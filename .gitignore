@@ -1,0 +1,5 @@
+node_modules/
+bank.db
+*.log
+.env
+firebase-service-account.json"serviceAccountKey.json" 
