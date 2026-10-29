@@ -29,21 +29,27 @@ const SALT = 10;
 try {
   let serviceAccount;
 
-  // ព្យាយាមទាញយកពីឯកសារ (សម្រាប់រត់លើ Local)
-  try {
-    serviceAccount = require('./serviceAccountKey.json');
-  } catch (e) {
-    // ប្រសិនបើគ្មានឯកសារ សូមទាញយកពី Environment Variable (សម្រាប់ Render)
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-      serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    } else {
-      throw new Error('Missing Firebase credentials');
+  // ព្យាយាមទាញយកពី Environment Variable នៅលើ Render
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } else {
+    // ប្រសិនបើគ្មាន សូមទាញយកពីឯកសារ (សម្រាប់រត់ក្នុងម៉ាស៊ីន)
+    try {
+      serviceAccount = require('./serviceAccountKey.json');
+    } catch (e) {
+      throw new Error('Missing Firebase credentials file and environment variable');
     }
   }
 
+  if (!serviceAccount || !serviceAccount.project_id) {
+    throw new Error('Service account configuration is invalid or missing project_id');
+  }
+
+  // ចាប់ផ្តើម Firebase Admin
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
+  
   console.log('✅ Firebase Admin initialized successfully');
 } catch (error) {
   console.error('❌ Firebase Admin initialization error:', error.message);
@@ -251,7 +257,7 @@ const ok = (res, data) => res.json({ success: true, data });
 const fail = (res, msg, code = 400) => res.status(code).json({ success: false, error: msg });
 
 // ============================================================
-// ACHIEVEMENTS
+// ACHIEVEMENTS & CASHBACK DEFS
 // ============================================================
 const ACHIEVEMENTS_DEF = [
   { code: 'first_tx', title: 'ប្រតិបត្តិការដំបូង', desc: 'បង្កើតប្រតិបត្តិការដំបូង', icon: '🎉' },
@@ -273,9 +279,6 @@ function unlockAchievement(userId, code) {
   } catch (_) {}
 }
 
-// ============================================================
-// CASHBACK
-// ============================================================
 const CASHBACK_RATES = {
   'អាហារ': 0.02,
   'ទិញទំនិញ': 0.01,
