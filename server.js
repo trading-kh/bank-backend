@@ -1,12 +1,18 @@
 // ============================================================================
-// Loan & Banking Backend — Complete Edition
+// Loan & Banking Backend — Complete Edition (with Modular Firebase Admin)
+// Features: Auth, Cards, Transactions, Goals, Notifs, Loans, Budgets,
+//           Reminders, Recurring, Streak, Achievements, Search, Insights,
+//           Cashback, Splits, Virtual Cards, Referral, FCM, Currency
 // ============================================================================
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const Database = require('better-sqlite3');
 const cors = require('cors');
-const admin = require('firebase-admin'); 
+
+// 🎯 ប្រើប្រាស់ Firebase Modular SDK
+const { initializeApp, cert, getApps } = require('firebase-admin/app');
+const { getAuth } = require('firebase-admin/auth');
 
 const app = express();
 app.use(express.json());
@@ -21,40 +27,32 @@ const SECRET = process.env.JWT_SECRET || 'dev-secret-CHANGE-ME';
 const SALT = 10;
 
 // ============================================================
-// FIREBASE ADMIN INITIALIZATION (Debug Mode)
+// FIREBASE ADMIN INITIALIZATION (Modular SDK)
 // ============================================================
 try {
   console.log('⏳ Initializing Firebase Admin...');
-
-  if (!admin) {
-    throw new Error('The firebase-admin package is not installed properly.');
-  }
-
   let serviceAccount;
 
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    // ទាញយក និងសម្អាត JSON ពី Render Environment Variable
     let rawJson = process.env.FIREBASE_SERVICE_ACCOUNT;
     
-    // លុបសញ្ញាការពារ (Quotes) ចេញ ប្រសិនបើមាន
     if (rawJson.startsWith('"') && rawJson.endsWith('"')) {
       rawJson = rawJson.slice(1, -1);
     }
+    
+    serviceAccount = JSON.parse(rawJson);
 
-    try {
-      serviceAccount = JSON.parse(rawJson);
-    } catch (parseError) {
-      throw new Error(`Failed to parse FIREBASE_SERVICE_ACCOUNT JSON. Please check the value on Render. Error: ${parseError.message}`);
-    }
-
-    // ជំនួស \n ក្នុង private_key ឱ្យទៅជាការចុះបន្ទាត់ពិតប្រាកដ
+    // 🎯 ជំនួស \n ក្នុង private_key ឱ្យទៅជាការចុះបន្ទាត់ពិតប្រាកដ
     if (serviceAccount.private_key) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
   } else {
+    // ប្រសិនបើរត់ក្នុង Local
     try {
       serviceAccount = require('./serviceAccountKey.json');
     } catch (e) {
-      throw new Error('Missing FIREBASE_SERVICE_ACCOUNT environment variable.');
+      throw new Error('Missing FIREBASE_SERVICE_ACCOUNT environment variable or serviceAccountKey.json file.');
     }
   }
 
@@ -62,15 +60,12 @@ try {
     throw new Error('Service account configuration is invalid or missing project_id.');
   }
 
-  // ពិនិត្យមើលថាតើ admin.credential មានវត្តមានឬអត់
-  if (!admin.credential || typeof admin.credential.cert !== 'function') {
-    throw new Error('admin.credential.cert is undefined. This means the firebase-admin package is incomplete or not installed.');
+  // ចាប់ផ្តើម Firebase Admin (ប្រើប្រាស់ Modular SDK)
+  if (!getApps().length) {
+    initializeApp({
+      credential: cert(serviceAccount)
+    });
   }
-
-  // ចាប់ផ្តើម Firebase Admin
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
   
   console.log('✅ Firebase Admin initialized successfully');
 } catch (error) {
@@ -279,7 +274,7 @@ const ok = (res, data) => res.json({ success: true, data });
 const fail = (res, msg, code = 400) => res.status(code).json({ success: false, error: msg });
 
 // ============================================================
-// ACHIEVEMENTS & CASHBACK
+// ACHIEVEMENTS & CASHBACK DEFS
 // ============================================================
 const ACHIEVEMENTS_DEF = [
   { code: 'first_tx', title: 'ប្រតិបត្តិការដំបូង', desc: 'បង្កើតប្រតិបត្តិការដំបូង', icon: '🎉' },
@@ -381,12 +376,13 @@ app.post('/auth/google', async (req, res) => {
   }
 
   try {
-    // ពិនិត្យមើលថាតើ admin ត្រូវបាន Initialize ត្រឹមត្រូវឬអត់
-    if (!admin.apps.length) {
-      return fail(res, 'Firebase Admin is not initialized. Check server logs.', 500);
+    // ពិនិត្យមើលថាតើ Firebase Admin ត្រូវបាន Initialize ត្រឹមត្រូវឬអត់
+    if (!getApps().length) {
+      return fail(res, 'Firebase Admin is not initialized on server.', 500);
     }
 
-    const decodedToken = await admin.auth().verifyIdToken(id_token);
+    // ប្រើ getAuth() សម្រាប់ Modular SDK
+    const decodedToken = await getAuth().verifyIdToken(id_token);
     const { uid, email, name } = decodedToken;
 
     let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
