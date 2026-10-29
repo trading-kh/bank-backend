@@ -1,15 +1,12 @@
 // ============================================================================
-// Loan & Banking Backend — Complete Edition (with Google Auth)
-// Features: Auth, Cards, Transactions, Goals, Notifs, Loans, Budgets,
-//           Reminders, Recurring, Streak, Achievements, Search, Insights,
-//           Cashback, Splits, Virtual Cards, Referral, FCM, Currency
+// Loan & Banking Backend — Complete Edition
 // ============================================================================
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const Database = require('better-sqlite3');
 const cors = require('cors');
-const admin = require('firebase-admin');
+const admin = require('firebase-admin'); 
 
 const app = express();
 app.use(express.json());
@@ -24,13 +21,18 @@ const SECRET = process.env.JWT_SECRET || 'dev-secret-CHANGE-ME';
 const SALT = 10;
 
 // ============================================================
-// FIREBASE ADMIN INITIALIZATION (Robust for Render)
+// FIREBASE ADMIN INITIALIZATION (Debug Mode)
 // ============================================================
 try {
+  console.log('⏳ Initializing Firebase Admin...');
+
+  if (!admin) {
+    throw new Error('The firebase-admin package is not installed properly.');
+  }
+
   let serviceAccount;
 
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    // ទាញយក និងសម្អាត JSON ពី Render Environment Variable
     let rawJson = process.env.FIREBASE_SERVICE_ACCOUNT;
     
     // លុបសញ្ញាការពារ (Quotes) ចេញ ប្រសិនបើមាន
@@ -38,25 +40,34 @@ try {
       rawJson = rawJson.slice(1, -1);
     }
 
-    serviceAccount = JSON.parse(rawJson);
+    try {
+      serviceAccount = JSON.parse(rawJson);
+    } catch (parseError) {
+      throw new Error(`Failed to parse FIREBASE_SERVICE_ACCOUNT JSON. Please check the value on Render. Error: ${parseError.message}`);
+    }
 
-    // 🎯 សំខាន់បំផុត៖ ជំនួស \n ក្នុង private_key ឱ្យទៅជាការចុះបន្ទាត់ពិតប្រាកដ
-    if (serviceAccount.private_key && serviceAccount.private_key.includes('\\n')) {
+    // ជំនួស \n ក្នុង private_key ឱ្យទៅជាការចុះបន្ទាត់ពិតប្រាកដ
+    if (serviceAccount.private_key) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
   } else {
-    // ប្រសិនបើរត់ក្នុង Local
     try {
       serviceAccount = require('./serviceAccountKey.json');
     } catch (e) {
-      throw new Error('Missing Firebase credentials file and environment variable');
+      throw new Error('Missing FIREBASE_SERVICE_ACCOUNT environment variable.');
     }
   }
 
   if (!serviceAccount || !serviceAccount.project_id) {
-    throw new Error('Service account configuration is invalid or missing project_id');
+    throw new Error('Service account configuration is invalid or missing project_id.');
   }
 
+  // ពិនិត្យមើលថាតើ admin.credential មានវត្តមានឬអត់
+  if (!admin.credential || typeof admin.credential.cert !== 'function') {
+    throw new Error('admin.credential.cert is undefined. This means the firebase-admin package is incomplete or not installed.');
+  }
+
+  // ចាប់ផ្តើម Firebase Admin
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
@@ -370,6 +381,11 @@ app.post('/auth/google', async (req, res) => {
   }
 
   try {
+    // ពិនិត្យមើលថាតើ admin ត្រូវបាន Initialize ត្រឹមត្រូវឬអត់
+    if (!admin.apps.length) {
+      return fail(res, 'Firebase Admin is not initialized. Check server logs.', 500);
+    }
+
     const decodedToken = await admin.auth().verifyIdToken(id_token);
     const { uid, email, name } = decodedToken;
 
