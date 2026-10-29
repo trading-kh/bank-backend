@@ -1,5 +1,5 @@
 // ============================================================================
-// Loan & Banking Backend — Complete Edition (with Google Auth & Secure Init)
+// Loan & Banking Backend — Complete Edition (with Google Auth)
 // Features: Auth, Cards, Transactions, Goals, Notifs, Loans, Budgets,
 //           Reminders, Recurring, Streak, Achievements, Search, Insights,
 //           Cashback, Splits, Virtual Cards, Referral, FCM, Currency
@@ -9,7 +9,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const Database = require('better-sqlite3');
 const cors = require('cors');
-const admin = require('firebase-admin'); // 🎯 បន្ថែម Firebase Admin
+const admin = require('firebase-admin');
 
 const app = express();
 app.use(express.json());
@@ -24,16 +24,28 @@ const SECRET = process.env.JWT_SECRET || 'dev-secret-CHANGE-ME';
 const SALT = 10;
 
 // ============================================================
-// FIREBASE ADMIN INITIALIZATION 🎯 (ដោះស្រាយបញ្ហាសុវត្ថិភាព)
+// FIREBASE ADMIN INITIALIZATION (Robust for Render)
 // ============================================================
 try {
   let serviceAccount;
 
-  // ព្យាយាមទាញយកពី Environment Variable នៅលើ Render
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    // ទាញយក និងសម្អាត JSON ពី Render Environment Variable
+    let rawJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+    
+    // លុបសញ្ញាការពារ (Quotes) ចេញ ប្រសិនបើមាន
+    if (rawJson.startsWith('"') && rawJson.endsWith('"')) {
+      rawJson = rawJson.slice(1, -1);
+    }
+
+    serviceAccount = JSON.parse(rawJson);
+
+    // 🎯 សំខាន់បំផុត៖ ជំនួស \n ក្នុង private_key ឱ្យទៅជាការចុះបន្ទាត់ពិតប្រាកដ
+    if (serviceAccount.private_key && serviceAccount.private_key.includes('\\n')) {
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+    }
   } else {
-    // ប្រសិនបើគ្មាន សូមទាញយកពីឯកសារ (សម្រាប់រត់ក្នុងម៉ាស៊ីន)
+    // ប្រសិនបើរត់ក្នុង Local
     try {
       serviceAccount = require('./serviceAccountKey.json');
     } catch (e) {
@@ -45,7 +57,6 @@ try {
     throw new Error('Service account configuration is invalid or missing project_id');
   }
 
-  // ចាប់ផ្តើម Firebase Admin
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
@@ -257,7 +268,7 @@ const ok = (res, data) => res.json({ success: true, data });
 const fail = (res, msg, code = 400) => res.status(code).json({ success: false, error: msg });
 
 // ============================================================
-// ACHIEVEMENTS & CASHBACK DEFS
+// ACHIEVEMENTS & CASHBACK
 // ============================================================
 const ACHIEVEMENTS_DEF = [
   { code: 'first_tx', title: 'ប្រតិបត្តិការដំបូង', desc: 'បង្កើតប្រតិបត្តិការដំបូង', icon: '🎉' },
