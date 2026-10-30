@@ -1,8 +1,5 @@
 // ============================================================================
-// Loan & Banking Backend — Complete Edition (with Modular Firebase Admin)
-// Features: Auth, Cards, Transactions, Goals, Notifs, Loans, Budgets,
-//           Reminders, Recurring, Streak, Achievements, Search, Insights,
-//           Cashback, Splits, Virtual Cards, Referral, FCM, Currency
+// Loan & Banking Backend — Complete Edition (with Firebase Admin & FCM)
 // ============================================================================
 const express = require('express');
 const bcrypt = require('bcrypt');
@@ -10,9 +7,9 @@ const jwt = require('jsonwebtoken');
 const Database = require('better-sqlite3');
 const cors = require('cors');
 
-// 🎯 ប្រើប្រាស់ Firebase Modular SDK
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
+const { getMessaging } = require('firebase-admin/messaging'); 
 
 const app = express();
 app.use(express.json());
@@ -27,28 +24,22 @@ const SECRET = process.env.JWT_SECRET || 'dev-secret-CHANGE-ME';
 const SALT = 10;
 
 // ============================================================
-// FIREBASE ADMIN INITIALIZATION (Modular SDK)
+// FIREBASE ADMIN INITIALIZATION
 // ============================================================
 try {
   console.log('⏳ Initializing Firebase Admin...');
   let serviceAccount;
 
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    // ទាញយក និងសម្អាត JSON ពី Render Environment Variable
     let rawJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-    
     if (rawJson.startsWith('"') && rawJson.endsWith('"')) {
       rawJson = rawJson.slice(1, -1);
     }
-    
     serviceAccount = JSON.parse(rawJson);
-
-    // 🎯 ជំនួស \n ក្នុង private_key ឱ្យទៅជាការចុះបន្ទាត់ពិតប្រាកដ
     if (serviceAccount.private_key) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
   } else {
-    // ប្រសិនបើរត់ក្នុង Local
     try {
       serviceAccount = require('./serviceAccountKey.json');
     } catch (e) {
@@ -60,7 +51,6 @@ try {
     throw new Error('Service account configuration is invalid or missing project_id.');
   }
 
-  // ចាប់ផ្តើម Firebase Admin (ប្រើប្រាស់ Modular SDK)
   if (!getApps().length) {
     initializeApp({
       credential: cert(serviceAccount)
@@ -73,7 +63,7 @@ try {
 }
 
 // ============================================================
-// SCHEMA
+// SCHEMA & MIGRATION
 // ============================================================
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -82,6 +72,7 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     phone TEXT NOT NULL,
     pin_hash TEXT NOT NULL,
+    auth_provider TEXT DEFAULT 'email', 
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -256,6 +247,27 @@ db.exec(`
   );
 `);
 
+// 🎯 MIGRATION: បន្ថែម auth_provider ប្រសិនបើគ្មាន
+try {
+  db.exec("ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'email'");
+  console.log('✅ Added auth_provider column to users table');
+} catch (e) {
+  console.log('ℹ️ auth_provider column already exists or error:', e.message);
+}
+
+// 🎯 MIGRATION: Update អ្នកប្រើដែលមានស្រាប់ឱ្យក្លាយជា google ប្រសិនបើគ្មាន PIN ត្រឹមត្រូវ
+try {
+  const googleUsers = db.prepare("SELECT id FROM users WHERE pin_hash LIKE 'GOOGLE_AUTH_%'").all();
+  for (const u of googleUsers) {
+    db.prepare("UPDATE users SET auth_provider = 'google' WHERE id = ?").run(u.id);
+  }
+  if (googleUsers.length > 0) {
+    console.log(`✅ Migrated ${googleUsers.length} Google users to auth_provider = google`);
+  }
+} catch (e) {
+  console.log('ℹ️ Migration check completed');
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -272,6 +284,25 @@ function auth(req, res, next) {
 
 const ok = (res, data) => res.json({ success: true, data });
 const fail = (res, msg, code = 400) => res.status(code).json({ success: false, error: msg });
+
+async function sendPushNotification(userId, title, body) {
+  try {
+    const fcmTokenRow = db.prepare('SELECT token FROM fcm_tokens WHERE user_id = ?').get(userId);
+    if (fcmTokenRow && fcmTokenRow.token && getApps().length > 0) {
+      const message = {
+        token: fcmTokenRow.token,
+        notification: { title: title, body: body },
+        data: { click_action: 'FLUTTER_NOTIFICATION_CLICK' }
+      };
+      await getMessaging().send(message);
+      console.log(`✅ FCM Notification sent to user ${userId}`);
+    } else {
+      console.log(`ℹ️ No FCM token for user ${userId} or Firebase not initialized`);
+    }
+  } catch (error) {
+    console.error('❌ FCM sending failed:', error.message);
+  }
+}
 
 // ============================================================
 // ACHIEVEMENTS & CASHBACK DEFS
@@ -329,8 +360,8 @@ app.post('/auth/register', async (req, res) => {
 
   const hash = await bcrypt.hash(pin, SALT);
   const info = db.prepare(
-    'INSERT INTO users (name, email, phone, pin_hash) VALUES (?, ?, ?, ?)'
-  ).run(name, email, phone, hash);
+    'INSERT INTO users (name, email, phone, pin_hash, auth_provider) VALUES (?, ?, ?, ?, ?)'
+  ).run(name, email, phone, hash, 'email');
 
   const userId = info.lastInsertRowid;
 
@@ -359,7 +390,14 @@ app.post('/auth/login', (req, res) => {
   const { email, pin } = req.body;
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   if (!user) return fail(res, 'User not found', 404);
+  
+  // 🎯 ប្រសិនបើជា Google User មិនអនុញ្ញាតឱ្យ Login ដោយ PIN ទេ
+  if (user.auth_provider === 'google') {
+    return fail(res, 'This account is linked with Google. Please use Google Login.', 400);
+  }
+  
   if (!bcrypt.compareSync(pin, user.pin_hash)) return fail(res, 'Wrong PIN', 401);
+  
   const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: '30d' });
   ok(res, {
     token,
@@ -367,32 +405,28 @@ app.post('/auth/login', (req, res) => {
   });
 });
 
-// 🎯 GOOGLE AUTH ROUTE
 app.post('/auth/google', async (req, res) => {
   const { id_token } = req.body;
-
-  if (!id_token) {
-    return fail(res, 'No token provided');
-  }
+  if (!id_token) return fail(res, 'No token provided');
 
   try {
-    // ពិនិត្យមើលថាតើ Firebase Admin ត្រូវបាន Initialize ត្រឹមត្រូវឬអត់
     if (!getApps().length) {
       return fail(res, 'Firebase Admin is not initialized on server.', 500);
     }
 
-    // ប្រើ getAuth() សម្រាប់ Modular SDK
     const decodedToken = await getAuth().verifyIdToken(id_token);
     const { uid, email, name } = decodedToken;
 
     let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    let generatedPin = null;
 
     if (!user) {
-      const hash = await bcrypt.hash('GOOGLE_AUTH_' + uid, SALT); 
-      const phone = ''; 
+      generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
+      const hash = await bcrypt.hash(generatedPin, SALT); 
+      
       const info = db.prepare(
-        'INSERT INTO users (name, email, phone, pin_hash) VALUES (?, ?, ?, ?)'
-      ).run(name || 'Google User', email, phone, hash);
+        'INSERT INTO users (name, email, phone, pin_hash, auth_provider) VALUES (?, ?, ?, ?, ?)'
+      ).run(name || 'Google User', email, '', hash, 'google');
 
       const userId = info.lastInsertRowid;
 
@@ -413,14 +447,19 @@ app.post('/auth/google', async (req, res) => {
       insGoal.run(userId, 'ដំណើរកម្សាន្ត', 800, 650, 11, 0xFFFF8A3D);
       insGoal.run(userId, 'មូលនិធិគ្រាអាសន្ន', 3000, 900, 12, 0xFF16A34A);
 
-      user = { id: userId, name: name || 'Google User', email: email, phone: phone };
+      user = { id: userId, name: name || 'Google User', email: email, phone: '' };
+    } else {
+      // 🎯 ប្រសិនបើអ្នកប្រើមានស្រាប់ (ឧ. ធ្លាប់ Register ធម្មតា) សូម Update ទៅជា google
+      db.prepare('UPDATE users SET auth_provider = ? WHERE id = ?').run('google', user.id);
+      console.log(`✅ Updated auth_provider to google for user ${user.id} (${email})`);
     }
 
     const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: '30d' });
 
     ok(res, {
       token,
-      user: { id: user.id, name: user.name, email: user.email, phone: user.phone }
+      user: { id: user.id, name: user.name, email: user.email, phone: user.phone },
+      generatedPin: generatedPin 
     });
 
   } catch (error) {
@@ -430,7 +469,7 @@ app.post('/auth/google', async (req, res) => {
 });
 
 app.get('/me', auth, (req, res) => {
-  const u = db.prepare('SELECT id, name, email, phone FROM users WHERE id = ?')
+  const u = db.prepare('SELECT id, name, email, phone, auth_provider FROM users WHERE id = ?')
     .get(req.userId);
   if (!u) return fail(res, 'Not found', 404);
   ok(res, u);
@@ -438,8 +477,14 @@ app.get('/me', auth, (req, res) => {
 
 app.post('/auth/verify-pin', auth, (req, res) => {
   const { pin } = req.body;
-  const u = db.prepare('SELECT pin_hash FROM users WHERE id = ?').get(req.userId);
+  const u = db.prepare('SELECT pin_hash, auth_provider FROM users WHERE id = ?').get(req.userId);
   if (!u) return fail(res, 'User not found', 404);
+  
+  // 🎯 សម្រាប់ Google User ត្រូវបានអនុញ្ញាតជានិច្ច
+  if (u.auth_provider === 'google') {
+    return ok(res, { valid: true });
+  }
+  
   if (!bcrypt.compareSync(pin || '', u.pin_hash)) return fail(res, 'Wrong PIN', 401);
   ok(res, { valid: true });
 });
@@ -470,7 +515,7 @@ app.patch('/cards/:id', auth, (req, res) => {
 });
 
 // ============================================================
-// TRANSACTIONS
+// TRANSACTIONS (កន្លែងកែសម្រួល PIN)
 // ============================================================
 app.get('/transactions', auth, (req, res) => {
   ok(res, db.prepare(
@@ -501,8 +546,18 @@ app.get('/transactions/search', auth, (req, res) => {
 
 app.post('/transactions', auth, (req, res) => {
   const { card_id, title, category, amount, is_expense, icon_code, pin } = req.body;
-  const u = db.prepare('SELECT pin_hash FROM users WHERE id = ?').get(req.userId);
-  if (!bcrypt.compareSync(pin || '', u.pin_hash)) return fail(res, 'Wrong PIN', 401);
+  
+  const u = db.prepare('SELECT pin_hash, auth_provider FROM users WHERE id = ?').get(req.userId);
+  
+  // 🎯 ប្រសិនបើអ្នកប្រើនេះមកពី Google មិនចាំបាច់ឆែក PIN ទេ
+  if (u.auth_provider !== 'google') {
+    if (!bcrypt.compareSync(pin || '', u.pin_hash)) {
+      console.log(`❌ Wrong PIN for user ${req.userId} (auth_provider: ${u.auth_provider})`);
+      return fail(res, 'Wrong PIN', 401);
+    }
+  } else {
+    console.log(`✅ Google user ${req.userId} bypassed PIN check`);
+  }
 
   const card = db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?')
     .get(card_id, req.userId);
@@ -519,6 +574,7 @@ app.post('/transactions', auth, (req, res) => {
       (user_id, card_id, title, category, amount, is_expense, icon_code)
       VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(req.userId, card_id, title, category, amount, is_expense ? 1 : 0, icon_code);
+    
     db.prepare(`INSERT INTO notifications
       (user_id, title, body, icon_code) VALUES (?, ?, ?, ?)`)
       .run(req.userId,
@@ -532,6 +588,11 @@ app.post('/transactions', auth, (req, res) => {
     const id = run();
     let cashback = 0;
     if (is_expense) cashback = computeCashback(req.userId, category, amount, id);
+    
+    const pushTitle = is_expense ? 'ប្រតិបត្តិការជោគជ័យ' : 'ទទួលបានប្រាក់';
+    const pushBody = `${title}  ${is_expense ? '-' : '+'}$${amount.toFixed(2)}`;
+    sendPushNotification(req.userId, pushTitle, pushBody);
+
     ok(res, {
       id, cashback,
       new_balance: db.prepare('SELECT balance FROM cards WHERE id = ?').get(card_id).balance,
@@ -631,6 +692,9 @@ app.post('/loan/pay', auth, (req, res) => {
   const active = newPaid >= loan.months ? 0 : 1;
   db.prepare('UPDATE loans SET paid = ?, active = ? WHERE id = ?')
     .run(newPaid, active, loan.id);
+  
+  sendPushNotification(req.userId, 'បង់រំលោះកម្ចី', `បង់បាន $${monthly.toFixed(2)}`);
+
   ok(res, { monthly, paid: newPaid, months: loan.months });
 });
 
@@ -1035,7 +1099,7 @@ app.get('/insights', auth, (req, res) => {
 });
 
 // ============================================================
-// FCM
+// FCM TOKEN REGISTRATION
 // ============================================================
 app.post('/fcm/register', auth, (req, res) => {
   const { token } = req.body;
@@ -1043,6 +1107,7 @@ app.post('/fcm/register', auth, (req, res) => {
   db.prepare('DELETE FROM fcm_tokens WHERE user_id = ?').run(req.userId);
   db.prepare('INSERT INTO fcm_tokens (user_id, token) VALUES (?, ?)')
     .run(req.userId, token);
+  console.log(`✅ FCM Token registered for user ${req.userId}`);
   ok(res, { registered: true });
 });
 
