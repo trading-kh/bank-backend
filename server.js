@@ -6,8 +6,8 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
-const Database = require('better-sqlite3');
 const cors = require('cors');
+const db = require('./db');
 
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
@@ -28,12 +28,7 @@ app.use((req, res, next) => {
 });
 
 // ---------- CONFIG ----------
-// ⚠️ Render: ឯកសារ bank.db បាត់ពេល redeploy លើកលែងតែអ្នកភ្ជាប់ Persistent Disk
-//    ហើយកំណត់ DB_PATH=/var/data/bank.db
-const db = new Database(process.env.DB_PATH || 'bank.db');
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
+// ទិន្នន័យរក្សាទុកក្នុង Postgres (DATABASE_URL) → មិនបាត់ពេល redeploy
 const IS_PROD = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
 if (IS_PROD && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be set in production');
@@ -42,7 +37,6 @@ const SECRET = process.env.JWT_SECRET || 'dev-secret-CHANGE-ME';
 const QR_SECRET = process.env.QR_SECRET || SECRET + ':qr';
 const SALT = 10;
 
-const TZ = '+7 hours';                 // ម៉ោងកម្ពុជា សម្រាប់កំណត់ "ថ្ងៃនេះ"
 const MAX_TX = 10000;                  // កំណត់ចំនួនអតិបរមាក្នុងមួយប្រតិបត្តិការ
 const MAX_PIN_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
@@ -85,287 +79,264 @@ try {
 }
 
 // ============================================================
-// SCHEMA & MIGRATION
+// SCHEMA & MIGRATION (Postgres)
 // ============================================================
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    phone TEXT NOT NULL,
-    pin_hash TEXT NOT NULL,
-    auth_provider TEXT DEFAULT 'email',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
+async function initDb() {
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      phone TEXT NOT NULL,
+      pin_hash TEXT NOT NULL,
+      auth_provider TEXT DEFAULT 'email',
+      pin_attempts INTEGER DEFAULT 0,
+      locked_until TIMESTAMPTZ,
+      referred_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  CREATE TABLE IF NOT EXISTS cards (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    number TEXT NOT NULL,
-    expiry TEXT NOT NULL,
-    cvv TEXT NOT NULL,
-    balance REAL DEFAULT 0,
-    frozen INTEGER DEFAULT 0,
-    online INTEGER DEFAULT 1,
-    daily_limit REAL DEFAULT 2000,
-    color1 INTEGER NOT NULL,
-    color2 INTEGER NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS cards (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      number TEXT NOT NULL,
+      expiry TEXT NOT NULL,
+      cvv TEXT NOT NULL,
+      balance DOUBLE PRECISION NOT NULL DEFAULT 0,
+      frozen INTEGER NOT NULL DEFAULT 0,
+      online INTEGER NOT NULL DEFAULT 1,
+      daily_limit DOUBLE PRECISION NOT NULL DEFAULT 2000,
+      color1 BIGINT NOT NULL,
+      color2 BIGINT NOT NULL
+    );
 
-  CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    card_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    category TEXT NOT NULL,
-    amount REAL NOT NULL,
-    is_expense INTEGER NOT NULL,
-    icon_code INTEGER NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS transactions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      card_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      is_expense INTEGER NOT NULL,
+      icon_code INTEGER NOT NULL,
+      counterparty_id INTEGER,
+      transfer_ref TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  CREATE TABLE IF NOT EXISTS goals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    target REAL NOT NULL,
-    saved REAL DEFAULT 0,
-    icon_code INTEGER NOT NULL,
-    color INTEGER NOT NULL,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS goals (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      target DOUBLE PRECISION NOT NULL,
+      saved DOUBLE PRECISION NOT NULL DEFAULT 0,
+      icon_code INTEGER NOT NULL,
+      color BIGINT NOT NULL
+    );
 
-  CREATE TABLE IF NOT EXISTS notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    body TEXT NOT NULL,
-    icon_code INTEGER NOT NULL,
-    read INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      icon_code INTEGER NOT NULL,
+      "read" INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  CREATE TABLE IF NOT EXISTS loans (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    principal REAL NOT NULL,
-    months INTEGER NOT NULL,
-    annual_rate REAL NOT NULL,
-    paid INTEGER DEFAULT 0,
-    active INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS loans (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      principal DOUBLE PRECISION NOT NULL,
+      months INTEGER NOT NULL,
+      annual_rate DOUBLE PRECISION NOT NULL,
+      paid INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  CREATE TABLE IF NOT EXISTS budgets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    category TEXT NOT NULL,
-    amount REAL NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, category),
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS budgets (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      category TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(user_id, category)
+    );
 
-  CREATE TABLE IF NOT EXISTS streaks (
-    user_id INTEGER PRIMARY KEY,
-    current_days INTEGER DEFAULT 0,
-    total_days INTEGER DEFAULT 0,
-    last_check_in TEXT,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS streaks (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      current_days INTEGER NOT NULL DEFAULT 0,
+      total_days INTEGER NOT NULL DEFAULT 0,
+      last_check_in TEXT
+    );
 
-  CREATE TABLE IF NOT EXISTS achievements (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    code TEXT NOT NULL,
-    unlocked_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, code),
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS achievements (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code TEXT NOT NULL,
+      unlocked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(user_id, code)
+    );
 
-  CREATE TABLE IF NOT EXISTS reminders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    amount REAL NOT NULL,
-    due_date TEXT NOT NULL,
-    paid INTEGER DEFAULT 0,
-    icon_code INTEGER DEFAULT 16,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS reminders (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      due_date TEXT NOT NULL,
+      paid INTEGER NOT NULL DEFAULT 0,
+      icon_code INTEGER NOT NULL DEFAULT 16,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  CREATE TABLE IF NOT EXISTS recurring (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    amount REAL NOT NULL,
-    category TEXT NOT NULL,
-    card_id INTEGER NOT NULL,
-    next_date TEXT NOT NULL,
-    frequency TEXT DEFAULT 'monthly',
-    active INTEGER DEFAULT 1,
-    icon_code INTEGER DEFAULT 16,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS recurring (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      category TEXT NOT NULL,
+      card_id INTEGER NOT NULL,
+      next_date TEXT NOT NULL,
+      frequency TEXT DEFAULT 'monthly',
+      active INTEGER NOT NULL DEFAULT 1,
+      icon_code INTEGER NOT NULL DEFAULT 16,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  CREATE TABLE IF NOT EXISTS splits (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    total_amount REAL NOT NULL,
-    your_share REAL NOT NULL,
-    participants TEXT NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS splits (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      total_amount DOUBLE PRECISION NOT NULL,
+      your_share DOUBLE PRECISION NOT NULL,
+      participants TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  CREATE TABLE IF NOT EXISTS virtual_cards (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    number TEXT NOT NULL,
-    cvv TEXT NOT NULL,
-    expiry TEXT NOT NULL,
-    limit_amount REAL DEFAULT 500,
-    spent REAL DEFAULT 0,
-    active INTEGER DEFAULT 1,
-    frozen INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS virtual_cards (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      number TEXT NOT NULL,
+      cvv TEXT NOT NULL,
+      expiry TEXT NOT NULL,
+      limit_amount DOUBLE PRECISION NOT NULL DEFAULT 500,
+      spent DOUBLE PRECISION NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      frozen INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  CREATE TABLE IF NOT EXISTS referrals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL UNIQUE,
-    code TEXT UNIQUE NOT NULL,
-    referred_count INTEGER DEFAULT 0,
-    earnings REAL DEFAULT 0,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS referrals (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      code TEXT UNIQUE NOT NULL,
+      referred_count INTEGER NOT NULL DEFAULT 0,
+      earnings DOUBLE PRECISION NOT NULL DEFAULT 0
+    );
 
-  CREATE TABLE IF NOT EXISTS fcm_tokens (
-    user_id INTEGER PRIMARY KEY,
-    token TEXT NOT NULL,
-    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS fcm_tokens (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      token TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  CREATE TABLE IF NOT EXISTS cashback (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    transaction_id INTEGER,
-    category TEXT NOT NULL,
-    amount REAL NOT NULL,
-    rate REAL NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS cashback (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      transaction_id INTEGER,
+      category TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      rate DOUBLE PRECISION NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-  -- ថ្មី: ការពារការផ្ទេរស្ទួន
-  CREATE TABLE IF NOT EXISTS idempotency_keys (
-    key TEXT NOT NULL,
-    user_id INTEGER NOT NULL,
-    req_hash TEXT NOT NULL,
-    response TEXT NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (key, user_id),
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      key TEXT NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      req_hash TEXT NOT NULL,
+      response TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (key, user_id)
+    );
 
-  -- ថ្មី: បញ្ជីធនាគារ/MFI ដែលគាំទ្រការផ្ទេរចេញក្រៅ
-  CREATE TABLE IF NOT EXISTS banks (
-    code TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    currency TEXT NOT NULL DEFAULT 'USD',
-    fee_rate REAL NOT NULL DEFAULT 0,
-    fee_max REAL NOT NULL DEFAULT 0,
-    min_amount REAL NOT NULL DEFAULT 0.01,
-    max_amount REAL NOT NULL DEFAULT 10000,
-    active INTEGER NOT NULL DEFAULT 1
-  );
+    CREATE TABLE IF NOT EXISTS banks (
+      code TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      fee_rate DOUBLE PRECISION NOT NULL DEFAULT 0,
+      fee_max DOUBLE PRECISION NOT NULL DEFAULT 0,
+      min_amount DOUBLE PRECISION NOT NULL DEFAULT 0.01,
+      max_amount DOUBLE PRECISION NOT NULL DEFAULT 10000,
+      active INTEGER NOT NULL DEFAULT 1
+    );
 
-  -- ថ្មី: ការផ្ទេរចេញក្រៅ (រវាងធនាគារ/MFIs/វ៉លឡេត)
-  CREATE TABLE IF NOT EXISTS external_transfers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    card_id INTEGER NOT NULL,
-    bank_code TEXT NOT NULL,
-    recipient_name TEXT NOT NULL,
-    recipient_account TEXT NOT NULL,
-    currency TEXT NOT NULL DEFAULT 'USD',
-    amount REAL NOT NULL,
-    fee REAL NOT NULL DEFAULT 0,
-    transfer_ref TEXT NOT NULL UNIQUE,
-    status TEXT NOT NULL DEFAULT 'settled',
-    note TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY(card_id) REFERENCES cards(id) ON DELETE CASCADE
-  );
-`);
+    CREATE TABLE IF NOT EXISTS external_transfers (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+      bank_code TEXT NOT NULL,
+      recipient_name TEXT NOT NULL,
+      recipient_account TEXT NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      amount DOUBLE PRECISION NOT NULL,
+      fee DOUBLE PRECISION NOT NULL DEFAULT 0,
+      transfer_ref TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'settled',
+      note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
 
-function addColumn(table, ddl) {
+    CREATE INDEX IF NOT EXISTS idx_tx_user_created ON transactions(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_tx_card ON transactions(card_id, is_expense);
+    CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
+    CREATE INDEX IF NOT EXISTS idx_users_name ON users(lower(name));
+    CREATE INDEX IF NOT EXISTS idx_tx_user_cp ON transactions(user_id, counterparty_id);
+    CREATE INDEX IF NOT EXISTS idx_ext_user_created ON external_transfers(user_id, created_at);
+  `);
+
+  // SQLite មាន ROUND(x, 2) សម្រាប់ REAL — Postgres មានតែ round(numeric, int)
+  await db.exec(`
+    CREATE OR REPLACE FUNCTION round(double precision, integer)
+    RETURNS double precision AS $$
+      SELECT round($1::numeric, $2)::double precision
+    $$ LANGUAGE sql IMMUTABLE;
+  `);
+
+  // បញ្ជីធនាគារ/MFI ចាប់ផ្តើម (បញ្ចូលតែពេលតារាងទទេ)
   try {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-    console.log(`✅ Added ${table}.${ddl}`);
+    const n = (await db.prepare('SELECT COUNT(*) AS c FROM banks').get()).c;
+    if (n === 0) {
+      for (const b of [
+        ['ABA', 'ABA Bank', 'USD', 0, 0, 0.01, 10000],
+        ['ACLEDA', 'ACLEDA Bank', 'USD', 0.001, 5, 0.01, 10000],
+        ['CANADIA', 'Canadia Bank', 'USD', 0.001, 5, 0.01, 10000],
+        ['WING', 'Wing Bank', 'USD', 0.002, 8, 0.01, 5000],
+        ['JUNTUOR', 'Jotuor Account', 'USD', 0.001, 5, 0.01, 5000],
+        ['LYF', 'LYF Wallet', 'USD', 0.002, 8, 0.01, 2000],
+        ['OTHER', 'Global / Other Bank', 'USD', 0.005, 15, 1, 10000],
+      ]) {
+        await db.prepare(`INSERT INTO banks
+          (code, name, currency, fee_rate, fee_max, min_amount, max_amount)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(...b);
+      }
+      console.log('✅ Seeded bank directory');
+    }
   } catch (e) {
-    if (!/duplicate column/i.test(e.message)) console.error(`❌ Migration ${table}.${ddl}:`, e.message);
+    console.error('❌ Bank directory seed:', e.message);
   }
-}
-addColumn('users', "auth_provider TEXT DEFAULT 'email'");
-addColumn('users', 'pin_attempts INTEGER DEFAULT 0');
-addColumn('users', 'locked_until TEXT');
-addColumn('users', 'referred_by INTEGER');
-addColumn('transactions', 'counterparty_id INTEGER');
-addColumn('transactions', 'transfer_ref TEXT');
 
-db.exec(`
-  CREATE INDEX IF NOT EXISTS idx_tx_user_created ON transactions(user_id, created_at);
-  CREATE INDEX IF NOT EXISTS idx_tx_card ON transactions(card_id, is_expense);
-  CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
-  CREATE INDEX IF NOT EXISTS idx_users_name ON users(name COLLATE NOCASE);
-  CREATE INDEX IF NOT EXISTS idx_tx_user_cp ON transactions(user_id, counterparty_id);
-  CREATE INDEX IF NOT EXISTS idx_ext_user_created
-    ON external_transfers(user_id, created_at);
-`);
-
-// បញ្ជីធនាគារ/MFI ចាប់ផ្តើម (បញ្ចូលតែពេលតារាងទទេ ដើម្បីកុំឲ្យលុបតួលេខដែលកែដោយដៃ)
-try {
-  const n = db.prepare('SELECT COUNT(*) AS c FROM banks').get().c;
-  if (n === 0) {
-    const insBank = db.prepare(`INSERT INTO banks
-      (code, name, currency, fee_rate, fee_max, min_amount, max_amount)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`);
-    [
-      ['ABA', 'ABA Bank', 'USD', 0, 0, 0.01, 10000],
-      ['ACLEDA', 'ACLEDA Bank', 'USD', 0.001, 5, 0.01, 10000],
-      ['CANADIA', 'Canadia Bank', 'USD', 0.001, 5, 0.01, 10000],
-      ['WING', 'Wing Bank', 'USD', 0.002, 8, 0.01, 5000],
-      ['JUNTUOR', 'Jotuor Account', 'USD', 0.001, 5, 0.01, 5000],
-      ['LYF', 'LYF Wallet', 'USD', 0.002, 8, 0.01, 2000],
-      ['OTHER', 'Global / Other Bank', 'USD', 0.005, 15, 1, 10000],
-    ].forEach((b) => insBank.run(...b));
-    console.log('✅ Seeded bank directory');
+  // Users ចាស់ដែលមាន pin_hash ជា placeholder
+  try {
+    const r = await db.prepare(
+      "UPDATE users SET auth_provider = 'google' WHERE pin_hash LIKE 'GOOGLE_AUTH_%'"
+    ).run();
+    if (r.changes > 0) console.log(`✅ Migrated ${r.changes} Google users`);
+  } catch (e) {
+    console.log('ℹ️ Migration check completed');
   }
-} catch (e) {
-  console.error('❌ Bank directory seed:', e.message);
-}
-
-// Users ចាស់ដែលមាន pin_hash ជា placeholder
-try {
-  const n = db.prepare(
-    "UPDATE users SET auth_provider = 'google' WHERE pin_hash LIKE 'GOOGLE_AUTH_%'"
-  ).run().changes;
-  if (n > 0) console.log(`✅ Migrated ${n} Google users`);
-} catch (e) {
-  console.log('ℹ️ Migration check completed');
 }
 
 // ============================================================
@@ -425,9 +396,9 @@ setInterval(() => hits.clear(), 10 * 60 * 1000).unref();
 
 // ពិនិត្យ PIN ជាមួយ lockout (៥ដងខុស → ចាក់សោ ១៥នាទី)
 async function checkPin(userId, pin) {
-  const u = db.prepare(`
+  const u = await db.prepare(`
     SELECT pin_hash, pin_attempts,
-           (locked_until IS NOT NULL AND locked_until > datetime('now')) AS locked
+           (locked_until IS NOT NULL AND locked_until > now()) AS locked
     FROM users WHERE id = ?`).get(userId);
   if (!u) throw new ApiError('User not found', 404, 'NOT_FOUND');
   if (u.locked) {
@@ -442,22 +413,23 @@ async function checkPin(userId, pin) {
   if (!valid) {
     const attempts = (u.pin_attempts || 0) + 1;
     if (attempts >= MAX_PIN_ATTEMPTS) {
-      db.prepare(`UPDATE users SET pin_attempts = 0,
-        locked_until = datetime('now', '+${LOCK_MINUTES} minutes') WHERE id = ?`).run(userId);
+      await db.prepare(`UPDATE users SET pin_attempts = 0,
+        locked_until = now() + interval '${LOCK_MINUTES} minutes' WHERE id = ?`).run(userId);
       throw new ApiError(`PIN ខុសច្រើនដងពេក គណនីត្រូវចាក់សោ ${LOCK_MINUTES} នាទី`, 423, 'PIN_LOCKED');
     }
-    db.prepare('UPDATE users SET pin_attempts = ? WHERE id = ?').run(attempts, userId);
+    await db.prepare('UPDATE users SET pin_attempts = ? WHERE id = ?').run(attempts, userId);
     throw new ApiError('Wrong PIN', 401, 'WRONG_PIN');
   }
   if (u.pin_attempts) {
-    db.prepare('UPDATE users SET pin_attempts = 0, locked_until = NULL WHERE id = ?').run(userId);
+    await db.prepare('UPDATE users SET pin_attempts = 0, locked_until = NULL WHERE id = ?').run(userId);
   }
 }
 
-const spentToday = (cardId) => db.prepare(`
+const spentToday = async (cardId) => (await db.prepare(`
   SELECT COALESCE(SUM(amount), 0) AS s FROM transactions
   WHERE card_id = ? AND is_expense = 1
-    AND date(created_at, '${TZ}') = date('now', '${TZ}')`).get(cardId).s;
+    AND (created_at AT TIME ZONE 'Asia/Phnom_Penh')::date
+      = (now() AT TIME ZONE 'Asia/Phnom_Penh')::date`).get(cardId)).s;
 
 function maskContact(u) {
   const digits = String(u.phone || '').replace(/\D/g, '');
@@ -468,7 +440,7 @@ function maskContact(u) {
 
 async function sendPushNotification(userId, title, body, data = {}) {
   try {
-    const row = db.prepare('SELECT token FROM fcm_tokens WHERE user_id = ?').get(userId);
+    const row = await db.prepare('SELECT token FROM fcm_tokens WHERE user_id = ?').get(userId);
     if (!row || !row.token || getApps().length === 0) {
       console.log(`ℹ️ No FCM token for user ${userId} or Firebase not initialized`);
       return;
@@ -487,12 +459,12 @@ async function sendPushNotification(userId, title, body, data = {}) {
   } catch (error) {
     console.error('❌ FCM sending failed:', error.message);
     if (error.code === 'messaging/registration-token-not-registered') {
-      db.prepare('DELETE FROM fcm_tokens WHERE user_id = ?').run(userId);
+      await db.prepare('DELETE FROM fcm_tokens WHERE user_id = ?').run(userId);
     }
   }
 }
 
-function seedNewUser(userId) {
+async function seedNewUser(userId) {
   const cards = [
     ['ABA Visa Platinum', '4532118800008824', '12/28', '458', 12450, 0xFF0052D4, 0xFF4364F7],
     ['Mastercard Gold', '5412750000003310', '09/27', '912', 5950, 0xFF0F9D8A, 0xFF38D39F],
@@ -501,13 +473,13 @@ function seedNewUser(userId) {
   const insCard = db.prepare(`INSERT INTO cards
     (user_id, name, number, expiry, cvv, balance, color1, color2)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-  cards.forEach((c) => insCard.run(userId, ...c));
+  for (const c of cards) await insCard.run(userId, ...c);
 
   const insGoal = db.prepare(`INSERT INTO goals
     (user_id, name, target, saved, icon_code, color) VALUES (?, ?, ?, ?, ?, ?)`);
-  insGoal.run(userId, 'ទិញទូរស័ព្ទថ្មី', 1200, 480, 14, 0xFF3D5AFE);
-  insGoal.run(userId, 'ដំណើរកម្សាន្ត', 800, 650, 11, 0xFFFF8A3D);
-  insGoal.run(userId, 'មូលនិធិគ្រាអាសន្ន', 3000, 900, 12, 0xFF16A34A);
+  await insGoal.run(userId, 'ទិញទូរស័ព្ទថ្មី', 1200, 480, 14, 0xFF3D5AFE);
+  await insGoal.run(userId, 'ដំណើរកម្សាន្ត', 800, 650, 11, 0xFFFF8A3D);
+  await insGoal.run(userId, 'មូលនិធិគ្រាអាសន្ន', 3000, 900, 12, 0xFF16A34A);
 }
 
 // ============================================================
@@ -526,23 +498,25 @@ const ACHIEVEMENTS_DEF = [
   { code: 'budget_master', title: 'ម្ចាស់ថវិកា', desc: 'កំណត់ថវិកា ៥ ប្រភេទ', icon: '🎯' },
 ];
 
-function unlockAchievement(userId, code) {
+async function unlockAchievement(userId, code) {
   try {
-    db.prepare('INSERT OR IGNORE INTO achievements (user_id, code) VALUES (?, ?)').run(userId, code);
+    await db.prepare(
+      'INSERT INTO achievements (user_id, code) VALUES (?, ?) ON CONFLICT DO NOTHING'
+    ).run(userId, code);
   } catch (_) {}
 }
 
 const CASHBACK_RATES = { 'អាហារ': 0.02, 'ទិញទំនិញ': 0.01, 'កម្សាន្ត': 0.03 };
 
-function computeCashback(userId, category, amount, txId) {
+async function computeCashback(userId, category, amount, txId) {
   const rate = CASHBACK_RATES[category];
   if (!rate || rate <= 0) return 0;
   const cashback = Math.round(amount * rate * 100) / 100;
   if (cashback <= 0) return 0;
-  const card = db.prepare('SELECT id FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(userId);
+  const card = await db.prepare('SELECT id FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(userId);
   if (!card) return 0;
-  db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?').run(cashback, card.id);
-  db.prepare(`INSERT INTO cashback (user_id, transaction_id, category, amount, rate)
+  await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?').run(cashback, card.id);
+  await db.prepare(`INSERT INTO cashback (user_id, transaction_id, category, amount, rate)
     VALUES (?, ?, ?, ?, ?)`).run(userId, txId, category, cashback, rate);
   return cashback;
 }
@@ -555,15 +529,15 @@ app.post('/auth/register', handle(async (req, res) => {
   if (!name || !email || !phone || !/^\d{4}$/.test(pin || ''))
     throw new ApiError('Invalid input');
 
-  const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+  const exists = await db.prepare('SELECT id FROM users WHERE email = ?').get(email);
   if (exists) throw new ApiError('Email already registered');
 
   const hash = await bcrypt.hash(pin, SALT);
-  const info = db.prepare(
+  const info = await db.prepare(
     'INSERT INTO users (name, email, phone, pin_hash, auth_provider) VALUES (?, ?, ?, ?, ?)'
   ).run(name, email, phone, hash, 'email');
   const userId = info.lastInsertRowid;
-  seedNewUser(userId);
+  await seedNewUser(userId);
 
   const token = jwt.sign({ id: userId }, SECRET, { expiresIn: '30d' });
   ok(res, { token, user: { id: userId, name, email, phone } });
@@ -571,7 +545,7 @@ app.post('/auth/register', handle(async (req, res) => {
 
 app.post('/auth/login', handle(async (req, res) => {
   const { email, pin } = req.body;
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   if (!user) throw new ApiError('User not found', 404, 'NOT_FOUND');
 
   if (user.auth_provider === 'google') {
@@ -603,16 +577,16 @@ app.post('/auth/google', handle(async (req, res) => {
     throw new ApiError('Google email is not verified', 401, 'EMAIL_NOT_VERIFIED');
   }
 
-  let user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+  let user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   let generatedPin = null;
 
   if (!user) {
     generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
     const hash = await bcrypt.hash(generatedPin, SALT);
-    const info = db.prepare(
+    const info = await db.prepare(
       'INSERT INTO users (name, email, phone, pin_hash, auth_provider) VALUES (?, ?, ?, ?, ?)'
     ).run(name || 'Google User', email, '', hash, 'google');
-    seedNewUser(info.lastInsertRowid);
+    await seedNewUser(info.lastInsertRowid);
     user = { id: info.lastInsertRowid, name: name || 'Google User', email, phone: '' };
   }
   // បើមានគណនីស្រាប់ មិនប្ដូរ auth_provider ទៀតទេ (ពីមុនធ្វើឲ្យ PIN login ខូច)
@@ -625,8 +599,8 @@ app.post('/auth/google', handle(async (req, res) => {
   });
 }));
 
-app.get('/me', auth, (req, res) => {
-  const u = db.prepare('SELECT id, name, email, phone, auth_provider FROM users WHERE id = ?')
+app.get('/me', auth, async (req, res) => {
+  const u = await db.prepare('SELECT id, name, email, phone, auth_provider FROM users WHERE id = ?')
     .get(req.userId);
   if (!u) return fail(res, 'Not found', 404, 'NOT_FOUND');
   ok(res, u);
@@ -644,7 +618,7 @@ app.post('/auth/change-pin', auth, handle(async (req, res) => {
   if (!/^\d{4}$/.test(new_pin || '')) throw new ApiError('PIN ថ្មីត្រូវមាន ៤ ខ្ទង់', 400, 'BAD_PIN');
   await checkPin(req.userId, old_pin);
   const hash = await bcrypt.hash(new_pin, SALT);
-  db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(hash, req.userId);
+  await db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(hash, req.userId);
   ok(res, { changed: true });
 }));
 
@@ -660,14 +634,14 @@ app.post('/auth/google/set-pin', auth, handle(async (req, res) => {
   } catch {
     throw new ApiError('Invalid Google Token', 401, 'BAD_GOOGLE_TOKEN');
   }
-  const user = db.prepare('SELECT id, email FROM users WHERE id = ?').get(req.userId);
+  const user = await db.prepare('SELECT id, email FROM users WHERE id = ?').get(req.userId);
   if (!user || user.email !== decoded.email || decoded.email_verified === false)
     throw new ApiError('Google account mismatch', 403, 'ACCOUNT_MISMATCH');
   if (Date.now() / 1000 - (decoded.auth_time || 0) > 300)
     throw new ApiError('សូមចូលតាម Google ម្ដងទៀត', 401, 'REAUTH_REQUIRED');
 
   const hash = await bcrypt.hash(new_pin, SALT);
-  db.prepare('UPDATE users SET pin_hash = ?, pin_attempts = 0, locked_until = NULL WHERE id = ?')
+  await db.prepare('UPDATE users SET pin_hash = ?, pin_attempts = 0, locked_until = NULL WHERE id = ?')
     .run(hash, req.userId);
   ok(res, { changed: true });
 }));
@@ -675,13 +649,13 @@ app.post('/auth/google/set-pin', auth, handle(async (req, res) => {
 // ============================================================
 // CARDS
 // ============================================================
-app.get('/cards', auth, (req, res) => {
-  ok(res, db.prepare('SELECT * FROM cards WHERE user_id = ?').all(req.userId));
+app.get('/cards', auth, async (req, res) => {
+  ok(res, await db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id').all(req.userId));
 });
 
-app.patch('/cards/:id', auth, (req, res) => {
+app.patch('/cards/:id', auth, async (req, res) => {
   const { frozen, online, daily_limit } = req.body;
-  const card = db.prepare('SELECT id FROM cards WHERE id = ? AND user_id = ?')
+  const card = await db.prepare('SELECT id FROM cards WHERE id = ? AND user_id = ?')
     .get(req.params.id, req.userId);
   if (!card) return fail(res, 'Card not found', 404, 'NOT_FOUND');
 
@@ -696,30 +670,30 @@ app.patch('/cards/:id', auth, (req, res) => {
   }
   if (updates.length === 0) return fail(res, 'Nothing to update');
   values.push(req.params.id, req.userId);
-  db.prepare(`UPDATE cards SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
+  await db.prepare(`UPDATE cards SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
   ok(res, { updated: true });
 });
 
 // ============================================================
 // TRANSACTIONS
 // ============================================================
-app.get('/transactions', auth, (req, res) => {
-  ok(res, db.prepare(
+app.get('/transactions', auth, async (req, res) => {
+  ok(res, await db.prepare(
     'SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 200'
   ).all(req.userId));
 });
 
-app.get('/transactions/search', auth, (req, res) => {
+app.get('/transactions/search', auth, async (req, res) => {
   const { q, category, from, to, min_amount, max_amount, is_expense } = req.query;
   let sql = 'SELECT * FROM transactions WHERE user_id = ?';
   const params = [req.userId];
   if (q) {
-    sql += ' AND (title LIKE ? OR category LIKE ?)';
+    sql += ' AND (title ILIKE ? OR category ILIKE ?)';
     params.push(`%${q}%`, `%${q}%`);
   }
   if (category) { sql += ' AND category = ?'; params.push(category); }
-  if (from) { sql += " AND created_at >= replace(substr(?, 1, 19), 'T', ' ')"; params.push(from); }
-  if (to) { sql += " AND created_at <= replace(substr(?, 1, 19), 'T', ' ')"; params.push(to); }
+  if (from) { sql += ' AND created_at >= ?::timestamptz'; params.push(from); }
+  if (to) { sql += ' AND created_at <= ?::timestamptz'; params.push(to); }
   if (min_amount) { sql += ' AND amount >= ?'; params.push(parseFloat(min_amount)); }
   if (max_amount) { sql += ' AND amount <= ?'; params.push(parseFloat(max_amount)); }
   if (is_expense !== undefined) {
@@ -727,7 +701,7 @@ app.get('/transactions/search', auth, (req, res) => {
     params.push(is_expense === 'true' ? 1 : 0);
   }
   sql += ' ORDER BY created_at DESC, id DESC LIMIT 200';
-  ok(res, db.prepare(sql).all(...params));
+  ok(res, await db.prepare(sql).all(...params));
 });
 
 app.post('/transactions', auth, handle(async (req, res) => {
@@ -743,28 +717,28 @@ app.post('/transactions', auth, handle(async (req, res) => {
 
   await checkPin(req.userId, pin);
 
-  const card = db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(card_id, req.userId);
+  const card = await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(card_id, req.userId);
   if (!card) throw new ApiError('Card not found', 404, 'NOT_FOUND');
   if (card.frozen) throw new ApiError('Card is frozen', 400, 'CARD_FROZEN');
   if (is_expense) {
     if (card.balance < amount) throw new ApiError('Insufficient balance', 400, 'INSUFFICIENT_FUNDS');
-    if (spentToday(card.id) + amount > card.daily_limit)
+    if (await spentToday(card.id) + amount > card.daily_limit)
       throw new ApiError('Exceeds daily limit', 400, 'DAILY_LIMIT');
   }
 
-  const run = db.transaction(() => {
+  const id = await db.transaction(async () => {
     const delta = is_expense ? -amount : amount;
-    const upd = db.prepare(`UPDATE cards SET balance = ROUND(balance + ?, 2)
+    const upd = await db.prepare(`UPDATE cards SET balance = ROUND(balance + ?, 2)
       WHERE id = ? AND balance + ? >= 0`).run(delta, card.id, delta);
     if (upd.changes !== 1) throw new ApiError('Insufficient balance', 400, 'INSUFFICIENT_FUNDS');
 
-    const info = db.prepare(`INSERT INTO transactions
+    const info = await db.prepare(`INSERT INTO transactions
       (user_id, card_id, title, category, amount, is_expense, icon_code)
       VALUES (?, ?, ?, ?, ?, ?, ?)`)
       .run(req.userId, card.id, String(title).slice(0, 100), String(category).slice(0, 50),
         amount, is_expense ? 1 : 0, Number.isInteger(icon_code) ? icon_code : 0);
 
-    db.prepare(`INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, ?)`)
+    await db.prepare(`INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, ?)`)
       .run(req.userId,
         is_expense ? 'ប្រតិបត្តិការជោគជ័យ' : 'ទទួលបានប្រាក់',
         `${title}  ${is_expense ? '-' : '+'}$${amount.toFixed(2)}`,
@@ -772,9 +746,8 @@ app.post('/transactions', auth, handle(async (req, res) => {
     return info.lastInsertRowid;
   });
 
-  const id = run();
-  unlockAchievement(req.userId, 'first_tx');
-  const cashback = is_expense ? computeCashback(req.userId, category, amount, id) : 0;
+  await unlockAchievement(req.userId, 'first_tx');
+  const cashback = is_expense ? await computeCashback(req.userId, category, amount, id) : 0;
 
   sendPushNotification(
     req.userId,
@@ -785,7 +758,7 @@ app.post('/transactions', auth, handle(async (req, res) => {
 
   ok(res, {
     id, cashback,
-    new_balance: db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id).balance,
+    new_balance: (await db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id)).balance,
   });
 }));
 
@@ -801,12 +774,12 @@ app.get('/recipients/lookup', auth, handle(async (req, res) => {
 
   let user;
   if (q.includes('@')) {
-    user = db.prepare('SELECT id, name, email, phone FROM users WHERE lower(email) = lower(?) AND id <> ?')
+    user = await db.prepare('SELECT id, name, email, phone FROM users WHERE lower(email) = lower(?) AND id <> ?')
       .get(q, req.userId);
   } else {
     const digits = q.replace(/[\s\-()+]/g, '');
     if (!/^\d{6,15}$/.test(digits)) throw new ApiError('លេខទូរស័ព្ទមិនត្រឹមត្រូវ', 400, 'BAD_QUERY');
-    user = db.prepare(`
+    user = await db.prepare(`
       SELECT id, name, email, phone FROM users
       WHERE phone <> '' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'(',''),')',''),'+','') = ?
         AND id <> ? LIMIT 1`).get(digits, req.userId);
@@ -821,14 +794,14 @@ app.get('/recipients', auth, handle(async (req, res) => {
   rateLimit(`recipients:${req.userId}`, 30, 60 * 1000);
   const q = String(req.query.q || '').trim().slice(0, 50).replace(/[%_]/g, '');
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
-  const rows = db.prepare(`
+  const rows = await db.prepare(`
     SELECT u.id, u.name, u.email, u.phone,
       (SELECT MAX(t.created_at) FROM transactions t
          WHERE t.user_id = ? AND t.counterparty_id = u.id) AS last_at
     FROM users u
     WHERE u.id <> ?
-      AND (? = '' OR lower(u.name) LIKE ?)
-    ORDER BY (last_at IS NULL), last_at DESC, u.name COLLATE NOCASE
+      AND (?::text = '' OR lower(u.name) LIKE ?)
+    ORDER BY last_at DESC NULLS LAST, lower(u.name)
     LIMIT ?`).all(req.userId, req.userId, q, `%${q.toLowerCase()}%`, limit);
   ok(res, rows.map((r) => ({
     recipient_id: String(r.id),
@@ -861,7 +834,7 @@ app.post('/qr/resolve', auth, handle(async (req, res) => {
   if (p.typ !== 'qr') throw new ApiError('QR មិនត្រឹមត្រូវ', 400, 'BAD_QR');
   if (p.uid === req.userId) throw new ApiError('មិនអាចផ្ទេរទៅខ្លួនឯង', 400, 'SELF_TRANSFER');
 
-  const user = db.prepare('SELECT id, name, email, phone FROM users WHERE id = ?').get(p.uid);
+  const user = await db.prepare('SELECT id, name, email, phone FROM users WHERE id = ?').get(p.uid);
   if (!user) throw new ApiError('QR មិនត្រឹមត្រូវ', 400, 'BAD_QR');
   ok(res, {
     recipient_id: String(user.id),
@@ -872,9 +845,9 @@ app.post('/qr/resolve', auth, handle(async (req, res) => {
 }));
 
 // 4) ផ្ទេរលុយ — Server ជាអ្នកសម្រេចទាំងអស់
-const executeTransfer = db.transaction((p) => {
+const executeTransfer = (p) => db.transaction(async () => {
   // ពិនិត្យ idempotency ម្ដងទៀតក្នុង transaction (ការពារ request ស្ទួនដំណាលគ្នា)
-  const prior = db.prepare('SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?')
+  const prior = await db.prepare('SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?')
     .get(p.idem, p.senderId);
   if (prior) {
     if (prior.req_hash !== p.reqHash)
@@ -882,52 +855,52 @@ const executeTransfer = db.transaction((p) => {
     return { replay: true, response: JSON.parse(prior.response) };
   }
 
-  const card = db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(p.cardId, p.senderId);
+  const card = await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(p.cardId, p.senderId);
   if (!card) throw new ApiError('Card not found', 404, 'CARD_NOT_FOUND');
   if (card.frozen) throw new ApiError('កាតត្រូវបានបង្កក', 400, 'CARD_FROZEN');
 
-  const sender = db.prepare('SELECT id, name FROM users WHERE id = ?').get(p.senderId);
-  const recipient = db.prepare('SELECT id, name, email, phone FROM users WHERE id = ?').get(p.recipientId);
+  const sender = await db.prepare('SELECT id, name FROM users WHERE id = ?').get(p.senderId);
+  const recipient = await db.prepare('SELECT id, name, email, phone FROM users WHERE id = ?').get(p.recipientId);
   if (!recipient) throw new ApiError('រកមិនឃើញអ្នកទទួល', 404, 'NOT_FOUND');
 
-  const recipientCard = db.prepare(
+  const recipientCard = await db.prepare(
     'SELECT id FROM cards WHERE user_id = ? AND frozen = 0 ORDER BY id LIMIT 1'
   ).get(recipient.id);
   if (!recipientCard) throw new ApiError('អ្នកទទួលមិនអាចទទួលប្រាក់បានពេលនេះ', 400, 'RECIPIENT_UNAVAILABLE');
 
   if (card.balance < p.amount) throw new ApiError('សមតុល្យមិនគ្រប់គ្រាន់', 400, 'INSUFFICIENT_FUNDS');
-  if (p.amount > card.daily_limit || spentToday(card.id) + p.amount > card.daily_limit)
+  if (p.amount > card.daily_limit || await spentToday(card.id) + p.amount > card.daily_limit)
     throw new ApiError('លើសកម្រិតប្រាក់ប្រចាំថ្ងៃ', 400, 'DAILY_LIMIT');
 
   // កាត់ (មាន guard កុំឲ្យអវិជ្ជមាន) រួចបូក
-  const dec = db.prepare(`UPDATE cards SET balance = ROUND(balance - ?, 2)
+  const dec = await db.prepare(`UPDATE cards SET balance = ROUND(balance - ?, 2)
     WHERE id = ? AND balance >= ?`).run(p.amount, card.id, p.amount);
   if (dec.changes !== 1) throw new ApiError('សមតុល្យមិនគ្រប់គ្រាន់', 400, 'INSUFFICIENT_FUNDS');
-  db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?').run(p.amount, recipientCard.id);
+  await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?').run(p.amount, recipientCard.id);
 
   const ref = crypto.randomUUID();
   const insTx = db.prepare(`INSERT INTO transactions
     (user_id, card_id, title, category, amount, is_expense, icon_code, counterparty_id, transfer_ref)
     VALUES (?, ?, ?, 'ផ្ទេរប្រាក់', ?, ?, 18, ?, ?)`);
   const noteSuffix = p.note ? ` · ${p.note}` : '';
-  const outId = insTx.run(sender.id, card.id, `ផ្ទេរទៅ ${recipient.name}${noteSuffix}`.slice(0, 100),
-    p.amount, 1, recipient.id, ref).lastInsertRowid;
-  insTx.run(recipient.id, recipientCard.id, `ទទួលពី ${sender.name}${noteSuffix}`.slice(0, 100),
+  const outId = (await insTx.run(sender.id, card.id, `ផ្ទេរទៅ ${recipient.name}${noteSuffix}`.slice(0, 100),
+    p.amount, 1, recipient.id, ref)).lastInsertRowid;
+  await insTx.run(recipient.id, recipientCard.id, `ទទួលពី ${sender.name}${noteSuffix}`.slice(0, 100),
     p.amount, 0, sender.id, ref);
 
   const insNotif = db.prepare('INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, 18)');
-  insNotif.run(sender.id, 'ផ្ទេរប្រាក់ជោគជ័យ', `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${recipient.name}`);
-  const recvNotifId = insNotif.run(recipient.id, 'បានទទួលប្រាក់',
-    `អ្នកបានទទួល $${p.amount.toFixed(2)} ពី ${sender.name}`).lastInsertRowid;
+  await insNotif.run(sender.id, 'ផ្ទេរប្រាក់ជោគជ័យ', `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${recipient.name}`);
+  const recvNotifId = (await insNotif.run(recipient.id, 'បានទទួលប្រាក់',
+    `អ្នកបានទទួល $${p.amount.toFixed(2)} ពី ${sender.name}`)).lastInsertRowid;
 
   const response = {
     id: outId,
     transfer_ref: ref,
-    new_balance: db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id).balance,
-    transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(outId),
+    new_balance: (await db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id)).balance,
+    transaction: await db.prepare('SELECT * FROM transactions WHERE id = ?').get(outId),
     recipient: { name: recipient.name, masked_account: maskContact(recipient) },
   };
-  db.prepare('INSERT INTO idempotency_keys (key, user_id, req_hash, response) VALUES (?, ?, ?, ?)')
+  await db.prepare('INSERT INTO idempotency_keys (key, user_id, req_hash, response) VALUES (?, ?, ?, ?)')
     .run(p.idem, p.senderId, p.reqHash, JSON.stringify(response));
 
   return { replay: false, response, recipientId: recipient.id, recvNotifId };
@@ -956,7 +929,7 @@ app.post('/transfers', auth, handle(async (req, res) => {
     .update(`${recipientId}|${cardId}|${amount}|${note}`).digest('hex');
 
   // ស្ទួន → ត្រឡប់លទ្ធផលដដែល (មិនកាត់លុយម្ដងទៀត)
-  const prior = db.prepare('SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?')
+  const prior = await db.prepare('SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?')
     .get(idem, req.userId);
   if (prior) {
     if (prior.req_hash !== reqHash)
@@ -966,13 +939,13 @@ app.post('/transfers', auth, handle(async (req, res) => {
 
   await checkPin(req.userId, req.body.pin);
 
-  const result = executeTransfer({
+  const result = await executeTransfer({
     idem, reqHash, senderId: req.userId, recipientId, cardId, amount, note,
   });
   ok(res, result.response);
 
   if (!result.replay) {
-    unlockAchievement(req.userId, 'first_tx');
+    await unlockAchievement(req.userId, 'first_tx');
     // FCM: មិនបង្ហាញចំនួនលុយលើ Lock Screen — App ទាញព័ត៌មានលម្អិតពី API
     sendPushNotification(result.recipientId, 'Aura Bank', 'អ្នកមានការជូនដំណឹងថ្មី', {
       type: 'transfer_received',
@@ -982,14 +955,14 @@ app.post('/transfers', auth, handle(async (req, res) => {
 }));
 
 // 5) បញ្ជីធនាគារ/MFI ដែលគាំទ្រ (App ប្រើដើម្បីបង្ហាញ fee និងកំណត់ចំនួន)
-app.get('/banks', auth, (req, res) => {
-  ok(res, db.prepare('SELECT * FROM banks WHERE active = 1 ORDER BY name').all());
+app.get('/banks', auth, async (req, res) => {
+  ok(res, await db.prepare('SELECT * FROM banks WHERE active = 1 ORDER BY name').all());
 });
 
 // 6) ផ្ទេរចេញក្រៅ (ធនាគារ/MFIs/វ៉លឡេត/ក្រៅប្រទេស)
 //    គោលការណ៍: លុយចេញពីកាតអ្នកផ្ញើតែម្ខាង — មិនបង្កើតចំណូលក្លែងក្លាយនៅកន្លែងណា។
-const executeExternalTransfer = db.transaction((p) => {
-  const prior = db.prepare('SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?')
+const executeExternalTransfer = (p) => db.transaction(async () => {
+  const prior = await db.prepare('SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?')
     .get(p.idem, p.senderId);
   if (prior) {
     if (prior.req_hash !== p.reqHash)
@@ -997,10 +970,10 @@ const executeExternalTransfer = db.transaction((p) => {
     return { replay: true, response: JSON.parse(prior.response) };
   }
 
-  const bankRail = db.prepare('SELECT * FROM banks WHERE code = ? AND active = 1').get(p.bankCode);
+  const bankRail = await db.prepare('SELECT * FROM banks WHERE code = ? AND active = 1').get(p.bankCode);
   if (!bankRail) throw new ApiError('Rails មិនត្រូវបានគាំទ្រ', 400, 'BANK_NOT_SUPPORTED');
 
-  const card = db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(p.cardId, p.senderId);
+  const card = await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(p.cardId, p.senderId);
   if (!card) throw new ApiError('Card not found', 404, 'CARD_NOT_FOUND');
   if (card.frozen) throw new ApiError('កាតត្រូវបានបង្កក', 400, 'CARD_FROZEN');
 
@@ -1010,10 +983,10 @@ const executeExternalTransfer = db.transaction((p) => {
 
   const fee = Math.min(Math.round(p.amount * bankRail.fee_rate * 100) / 100, bankRail.fee_max);
   const total = Math.round((p.amount + fee) * 100) / 100;
-  if (total > card.daily_limit || spentToday(card.id) + total > card.daily_limit)
+  if (total > card.daily_limit || await spentToday(card.id) + total > card.daily_limit)
     throw new ApiError('លើសកម្រិតប្រាក់ប្រចាំថ្ងៃ', 400, 'DAILY_LIMIT');
 
-  const dec = db.prepare(`UPDATE cards SET balance = ROUND(balance - ?, 2)
+  const dec = await db.prepare(`UPDATE cards SET balance = ROUND(balance - ?, 2)
     WHERE id = ? AND balance >= ?`).run(total, card.id, total);
   if (dec.changes !== 1) throw new ApiError('សមតុល្យមិនគ្រប់គ្រាន់', 400, 'INSUFFICIENT_FUNDS');
 
@@ -1024,19 +997,19 @@ const executeExternalTransfer = db.transaction((p) => {
     VALUES (?, ?, ?, 'ផ្ទេរប្រាក់', ?, 1, 18, ?)`);
   const noteSuffix = p.note ? ` · ${p.note}` : '';
   // amount កត់ត្រាតែចំនួនផ្ទេរ ដូច P2P / spend ភាគីទទួល
-  const outId = insTx.run(p.senderId, card.id,
-    `ផ្ទេរទៅ ${label}${noteSuffix}`.slice(0, 100), p.amount, ref).lastInsertRowid;
+  const outId = (await insTx.run(p.senderId, card.id,
+    `ផ្ទេរទៅ ${label}${noteSuffix}`.slice(0, 100), p.amount, ref)).lastInsertRowid;
 
   const insExt = db.prepare(`INSERT INTO external_transfers
     (user_id, card_id, bank_code, recipient_name, recipient_account, currency,
      amount, fee, transfer_ref, status, note)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'settled', ?)`);
-  const extId = insExt.run(p.senderId, card.id, bankRail.code, p.recipientName,
-    p.recipientAccount, bankRail.currency, p.amount, fee, ref, p.note || null).lastInsertRowid;
+  const extId = (await insExt.run(p.senderId, card.id, bankRail.code, p.recipientName,
+    p.recipientAccount, bankRail.currency, p.amount, fee, ref, p.note || null)).lastInsertRowid;
 
   const insNotif = db.prepare('INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, 18)');
-  const notifId = insNotif.run(p.senderId, 'ផ្ទេរជោគជ័យ',
-    `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${label}`).lastInsertRowid;
+  const notifId = (await insNotif.run(p.senderId, 'ផ្ទេរជោគជ័យ',
+    `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${label}`)).lastInsertRowid;
 
   const response = {
     id: outId,
@@ -1045,11 +1018,11 @@ const executeExternalTransfer = db.transaction((p) => {
     bank: { code: bankRail.code, name: bankRail.name },
     fee,
     total_debit: total,
-    new_balance: db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id).balance,
-    transaction: db.prepare('SELECT * FROM transactions WHERE id = ?').get(outId),
+    new_balance: (await db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id)).balance,
+    transaction: await db.prepare('SELECT * FROM transactions WHERE id = ?').get(outId),
     recipient: { name: p.recipientName, account: p.recipientAccount },
   };
-  db.prepare('INSERT INTO idempotency_keys (key, user_id, req_hash, response) VALUES (?, ?, ?, ?)')
+  await db.prepare('INSERT INTO idempotency_keys (key, user_id, req_hash, response) VALUES (?, ?, ?, ?)')
     .run(p.idem, p.senderId, p.reqHash, JSON.stringify(response));
 
   return { replay: false, response, notifId };
@@ -1082,7 +1055,7 @@ app.post('/transfers/external', auth, handle(async (req, res) => {
   const reqHash = crypto.createHash('sha256')
     .update(`${bankCode}|${digits}|${cardId}|${amount}|${recipientName}|${note}`).digest('hex');
 
-  const prior = db.prepare('SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?')
+  const prior = await db.prepare('SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?')
     .get(idem, req.userId);
   if (prior) {
     if (prior.req_hash !== reqHash)
@@ -1093,14 +1066,14 @@ app.post('/transfers/external', auth, handle(async (req, res) => {
   // PIN ផ្ទៀងផ្ទាត់នៅ Server ជានិច្ច (មិនជឿ Client)
   await checkPin(req.userId, req.body.pin);
 
-  const result = executeExternalTransfer({
+  const result = await executeExternalTransfer({
     idem, reqHash, senderId: req.userId, bankCode,
     recipientName, recipientAccount: digits, cardId, amount, note,
   });
   ok(res, result.response);
 
   if (!result.replay) {
-    unlockAchievement(req.userId, 'first_tx');
+    await unlockAchievement(req.userId, 'first_tx');
     // FCM ទៅឧបករណ៍របស់អ្នកផ្ញើ ដើម្បីឲ្យ list ព័ត៌មានលម្អិតក្នុង App ទាន់ពេល
     sendPushNotification(req.userId, 'Aura Bank', 'អ្នកមានការជូនដំណឹងថ្មី', {
       type: 'transfer_sent',
@@ -1110,8 +1083,8 @@ app.post('/transfers/external', auth, handle(async (req, res) => {
 }));
 
 // 7) ប្រវត្តិការផ្ទេរចេញក្រៅរបស់អ្នកប្រើ
-app.get('/transfers/external', auth, (req, res) => {
-  ok(res, db.prepare(`SELECT e.*, b.name AS bank_name FROM external_transfers e
+app.get('/transfers/external', auth, async (req, res) => {
+  ok(res, await db.prepare(`SELECT e.*, b.name AS bank_name FROM external_transfers e
     JOIN banks b ON b.code = e.bank_code
     WHERE e.user_id = ? ORDER BY e.created_at DESC LIMIT 100`).all(req.userId));
 });
@@ -1119,57 +1092,57 @@ app.get('/transfers/external', auth, (req, res) => {
 // ============================================================
 // GOALS
 // ============================================================
-app.get('/goals', auth, (req, res) => {
-  ok(res, db.prepare('SELECT * FROM goals WHERE user_id = ?').all(req.userId));
+app.get('/goals', auth, async (req, res) => {
+  ok(res, await db.prepare('SELECT * FROM goals WHERE user_id = ?').all(req.userId));
 });
 
-app.post('/goals', auth, (req, res) => {
+app.post('/goals', auth, async (req, res) => {
   const { name, icon_code, color } = req.body;
   const target = toMoney(req.body.target);
   if (!name || !(target > 0)) return fail(res, 'Invalid');
-  const info = db.prepare(
+  const info = await db.prepare(
     'INSERT INTO goals (user_id, name, target, icon_code, color) VALUES (?, ?, ?, ?, ?)'
   ).run(req.userId, name, target, icon_code || 19, color || 0xFF3D5AFE);
   ok(res, { id: info.lastInsertRowid });
 });
 
-app.post('/goals/:id/deposit', auth, (req, res) => {
+app.post('/goals/:id/deposit', auth, async (req, res) => {
   const amount = toMoney(req.body.amount);
   if (!(amount > 0)) return fail(res, 'Invalid amount');
-  const g = db.prepare('SELECT id FROM goals WHERE id = ? AND user_id = ?')
+  const g = await db.prepare('SELECT id FROM goals WHERE id = ? AND user_id = ?')
     .get(req.params.id, req.userId);
   if (!g) return fail(res, 'Not found', 404, 'NOT_FOUND');
-  db.prepare('UPDATE goals SET saved = saved + ? WHERE id = ?').run(amount, req.params.id);
-  const g2 = db.prepare('SELECT saved FROM goals WHERE id = ?').get(req.params.id);
-  if (g2.saved >= 100) unlockAchievement(req.userId, 'savings_100');
-  if (g2.saved >= 1000) unlockAchievement(req.userId, 'savings_1000');
+  await db.prepare('UPDATE goals SET saved = saved + ? WHERE id = ?').run(amount, req.params.id);
+  const g2 = await db.prepare('SELECT saved FROM goals WHERE id = ?').get(req.params.id);
+  if (g2.saved >= 100) await unlockAchievement(req.userId, 'savings_100');
+  if (g2.saved >= 1000) await unlockAchievement(req.userId, 'savings_1000');
   ok(res, { updated: true });
 });
 
 // ============================================================
 // NOTIFICATIONS
 // ============================================================
-app.get('/notifications', auth, (req, res) => {
-  ok(res, db.prepare(
+app.get('/notifications', auth, async (req, res) => {
+  ok(res, await db.prepare(
     'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 50'
   ).all(req.userId));
 });
 
-app.post('/notifications/read-all', auth, (req, res) => {
-  db.prepare('UPDATE notifications SET read = 1 WHERE user_id = ?').run(req.userId);
+app.post('/notifications/read-all', auth, async (req, res) => {
+  await db.prepare('UPDATE notifications SET "read" = 1 WHERE user_id = ?').run(req.userId);
   ok(res, { read: true });
 });
 
 // ============================================================
 // LOANS
 // ============================================================
-app.get('/loan', auth, (req, res) => {
-  ok(res, db.prepare(
+app.get('/loan', auth, async (req, res) => {
+  ok(res, await db.prepare(
     'SELECT * FROM loans WHERE user_id = ? AND active = 1 ORDER BY id DESC LIMIT 1'
   ).get(req.userId) || null);
 });
 
-app.post('/loan', auth, (req, res) => {
+app.post('/loan', auth, async (req, res) => {
   const principal = toMoney(req.body.principal);
   const months = parseInt(req.body.months, 10);
   const annual_rate = Number(req.body.annual_rate);
@@ -1177,26 +1150,25 @@ app.post('/loan', auth, (req, res) => {
       !Number.isFinite(annual_rate) || annual_rate < 0 || annual_rate > 100)
     return fail(res, 'Invalid');
 
-  const exists = db.prepare('SELECT id FROM loans WHERE user_id = ? AND active = 1').get(req.userId);
+  const exists = await db.prepare('SELECT id FROM loans WHERE user_id = ? AND active = 1').get(req.userId);
   if (exists) return fail(res, 'You already have an active loan');
 
-  const run = db.transaction(() => {
-    const info = db.prepare(
+  const id = await db.transaction(async () => {
+    const info = await db.prepare(
       'INSERT INTO loans (user_id, principal, months, annual_rate) VALUES (?, ?, ?, ?)'
     ).run(req.userId, principal, months, annual_rate);
-    const firstCard = db.prepare('SELECT id FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(req.userId);
+    const firstCard = await db.prepare('SELECT id FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(req.userId);
     if (firstCard) {
-      db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?').run(principal, firstCard.id);
+      await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?').run(principal, firstCard.id);
     }
     return info.lastInsertRowid;
   });
-  const id = run();
-  unlockAchievement(req.userId, 'first_loan');
+  await unlockAchievement(req.userId, 'first_loan');
   ok(res, { id });
 });
 
-app.post('/loan/pay', auth, (req, res) => {
-  const loan = db.prepare(
+app.post('/loan/pay', auth, async (req, res) => {
+  const loan = await db.prepare(
     'SELECT * FROM loans WHERE user_id = ? AND active = 1 ORDER BY id DESC LIMIT 1'
   ).get(req.userId);
   if (!loan) return fail(res, 'No active loan');
@@ -1205,15 +1177,15 @@ app.post('/loan/pay', auth, (req, res) => {
   const monthly = Math.round((r === 0 ? loan.principal / loan.months
     : loan.principal * r / (1 - Math.pow(1 + r, -loan.months))) * 100) / 100;
 
-  const card = db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(req.userId);
+  const card = await db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(req.userId);
   if (!card || card.balance < monthly) return fail(res, 'Insufficient balance', 400, 'INSUFFICIENT_FUNDS');
 
   const newPaid = loan.paid + 1;
   const active = newPaid >= loan.months ? 0 : 1;
-  db.transaction(() => {
-    db.prepare('UPDATE cards SET balance = ROUND(balance - ?, 2) WHERE id = ?').run(monthly, card.id);
-    db.prepare('UPDATE loans SET paid = ?, active = ? WHERE id = ?').run(newPaid, active, loan.id);
-  })();
+  await db.transaction(async () => {
+    await db.prepare('UPDATE cards SET balance = ROUND(balance - ?, 2) WHERE id = ?').run(monthly, card.id);
+    await db.prepare('UPDATE loans SET paid = ?, active = ? WHERE id = ?').run(newPaid, active, loan.id);
+  });
 
   sendPushNotification(req.userId, 'បង់រំលោះកម្ចី', `បង់បាន $${monthly.toFixed(2)}`, { type: 'loan_paid' });
   ok(res, { monthly, paid: newPaid, months: loan.months });
@@ -1222,28 +1194,29 @@ app.post('/loan/pay', auth, (req, res) => {
 // ============================================================
 // ANALYTICS
 // ============================================================
-app.get('/analytics', auth, (req, res) => {
-  const rows = db.prepare(
+app.get('/analytics', auth, async (req, res) => {
+  const rows = await db.prepare(
     'SELECT category, SUM(amount) AS total FROM transactions WHERE user_id = ? AND is_expense = 1 GROUP BY category'
   ).all(req.userId);
-  const income = db.prepare(
+  const income = (await db.prepare(
     'SELECT COALESCE(SUM(amount), 0) AS s FROM transactions WHERE user_id = ? AND is_expense = 0'
-  ).get(req.userId).s;
-  const expense = db.prepare(
+  ).get(req.userId)).s;
+  const expense = (await db.prepare(
     'SELECT COALESCE(SUM(amount), 0) AS s FROM transactions WHERE user_id = ? AND is_expense = 1'
-  ).get(req.userId).s;
+  ).get(req.userId)).s;
   ok(res, { income, expense, by_category: rows });
 });
 
 // ============================================================
 // BUDGETS
 // ============================================================
-app.get('/budgets', auth, (req, res) => {
-  const rows = db.prepare('SELECT * FROM budgets WHERE user_id = ?').all(req.userId);
-  const spentRows = db.prepare(`
+app.get('/budgets', auth, async (req, res) => {
+  const rows = await db.prepare('SELECT * FROM budgets WHERE user_id = ?').all(req.userId);
+  const spentRows = await db.prepare(`
     SELECT category, SUM(amount) AS spent FROM transactions
     WHERE user_id = ? AND is_expense = 1
-      AND date(created_at, '${TZ}') >= date('now', '${TZ}', 'start of month')
+      AND (created_at AT TIME ZONE 'Asia/Phnom_Penh')::date
+        >= date_trunc('month', now() AT TIME ZONE 'Asia/Phnom_Penh')::date
     GROUP BY category
   `).all(req.userId);
   const spentMap = {};
@@ -1251,68 +1224,68 @@ app.get('/budgets', auth, (req, res) => {
   ok(res, rows.map((b) => ({ ...b, spent: spentMap[b.category] || 0 })));
 });
 
-app.post('/budgets', auth, (req, res) => {
+app.post('/budgets', auth, async (req, res) => {
   const { category } = req.body;
   const amount = toMoney(req.body.amount);
   if (!category || !(amount > 0)) return fail(res, 'Invalid');
   try {
-    db.prepare('INSERT INTO budgets (user_id, category, amount) VALUES (?, ?, ?)')
+    await db.prepare('INSERT INTO budgets (user_id, category, amount) VALUES (?, ?, ?)')
       .run(req.userId, category, amount);
-    const count = db.prepare('SELECT COUNT(*) AS c FROM budgets WHERE user_id = ?').get(req.userId).c;
-    unlockAchievement(req.userId, 'budget_set');
-    if (count >= 5) unlockAchievement(req.userId, 'budget_master');
+    const count = (await db.prepare('SELECT COUNT(*) AS c FROM budgets WHERE user_id = ?').get(req.userId)).c;
+    await unlockAchievement(req.userId, 'budget_set');
+    if (count >= 5) await unlockAchievement(req.userId, 'budget_master');
     ok(res, { created: true });
   } catch (e) {
-    if (e.message.includes('UNIQUE')) return fail(res, 'Budget already exists');
+    if (e.code === '23505' || /unique/i.test(e.message)) return fail(res, 'Budget already exists');
     fail(res, e.message, 500);
   }
 });
 
-app.patch('/budgets/:id', auth, (req, res) => {
+app.patch('/budgets/:id', auth, async (req, res) => {
   const amount = toMoney(req.body.amount);
   if (!(amount > 0)) return fail(res, 'Invalid');
-  db.prepare('UPDATE budgets SET amount = ? WHERE id = ? AND user_id = ?')
+  await db.prepare('UPDATE budgets SET amount = ? WHERE id = ? AND user_id = ?')
     .run(amount, req.params.id, req.userId);
   ok(res, { updated: true });
 });
 
-app.delete('/budgets/:id', auth, (req, res) => {
-  db.prepare('DELETE FROM budgets WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
+app.delete('/budgets/:id', auth, async (req, res) => {
+  await db.prepare('DELETE FROM budgets WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
   ok(res, { deleted: true });
 });
 
 // ============================================================
 // STREAK
 // ============================================================
-app.get('/streak', auth, (req, res) => {
-  const s = db.prepare('SELECT * FROM streaks WHERE user_id = ?').get(req.userId);
+app.get('/streak', auth, async (req, res) => {
+  const s = await db.prepare('SELECT * FROM streaks WHERE user_id = ?').get(req.userId);
   ok(res, s || { current_days: 0, total_days: 0, last_check_in: null });
 });
 
-app.post('/streak/check-in', auth, (req, res) => {
+app.post('/streak/check-in', auth, async (req, res) => {
   const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().split('T')[0]; // ម៉ោងកម្ពុជា
-  const s = db.prepare('SELECT * FROM streaks WHERE user_id = ?').get(req.userId);
+  const s = await db.prepare('SELECT * FROM streaks WHERE user_id = ?').get(req.userId);
   if (!s) {
-    db.prepare('INSERT INTO streaks (user_id, current_days, total_days, last_check_in) VALUES (?, 1, 1, ?)')
+    await db.prepare('INSERT INTO streaks (user_id, current_days, total_days, last_check_in) VALUES (?, 1, 1, ?)')
       .run(req.userId, today);
     return ok(res, { current_days: 1, total_days: 1, is_new: true });
   }
   if (s.last_check_in === today) return ok(res, { ...s, is_new: false });
   const yesterday = new Date(Date.now() + 7 * 3600 * 1000 - 86400000).toISOString().split('T')[0];
   const newCurrent = s.last_check_in === yesterday ? s.current_days + 1 : 1;
-  db.prepare('UPDATE streaks SET current_days = ?, total_days = ?, last_check_in = ? WHERE user_id = ?')
+  await db.prepare('UPDATE streaks SET current_days = ?, total_days = ?, last_check_in = ? WHERE user_id = ?')
     .run(newCurrent, s.total_days + 1, today, req.userId);
-  if (newCurrent >= 7) unlockAchievement(req.userId, 'streak_7');
-  if (newCurrent >= 30) unlockAchievement(req.userId, 'streak_30');
-  if (newCurrent >= 100) unlockAchievement(req.userId, 'streak_100');
+  if (newCurrent >= 7) await unlockAchievement(req.userId, 'streak_7');
+  if (newCurrent >= 30) await unlockAchievement(req.userId, 'streak_30');
+  if (newCurrent >= 100) await unlockAchievement(req.userId, 'streak_100');
   ok(res, { current_days: newCurrent, total_days: s.total_days + 1, is_new: true });
 });
 
 // ============================================================
 // ACHIEVEMENTS
 // ============================================================
-app.get('/achievements', auth, (req, res) => {
-  const unlocked = db.prepare('SELECT code, unlocked_at FROM achievements WHERE user_id = ?').all(req.userId);
+app.get('/achievements', auth, async (req, res) => {
+  const unlocked = await db.prepare('SELECT code, unlocked_at FROM achievements WHERE user_id = ?').all(req.userId);
   const map = {};
   for (const u of unlocked) map[u.code] = u.unlocked_at;
   ok(res, ACHIEVEMENTS_DEF.map((a) => ({
@@ -1323,84 +1296,84 @@ app.get('/achievements', auth, (req, res) => {
 // ============================================================
 // REMINDERS
 // ============================================================
-app.get('/reminders', auth, (req, res) => {
-  ok(res, db.prepare('SELECT * FROM reminders WHERE user_id = ? ORDER BY due_date ASC').all(req.userId));
+app.get('/reminders', auth, async (req, res) => {
+  ok(res, await db.prepare('SELECT * FROM reminders WHERE user_id = ? ORDER BY due_date ASC').all(req.userId));
 });
 
-app.post('/reminders', auth, (req, res) => {
+app.post('/reminders', auth, async (req, res) => {
   const { title, due_date, icon_code } = req.body;
   const amount = toMoney(req.body.amount);
   if (!title || !(amount > 0) || !due_date) return fail(res, 'Invalid');
-  db.prepare('INSERT INTO reminders (user_id, title, amount, due_date, icon_code) VALUES (?, ?, ?, ?, ?)')
+  await db.prepare('INSERT INTO reminders (user_id, title, amount, due_date, icon_code) VALUES (?, ?, ?, ?, ?)')
     .run(req.userId, title, amount, due_date, icon_code || 16);
   ok(res, { created: true });
 });
 
-app.patch('/reminders/:id', auth, (req, res) => {
-  db.prepare('UPDATE reminders SET paid = ? WHERE id = ? AND user_id = ?')
+app.patch('/reminders/:id', auth, async (req, res) => {
+  await db.prepare('UPDATE reminders SET paid = ? WHERE id = ? AND user_id = ?')
     .run(req.body.paid ? 1 : 0, req.params.id, req.userId);
   ok(res, { updated: true });
 });
 
-app.delete('/reminders/:id', auth, (req, res) => {
-  db.prepare('DELETE FROM reminders WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
+app.delete('/reminders/:id', auth, async (req, res) => {
+  await db.prepare('DELETE FROM reminders WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
   ok(res, { deleted: true });
 });
 
 // ============================================================
 // RECURRING
 // ============================================================
-app.get('/recurring', auth, (req, res) => {
-  ok(res, db.prepare('SELECT * FROM recurring WHERE user_id = ? ORDER BY next_date ASC').all(req.userId));
+app.get('/recurring', auth, async (req, res) => {
+  ok(res, await db.prepare('SELECT * FROM recurring WHERE user_id = ? ORDER BY next_date ASC').all(req.userId));
 });
 
-app.post('/recurring', auth, (req, res) => {
+app.post('/recurring', auth, async (req, res) => {
   const { title, category, card_id, next_date, frequency, icon_code } = req.body;
   const amount = toMoney(req.body.amount);
   if (!title || !(amount > 0) || !next_date || !card_id) return fail(res, 'Invalid');
-  const card = db.prepare('SELECT id FROM cards WHERE id = ? AND user_id = ?').get(card_id, req.userId);
+  const card = await db.prepare('SELECT id FROM cards WHERE id = ? AND user_id = ?').get(card_id, req.userId);
   if (!card) return fail(res, 'Card not found', 404, 'NOT_FOUND');
   if (!['monthly', 'weekly', 'yearly'].includes(frequency || 'monthly')) return fail(res, 'Invalid frequency');
-  db.prepare(`INSERT INTO recurring
+  await db.prepare(`INSERT INTO recurring
     (user_id, title, amount, category, card_id, next_date, frequency, icon_code)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(req.userId, title, amount, category || 'វិក្កយបត្រ', card_id, next_date, frequency || 'monthly', icon_code || 16);
   ok(res, { created: true });
 });
 
-app.patch('/recurring/:id', auth, (req, res) => {
-  db.prepare('UPDATE recurring SET active = ? WHERE id = ? AND user_id = ?')
+app.patch('/recurring/:id', auth, async (req, res) => {
+  await db.prepare('UPDATE recurring SET active = ? WHERE id = ? AND user_id = ?')
     .run(req.body.active ? 1 : 0, req.params.id, req.userId);
   ok(res, { updated: true });
 });
 
-app.delete('/recurring/:id', auth, (req, res) => {
-  db.prepare('DELETE FROM recurring WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
+app.delete('/recurring/:id', auth, async (req, res) => {
+  await db.prepare('DELETE FROM recurring WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
   ok(res, { deleted: true });
 });
 
-app.post('/recurring/process-due', auth, (req, res) => {
+app.post('/recurring/process-due', auth, async (req, res) => {
   const today = new Date().toISOString();
-  const due = db.prepare(
+  const due = await db.prepare(
     'SELECT * FROM recurring WHERE user_id = ? AND active = 1 AND next_date <= ?'
   ).all(req.userId, today);
   let processed = 0;
   for (const r of due) {
-    const card = db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(r.card_id, req.userId);
+    const card = await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(r.card_id, req.userId);
     if (!card || card.balance < r.amount || card.frozen) continue;
     const next = new Date();
     if (r.frequency === 'monthly') next.setMonth(next.getMonth() + 1);
     else if (r.frequency === 'weekly') next.setDate(next.getDate() + 7);
     else if (r.frequency === 'yearly') next.setFullYear(next.getFullYear() + 1);
-    db.transaction(() => {
-      db.prepare('UPDATE cards SET balance = ROUND(balance - ?, 2) WHERE id = ?').run(r.amount, r.card_id);
-      db.prepare(`INSERT INTO transactions
+    await db.transaction(async () => {
+      await db.prepare('UPDATE cards SET balance = ROUND(balance - ?, 2) WHERE id = ?').run(r.amount, r.card_id);
+      await db.prepare(`INSERT INTO transactions
         (user_id, card_id, title, category, amount, is_expense, icon_code)
         VALUES (?, ?, ?, ?, ?, 1, ?)`)
         .run(req.userId, r.card_id, r.title, r.category, r.amount, r.icon_code);
-      db.prepare('UPDATE recurring SET next_date = ? WHERE id = ?')
+      await db.prepare('UPDATE recurring SET next_date = ? WHERE id = ?')
         .run(next.toISOString().split('T')[0], r.id);
-    })();
+    });
     processed++;
   }
   ok(res, { processed });
@@ -1409,17 +1382,17 @@ app.post('/recurring/process-due', auth, (req, res) => {
 // ============================================================
 // SPLITS
 // ============================================================
-app.get('/splits', auth, (req, res) => {
-  ok(res, db.prepare('SELECT * FROM splits WHERE user_id = ? ORDER BY created_at DESC').all(req.userId));
+app.get('/splits', auth, async (req, res) => {
+  ok(res, await db.prepare('SELECT * FROM splits WHERE user_id = ? ORDER BY created_at DESC').all(req.userId));
 });
 
-app.post('/splits', auth, (req, res) => {
+app.post('/splits', auth, async (req, res) => {
   const { title, participants } = req.body;
   const total_amount = toMoney(req.body.total_amount);
   if (!title || !(total_amount > 0) || !Array.isArray(participants) || participants.length < 1)
     return fail(res, 'Invalid');
   const share = Math.round(total_amount / (participants.length + 1) * 100) / 100;
-  db.prepare(`INSERT INTO splits
+  await db.prepare(`INSERT INTO splits
     (user_id, title, total_amount, your_share, participants) VALUES (?, ?, ?, ?, ?)`)
     .run(req.userId, title, total_amount, share, JSON.stringify(participants));
   ok(res, { your_share: share });
@@ -1428,11 +1401,11 @@ app.post('/splits', auth, (req, res) => {
 // ============================================================
 // VIRTUAL CARDS
 // ============================================================
-app.get('/virtual-cards', auth, (req, res) => {
-  ok(res, db.prepare('SELECT * FROM virtual_cards WHERE user_id = ?').all(req.userId));
+app.get('/virtual-cards', auth, async (req, res) => {
+  ok(res, await db.prepare('SELECT * FROM virtual_cards WHERE user_id = ?').all(req.userId));
 });
 
-app.post('/virtual-cards', auth, (req, res) => {
+app.post('/virtual-cards', auth, async (req, res) => {
   const { name } = req.body;
   const limit = req.body.limit_amount === undefined ? 500 : toMoney(req.body.limit_amount);
   if (!name || !(limit > 0)) return fail(res, 'Invalid');
@@ -1440,13 +1413,13 @@ app.post('/virtual-cards', auth, (req, res) => {
   const cvv = String(crypto.randomInt(100, 1000));
   const m = String(new Date().getMonth() + 1).padStart(2, '0');
   const y = String(new Date().getFullYear() + 3).slice(-2);
-  db.prepare(`INSERT INTO virtual_cards
+  await db.prepare(`INSERT INTO virtual_cards
     (user_id, name, number, cvv, expiry, limit_amount) VALUES (?, ?, ?, ?, ?, ?)`)
     .run(req.userId, name, number, cvv, `${m}/${y}`, limit);
   ok(res, { created: true });
 });
 
-app.patch('/virtual-cards/:id', auth, (req, res) => {
+app.patch('/virtual-cards/:id', auth, async (req, res) => {
   const { active, frozen } = req.body;
   const updates = [];
   const params = [];
@@ -1454,85 +1427,86 @@ app.patch('/virtual-cards/:id', auth, (req, res) => {
   if (frozen !== undefined) { updates.push('frozen = ?'); params.push(frozen ? 1 : 0); }
   if (updates.length === 0) return fail(res, 'Nothing to update');
   params.push(req.params.id, req.userId);
-  db.prepare(`UPDATE virtual_cards SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).run(...params);
+  await db.prepare(`UPDATE virtual_cards SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).run(...params);
   ok(res, { updated: true });
 });
 
-app.delete('/virtual-cards/:id', auth, (req, res) => {
-  db.prepare('DELETE FROM virtual_cards WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
+app.delete('/virtual-cards/:id', auth, async (req, res) => {
+  await db.prepare('DELETE FROM virtual_cards WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
   ok(res, { deleted: true });
 });
 
 // ============================================================
 // REFERRAL
 // ============================================================
-app.get('/referral', auth, (req, res) => {
-  let r = db.prepare('SELECT * FROM referrals WHERE user_id = ?').get(req.userId);
+app.get('/referral', auth, async (req, res) => {
+  let r = await db.prepare('SELECT * FROM referrals WHERE user_id = ?').get(req.userId);
   if (!r) {
     const code = 'REF' + crypto.randomBytes(4).toString('hex').toUpperCase().slice(0, 6);
-    db.prepare('INSERT INTO referrals (user_id, code) VALUES (?, ?)').run(req.userId, code);
-    r = db.prepare('SELECT * FROM referrals WHERE user_id = ?').get(req.userId);
+    await db.prepare('INSERT INTO referrals (user_id, code) VALUES (?, ?)').run(req.userId, code);
+    r = await db.prepare('SELECT * FROM referrals WHERE user_id = ?').get(req.userId);
   }
   ok(res, r);
 });
 
-app.post('/referral/redeem', auth, (req, res) => {
+app.post('/referral/redeem', auth, async (req, res) => {
   const { code } = req.body;
   if (!code) return fail(res, 'Invalid');
-  const me = db.prepare('SELECT referred_by FROM users WHERE id = ?').get(req.userId);
+  const me = await db.prepare('SELECT referred_by FROM users WHERE id = ?').get(req.userId);
   if (me && me.referred_by) return fail(res, 'អ្នកបានប្រើកូដណែនាំរួចហើយ', 400, 'ALREADY_REDEEMED');
 
-  const referrer = db.prepare('SELECT user_id FROM referrals WHERE code = ?').get(String(code).toUpperCase());
+  const referrer = await db.prepare('SELECT user_id FROM referrals WHERE code = ?').get(String(code).toUpperCase());
   if (!referrer) return fail(res, 'Invalid code');
   if (referrer.user_id === req.userId) return fail(res, 'Cannot use own code');
 
-  db.transaction(() => {
+  await db.transaction(async () => {
     const bump = db.prepare(`UPDATE cards SET balance = ROUND(balance + 5, 2)
       WHERE id = (SELECT id FROM cards WHERE user_id = ? ORDER BY id LIMIT 1)`);
-    bump.run(referrer.user_id);
-    bump.run(req.userId);
-    db.prepare('UPDATE users SET referred_by = ? WHERE id = ?').run(referrer.user_id, req.userId);
-    db.prepare('UPDATE referrals SET referred_count = referred_count + 1, earnings = earnings + 5 WHERE user_id = ?')
+    await bump.run(referrer.user_id);
+    await bump.run(req.userId);
+    await db.prepare('UPDATE users SET referred_by = ? WHERE id = ?').run(referrer.user_id, req.userId);
+    await db.prepare('UPDATE referrals SET referred_count = referred_count + 1, earnings = earnings + 5 WHERE user_id = ?')
       .run(referrer.user_id);
-    db.prepare('INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, ?)')
+    await db.prepare('INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, ?)')
       .run(referrer.user_id, 'ប្រាក់រង្វាន់ Referral', 'ទទួលបាន $5.00', 18);
-  })();
-  unlockAchievement(referrer.user_id, 'referral_1');
+  });
+  await unlockAchievement(referrer.user_id, 'referral_1');
   ok(res, { bonus: 5 });
 });
 
 // ============================================================
 // CASHBACK
 // ============================================================
-app.get('/cashback', auth, (req, res) => {
-  const rows = db.prepare(
+app.get('/cashback', auth, async (req, res) => {
+  const rows = await db.prepare(
     'SELECT * FROM cashback WHERE user_id = ? ORDER BY created_at DESC LIMIT 100'
   ).all(req.userId);
-  const total = db.prepare(
+  const total = (await db.prepare(
     'SELECT COALESCE(SUM(amount), 0) AS s FROM cashback WHERE user_id = ?'
-  ).get(req.userId).s;
+  ).get(req.userId)).s;
   ok(res, { total, history: rows, rates: CASHBACK_RATES });
 });
 
 // ============================================================
 // INSIGHTS
 // ============================================================
-app.get('/insights', auth, (req, res) => {
-  const thisStart = `date('now', '${TZ}', 'start of month')`;
-  const lastStart = `date('now', '${TZ}', 'start of month', '-1 month')`;
+app.get('/insights', auth, async (req, res) => {
+  const localDate = `(created_at AT TIME ZONE 'Asia/Phnom_Penh')::date`;
+  const thisStart = `date_trunc('month', now() AT TIME ZONE 'Asia/Phnom_Penh')::date`;
+  const lastStart = `date_trunc('month', (now() AT TIME ZONE 'Asia/Phnom_Penh') - interval '1 month')::date`;
 
-  const thisMonth = db.prepare(`
+  const thisMonth = await db.prepare(`
     SELECT category, SUM(amount) AS total, COUNT(*) AS count
     FROM transactions
-    WHERE user_id = ? AND is_expense = 1 AND date(created_at, '${TZ}') >= ${thisStart}
+    WHERE user_id = ? AND is_expense = 1 AND ${localDate} >= ${thisStart}
     GROUP BY category ORDER BY total DESC
   `).all(req.userId);
 
-  const lastMonth = db.prepare(`
+  const lastMonth = await db.prepare(`
     SELECT category, SUM(amount) AS total
     FROM transactions
     WHERE user_id = ? AND is_expense = 1
-      AND date(created_at, '${TZ}') >= ${lastStart} AND date(created_at, '${TZ}') < ${thisStart}
+      AND ${localDate} >= ${lastStart} AND ${localDate} < ${thisStart}
     GROUP BY category
   `).all(req.userId);
 
@@ -1602,13 +1576,13 @@ app.get('/insights', auth, (req, res) => {
     });
   }
 
-  const budgets = db.prepare('SELECT * FROM budgets WHERE user_id = ?').all(req.userId);
+  const budgets = await db.prepare('SELECT * FROM budgets WHERE user_id = ?').all(req.userId);
   for (const b of budgets) {
-    const spent = db.prepare(`
+    const spent = (await db.prepare(`
       SELECT COALESCE(SUM(amount), 0) AS s FROM transactions
       WHERE user_id = ? AND is_expense = 1 AND category = ?
-        AND date(created_at, '${TZ}') >= ${thisStart}
-    `).get(req.userId, b.category).s;
+        AND ${localDate} >= ${thisStart}
+    `).get(req.userId, b.category)).s;
     if (spent > b.amount) {
       insights.push({
         type: 'budget_over', icon: '🚨',
@@ -1630,29 +1604,29 @@ app.get('/insights', auth, (req, res) => {
 // ============================================================
 // FCM TOKEN REGISTRATION
 // ============================================================
-app.post('/fcm/register', auth, (req, res) => {
+app.post('/fcm/register', auth, async (req, res) => {
   const { token } = req.body;
   if (!token || typeof token !== 'string') return fail(res, 'Invalid');
-  db.transaction(() => {
+  await db.transaction(async () => {
     // Token មួយជាកម្មសិទ្ធិទូរស័ព្ទមួយ: លុបពីអ្នកប្រើផ្សេង ដើម្បីកុំឲ្យ
     // ការជូនដំណឹងរបស់ B ទៅលោតលើទូរស័ព្ទដែល A ធ្លាប់ Login
-    db.prepare('DELETE FROM fcm_tokens WHERE token = ? OR user_id = ?').run(token, req.userId);
-    db.prepare('INSERT INTO fcm_tokens (user_id, token) VALUES (?, ?)').run(req.userId, token);
-  })();
+    await db.prepare('DELETE FROM fcm_tokens WHERE token = ? OR user_id = ?').run(token, req.userId);
+    await db.prepare('INSERT INTO fcm_tokens (user_id, token) VALUES (?, ?)').run(req.userId, token);
+  });
   console.log(`✅ FCM Token registered for user ${req.userId}`);
   ok(res, { registered: true });
 });
 
 // ហៅពេល Logout
-app.post('/fcm/unregister', auth, (req, res) => {
-  db.prepare('DELETE FROM fcm_tokens WHERE user_id = ?').run(req.userId);
+app.post('/fcm/unregister', auth, async (req, res) => {
+  await db.prepare('DELETE FROM fcm_tokens WHERE user_id = ?').run(req.userId);
   ok(res, { unregistered: true });
 });
 
 // ============================================================
 // CURRENCY
 // ============================================================
-app.get('/currency/rates', auth, (req, res) => {
+app.get('/currency/rates', auth, async (req, res) => {
   ok(res, { USD_KHR: 4100, KHR_USD: 1 / 4100 });
 });
 
@@ -1667,4 +1641,9 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Backend on http://localhost:${PORT}`));
+initDb()
+  .then(() => app.listen(PORT, () => console.log(`🚀 Backend on http://localhost:${PORT}`)))
+  .catch((e) => {
+    console.error('❌ Database init failed:', e);
+    process.exit(1);
+  });
