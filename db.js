@@ -9,11 +9,20 @@ if (!connectionString) {
   throw new Error('DATABASE_URL must be set');
 }
 
-const isLocal = /@(localhost|127\.0\.0\.1)[:/]/.test(connectionString);
+// Render's External URL needs TLS; its Internal URL (and a local cluster) does not.
+function resolveSsl(conn) {
+  const url = new URL(conn);
+  if (url.searchParams.get('sslmode') === 'disable') return false;
+  if (url.searchParams.get('sslmode')) return { rejectUnauthorized: false };
+  const host = url.hostname;
+  const isLocalHost = host === 'localhost' || host === '::1' || /^127\./.test(host);
+  const isPrivate = isLocalHost || !host.includes('.') || host.endsWith('.internal');
+  return isPrivate ? false : { rejectUnauthorized: false };
+}
 
 const pool = new Pool({
   connectionString,
-  ssl: isLocal ? false : { rejectUnauthorized: false },
+  ssl: resolveSsl(connectionString),
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 15000,
