@@ -118,6 +118,31 @@ async function main() {
   const me = await api('GET', '/me', undefined, tokenA);
   assert(me.json.data?.name === 'Sokha Test', 'GET /me');
 
+  const TINY_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const av = await api('POST', '/me/avatar', { avatar: TINY_PNG }, tokenA);
+  assert(av.status === 200, 'POST /me/avatar', av.json);
+  const meAv = await api('GET', '/me', undefined, tokenA);
+  assert(meAv.json.data?.avatar === TINY_PNG, 'avatar returned by GET /me');
+  const avBad = await api('POST', '/me/avatar', { avatar: 'data:image/png;base64,AAAA' }, tokenA);
+  assert(avBad.status === 400, 'reject non-image avatar', avBad.json);
+  const avClear = await api('POST', '/me/avatar', { avatar: null }, tokenA);
+  assert(avClear.status === 200, 'clear avatar', avClear.json);
+  const meNoAv = await api('GET', '/me', undefined, tokenA);
+  assert(meNoAv.json.data?.avatar === null, 'avatar cleared');
+
+  // 60 KB JPEG → ធំជាង global 10 KB limit, ត្រូវឆ្លងកាត់ parser ពិសេស
+  const bigJpeg = 'data:image/jpeg;base64,' +
+    Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60 * 1024)])
+      .toString('base64');
+  const avBig = await api('POST', '/me/avatar', { avatar: bigJpeg }, tokenA);
+  assert(avBig.status === 200, 'avatar up to 200 KB accepted', avBig.json);
+  const hugeJpeg = 'data:image/jpeg;base64,' +
+    Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(220 * 1024)])
+      .toString('base64');
+  const avHuge = await api('POST', '/me/avatar', { avatar: hugeJpeg }, tokenA);
+  assert(avHuge.status === 413, 'avatar over 200 KB rejected', avHuge.json);
+  await api('POST', '/me/avatar', { avatar: null }, tokenA);
+
   const cards = await api('GET', '/cards', undefined, tokenA);
   assert(cards.json.data.length === 3, '3 seeded cards', cards.json.data?.length);
   assert(cards.json.data[0].balance === 12450, 'seeded balance is a number', cards.json.data[0].balance);
@@ -204,12 +229,20 @@ async function main() {
   const insights = await api('GET', '/insights', undefined, tokenA);
   assert(insights.status === 200 && Array.isArray(insights.json.data.insights), 'insights', insights.json);
 
-  const loan = await api('POST', '/loan', { principal: 100, months: 3, annual_rate: 12 }, tokenA);
+  const badLoan = await api('POST', '/loan', { principal: 100, months: 3, annual_rate: 12 }, tokenA);
+  assert(badLoan.status === 400, 'loan without address rejected', badLoan.json);
+
+  const loan = await api('POST', '/loan', { principal: 100, months: 3, annual_rate: 12,
+    province: 'ភ្នំពេញ', district: 'ចំការមន', commune: 'ទន្លេបាសាក់', village: 'ទន្លេបាសាក់' }, tokenA);
   assert(loan.status === 200 && loan.json.data.id, 'loan created', loan.json);
   const pay = await api('POST', '/loan/pay', {}, tokenA);
   assert(pay.status === 200, 'loan payment', pay.json);
   const loanGet = await api('GET', '/loan', undefined, tokenA);
   assert(loanGet.json.data.paid === 1, 'loan paid count', loanGet.json.data);
+  assert(loanGet.json.data.province === 'ភ្នំពេញ' &&
+    loanGet.json.data.district === 'ចំការមន' &&
+    loanGet.json.data.commune === 'ទន្លេបាសាក់' &&
+    loanGet.json.data.village === 'ទន្លេបាសាក់', 'loan address persisted', loanGet.json.data);
 
   const ext = await api('GET', '/transfers/external', undefined, tokenA);
   assert(ext.status === 200, 'external transfer history');

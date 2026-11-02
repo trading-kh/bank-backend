@@ -14,6 +14,8 @@ const { getAuth } = require('firebase-admin/auth');
 const { getMessaging } = require('firebase-admin/messaging');
 
 const app = express();
+// Avatar ជា base64 data URL (រហូត ~200 KB) → parse មុន global 10 KB limit
+app.use('/me/avatar', express.json({ limit: '300kb' }));
 app.use(express.json({ limit: '10kb' }));
 // Express 5 មិនបំពេញ req.body = {} ទេ ពេលសំណើគ្មាន body → routes ដែល destructure
 // req.body នឹង throw TypeError → 500 "Server error". Normalize ត្រង់នេះម្ដង។
@@ -96,6 +98,8 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
+
     CREATE TABLE IF NOT EXISTS cards (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -155,6 +159,11 @@ async function initDb() {
       active INTEGER NOT NULL DEFAULT 1,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE loans ADD COLUMN IF NOT EXISTS province TEXT;
+    ALTER TABLE loans ADD COLUMN IF NOT EXISTS district TEXT;
+    ALTER TABLE loans ADD COLUMN IF NOT EXISTS commune TEXT;
+    ALTER TABLE loans ADD COLUMN IF NOT EXISTS village TEXT;
 
     CREATE TABLE IF NOT EXISTS budgets (
       id SERIAL PRIMARY KEY,
@@ -540,7 +549,7 @@ app.post('/auth/register', handle(async (req, res) => {
   await seedNewUser(userId);
 
   const token = jwt.sign({ id: userId }, SECRET, { expiresIn: '30d' });
-  ok(res, { token, user: { id: userId, name, email, phone } });
+  ok(res, { token, user: { id: userId, name, email, phone, avatar: null } });
 }));
 
 app.post('/auth/login', handle(async (req, res) => {
@@ -556,7 +565,7 @@ app.post('/auth/login', handle(async (req, res) => {
   const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: '30d' });
   ok(res, {
     token,
-    user: { id: user.id, name: user.name, email: user.email, phone: user.phone },
+    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, avatar: user.avatar || null },
   });
 }));
 
@@ -587,24 +596,53 @@ app.post('/auth/google', handle(async (req, res) => {
       'INSERT INTO users (name, email, phone, pin_hash, auth_provider) VALUES (?, ?, ?, ?, ?)'
     ).run(name || 'Google User', email, '', hash, 'google');
     await seedNewUser(info.lastInsertRowid);
-    user = { id: info.lastInsertRowid, name: name || 'Google User', email, phone: '' };
+    user = { id: info.lastInsertRowid, name: name || 'Google User', email, phone: '', avatar: null };
   }
   // បើមានគណនីស្រាប់ មិនប្ដូរ auth_provider ទៀតទេ (ពីមុនធ្វើឲ្យ PIN login ខូច)
 
   const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: '30d' });
   ok(res, {
     token,
-    user: { id: user.id, name: user.name, email: user.email, phone: user.phone },
+    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, avatar: user.avatar || null },
     generatedPin,
   });
 }));
 
 app.get('/me', auth, async (req, res) => {
-  const u = await db.prepare('SELECT id, name, email, phone, auth_provider FROM users WHERE id = ?')
+  const u = await db.prepare('SELECT id, name, email, phone, avatar, auth_provider FROM users WHERE id = ?')
     .get(req.userId);
   if (!u) return fail(res, 'Not found', 404, 'NOT_FOUND');
   ok(res, u);
 });
+
+// ---------- AVATAR ----------
+const AVATAR_RE = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
+const AVATAR_MAX_BYTES = 200 * 1024;
+
+// រក្សាទុករូប Profile ជា base64 ក្នុង Postgres (disk របស់ Render ជា ephemeral)
+app.post('/me/avatar', auth, handle(async (req, res) => {
+  const raw = req.body.avatar;
+  if (raw === null || raw === '') {
+    await db.prepare('UPDATE users SET avatar = NULL WHERE id = ?').run(req.userId);
+    return ok(res, { avatar: null });
+  }
+  const m = typeof raw === 'string' ? AVATAR_RE.exec(raw) : null;
+  if (!m) throw new ApiError('រូបភាពមិនត្រឹមត្រូវ', 400, 'BAD_AVATAR');
+
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > AVATAR_MAX_BYTES)
+    throw new ApiError('រូបភាពធំពេក (អតិបរមា 200 KB)', 413, 'AVATAR_TOO_LARGE');
+
+  const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  const isWebp = buf.length > 12 && buf.toString('ascii', 0, 4) === 'RIFF' &&
+    buf.toString('ascii', 8, 12) === 'WEBP';
+  if (!isJpeg && !isPng && !isWebp)
+    throw new ApiError('រូបភាពមិនត្រឹមត្រូវ', 400, 'BAD_AVATAR');
+
+  await db.prepare('UPDATE users SET avatar = ? WHERE id = ?').run(raw, req.userId);
+  ok(res, { updated: true });
+}));
 
 // ពិនិត្យ PIN (លែងមាន bypass សម្រាប់ Google User)
 app.post('/auth/verify-pin', auth, handle(async (req, res) => {
@@ -1146,17 +1184,22 @@ app.post('/loan', auth, async (req, res) => {
   const principal = toMoney(req.body.principal);
   const months = parseInt(req.body.months, 10);
   const annual_rate = Number(req.body.annual_rate);
+  const addr = ['province', 'district', 'commune', 'village'].map((k) =>
+    typeof req.body[k] === 'string' ? req.body[k].trim() : '');
   if (!(principal > 0) || principal > MAX_TX || !(months >= 1) || months > 120 ||
       !Number.isFinite(annual_rate) || annual_rate < 0 || annual_rate > 100)
     return fail(res, 'Invalid');
+  if (addr.some((s) => !s || s.length > 100))
+    return fail(res, 'សូមជ្រើសរើសទីតាំងខេត្ត ស្រុក ឃុំ ភូមិ', 400, 'BAD_ADDRESS');
+  const [province, district, commune, village] = addr;
 
   const exists = await db.prepare('SELECT id FROM loans WHERE user_id = ? AND active = 1').get(req.userId);
   if (exists) return fail(res, 'You already have an active loan');
 
   const id = await db.transaction(async () => {
     const info = await db.prepare(
-      'INSERT INTO loans (user_id, principal, months, annual_rate) VALUES (?, ?, ?, ?)'
-    ).run(req.userId, principal, months, annual_rate);
+      'INSERT INTO loans (user_id, principal, months, annual_rate, province, district, commune, village) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(req.userId, principal, months, annual_rate, province, district, commune, village);
     const firstCard = await db.prepare('SELECT id FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(req.userId);
     if (firstCard) {
       await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?').run(principal, firstCard.id);
@@ -1636,6 +1679,8 @@ app.get('/currency/rates', auth, async (req, res) => {
 app.use((req, res) => fail(res, 'Not found', 404, 'NOT_FOUND'));
 app.use((err, req, res, next) => {
   if (err.type === 'entity.parse.failed') return fail(res, 'Invalid JSON', 400, 'BAD_JSON');
+  if (err.type === 'entity.too.large')
+    return fail(res, 'រូបភាពធំពេក (អតិបរមា 200 KB)', 413, 'AVATAR_TOO_LARGE');
   console.error('❌ Unhandled:', err);
   fail(res, 'Server error', 500, 'SERVER_ERROR');
 });
