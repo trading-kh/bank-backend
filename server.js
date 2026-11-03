@@ -99,6 +99,7 @@ async function initDb() {
     );
 
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_thumb TEXT;
 
     CREATE TABLE IF NOT EXISTS cards (
       id SERIAL PRIMARY KEY,
@@ -618,12 +619,14 @@ app.get('/me', auth, async (req, res) => {
 // ---------- AVATAR ----------
 const AVATAR_RE = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
 const AVATAR_MAX_BYTES = 200 * 1024;
+const THUMB_MAX_BYTES = 24 * 1024;
 
 // រក្សាទុករូប Profile ជា base64 ក្នុង Postgres (disk របស់ Render ជា ephemeral)
 app.post('/me/avatar', auth, handle(async (req, res) => {
   const raw = req.body.avatar;
   if (raw === null || raw === '') {
-    await db.prepare('UPDATE users SET avatar = NULL WHERE id = ?').run(req.userId);
+    await db.prepare('UPDATE users SET avatar = NULL, avatar_thumb = NULL WHERE id = ?')
+      .run(req.userId);
     return ok(res, { avatar: null });
   }
   const m = typeof raw === 'string' ? AVATAR_RE.exec(raw) : null;
@@ -640,7 +643,16 @@ app.post('/me/avatar', auth, handle(async (req, res) => {
   if (!isJpeg && !isPng && !isWebp)
     throw new ApiError('រូបភាពមិនត្រឹមត្រូវ', 400, 'BAD_AVATAR');
 
-  await db.prepare('UPDATE users SET avatar = ? WHERE id = ?').run(raw, req.userId);
+  // Thumbnail 96px សម្រាប់បង្ហាញក្នុងបញ្ជីអ្នកទទួល (បើមិនមាន ឬធំពេក ដាក់ null)
+  const thumbRaw = req.body.thumb;
+  let thumb = null;
+  if (typeof thumbRaw === 'string' && thumbRaw) {
+    const tm = AVATAR_RE.exec(thumbRaw);
+    if (tm && Buffer.from(tm[2], 'base64').length <= THUMB_MAX_BYTES) thumb = tm[2];
+  }
+
+  await db.prepare('UPDATE users SET avatar = ?, avatar_thumb = ? WHERE id = ?')
+    .run(raw, thumb, req.userId);
   ok(res, { updated: true });
 }));
 
@@ -812,19 +824,24 @@ app.get('/recipients/lookup', auth, handle(async (req, res) => {
 
   let user;
   if (q.includes('@')) {
-    user = await db.prepare('SELECT id, name, email, phone FROM users WHERE lower(email) = lower(?) AND id <> ?')
+    user = await db.prepare('SELECT id, name, email, phone, avatar_thumb FROM users WHERE lower(email) = lower(?) AND id <> ?')
       .get(q, req.userId);
   } else {
     const digits = q.replace(/[\s\-()+]/g, '');
     if (!/^\d{6,15}$/.test(digits)) throw new ApiError('លេខទូរស័ព្ទមិនត្រឹមត្រូវ', 400, 'BAD_QUERY');
     user = await db.prepare(`
-      SELECT id, name, email, phone FROM users
+      SELECT id, name, email, phone, avatar_thumb FROM users
       WHERE phone <> '' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'(',''),')',''),'+','') = ?
         AND id <> ? LIMIT 1`).get(digits, req.userId);
   }
   if (!user) throw new ApiError('រកមិនឃើញអ្នកទទួល', 404, 'NOT_FOUND');
 
-  ok(res, { recipient_id: String(user.id), name: user.name, masked_account: maskContact(user) });
+  ok(res, {
+    recipient_id: String(user.id),
+    name: user.name,
+    masked_account: maskContact(user),
+    avatar_thumb: user.avatar_thumb || null,
+  });
 }));
 
 // 1b) បញ្ជីអ្នកទទួលដែលបានចុះឈ្មោះ (ឈ្មោះ + account បិទបាំងតែប៉ុណ្ណោះ)
@@ -833,7 +850,7 @@ app.get('/recipients', auth, handle(async (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, 50).replace(/[%_]/g, '');
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
   const rows = await db.prepare(`
-    SELECT u.id, u.name, u.email, u.phone,
+    SELECT u.id, u.name, u.email, u.phone, u.avatar_thumb,
       (SELECT MAX(t.created_at) FROM transactions t
          WHERE t.user_id = ? AND t.counterparty_id = u.id) AS last_at
     FROM users u
@@ -846,6 +863,7 @@ app.get('/recipients', auth, handle(async (req, res) => {
     name: r.name,
     masked_account: maskContact(r),
     recent: !!r.last_at,
+    avatar_thumb: r.avatar_thumb || null,
   })));
 }));
 
@@ -872,12 +890,13 @@ app.post('/qr/resolve', auth, handle(async (req, res) => {
   if (p.typ !== 'qr') throw new ApiError('QR មិនត្រឹមត្រូវ', 400, 'BAD_QR');
   if (p.uid === req.userId) throw new ApiError('មិនអាចផ្ទេរទៅខ្លួនឯង', 400, 'SELF_TRANSFER');
 
-  const user = await db.prepare('SELECT id, name, email, phone FROM users WHERE id = ?').get(p.uid);
+  const user = await db.prepare('SELECT id, name, email, phone, avatar_thumb FROM users WHERE id = ?').get(p.uid);
   if (!user) throw new ApiError('QR មិនត្រឹមត្រូវ', 400, 'BAD_QR');
   ok(res, {
     recipient_id: String(user.id),
     name: user.name,
     masked_account: maskContact(user),
+    avatar_thumb: user.avatar_thumb || null,
     amount: p.amt, // ប្រើសម្រាប់បំពេញជាមុនប៉ុណ្ណោះ
   });
 }));

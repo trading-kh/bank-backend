@@ -168,6 +168,26 @@ async function main() {
   assert(rec.status === 200 && rec.json.data.length === 1 && rec.json.data[0].name === 'Dara Test', 'recipient directory', rec.json);
   assert(!JSON.stringify(rec.json.data).includes('098765432'), 'recipient phone masked');
 
+  // Thumbnail រូបភាពអ្នកទទួល → ត្រូវមានក្នុង directory និង lookup
+  const THUMB = 'data:image/jpeg;base64,' +
+    Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(2 * 1024)])
+      .toString('base64');
+  const avThumb = await api('POST', '/me/avatar',
+    { avatar: TINY_PNG, thumb: THUMB }, tokenB);
+  assert(avThumb.status === 200, 'POST /me/avatar with thumb', avThumb.json);
+  const thumbB64 = THUMB.split(',')[1];
+  const recThumb = await api('GET', '/recipients?q=dar', undefined, tokenA);
+  assert(recThumb.json.data[0].avatar_thumb === thumbB64,
+    'recipient directory carries avatar_thumb', recThumb.json.data[0]);
+  const lookThumb = await api('GET', '/recipients/lookup?q=dara@test.com', undefined, tokenA);
+  assert(lookThumb.json.data?.avatar_thumb === thumbB64,
+    'recipient lookup carries avatar_thumb', lookThumb.json);
+  const avNoThumb = await api('POST', '/me/avatar', { avatar: TINY_PNG }, tokenB);
+  assert(avNoThumb.status === 200, 'POST /me/avatar without thumb', avNoThumb.json);
+  const recNoThumb = await api('GET', '/recipients?q=dar', undefined, tokenA);
+  assert(recNoThumb.json.data[0].avatar_thumb === null,
+    'avatar_thumb cleared when not provided', recNoThumb.json.data[0]);
+
   const lookup = await api('GET', '/recipients/lookup?q=dara%40test.com', undefined, tokenA);
   assert(lookup.json.data?.name === 'Dara Test', 'lookup by email');
 
