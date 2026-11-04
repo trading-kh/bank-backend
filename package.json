@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "dev": "node scripts/dev.js",
     "test": "node scripts/smoke-test.js"
   },
   "keywords": [],

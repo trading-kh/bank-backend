@@ -104,6 +104,7 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_locked INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS data_version INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS cards (
       id SERIAL PRIMARY KEY,
@@ -685,8 +686,9 @@ app.post('/auth/google', handle(async (req, res) => {
 }));
 
 app.get('/me', auth, async (req, res) => {
-  const u = await db.prepare('SELECT id, name, email, phone, avatar, auth_provider FROM users WHERE id = ?')
-    .get(req.userId);
+  const u = await db.prepare(
+    'SELECT id, name, email, phone, avatar, auth_provider, data_version FROM users WHERE id = ?'
+  ).get(req.userId);
   if (!u) return fail(res, 'Not found', 404, 'NOT_FOUND');
   ok(res, u);
 });

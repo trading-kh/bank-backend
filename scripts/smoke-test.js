@@ -5,7 +5,7 @@ const fs = require('fs');
 const EmbeddedPostgres = require('embedded-postgres').default;
 
 const PG_PORT = 55432;
-const PORT = 3100;
+const PORT = Number(process.env.TEST_PORT || 3111);
 const DB_DIR = path.join(process.env.TEMP || '.', 'aura-pgtest');
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -410,6 +410,13 @@ async function main() {
   const adminEdit = await api('PATCH', `/admin/api/users/${adminUserId}`, { name: 'Sokha Admin' }, adminToken);
   assert(adminEdit.status === 200 && adminEdit.json.data.name === 'Sokha Admin', 'admin edits user', adminEdit.json);
 
+  const meAfterEdit = await api('GET', '/me', undefined, login.json.data.token);
+  assert(meAfterEdit.json.data.name === 'Sokha Admin',
+    'user app sees the admin name edit right away', meAfterEdit.json.data?.name);
+  const versionAfterEdit = meAfterEdit.json.data.data_version ?? 0;
+  assert(versionAfterEdit > 0, 'admin edit bumps data_version (app detects the change)',
+    meAfterEdit.json.data?.data_version);
+
   const adminCards = await api('GET', '/admin/api/cards', undefined, adminToken);
   assert(adminCards.status === 200 && adminCards.json.data.rows.length >= 3, 'admin cards list', adminCards.json.data?.rows?.length);
   const ownCard = adminCards.json.data.rows.find((c) => c.user_id === adminUserId);
@@ -423,6 +430,10 @@ async function main() {
     user_id: adminUserId, card_id: adminCardId, title: 'Admin credit', category: 'ផ្សេងៗ', amount: 25, is_expense: false,
   }, adminToken);
   assert(adminTx.status === 200 && adminTx.json.data.new_balance === 5025, 'admin creates transaction (credits card)', adminTx.json);
+
+  const meAfterTx = await api('GET', '/me', undefined, login.json.data.token);
+  assert((meAfterTx.json.data.data_version ?? 0) > versionAfterEdit,
+    'admin transaction bumps data_version', meAfterTx.json.data?.data_version);
 
   const adminTxList = await api('GET', '/admin/api/transactions?q=Admin credit', undefined, adminToken);
   assert(adminTxList.status === 200 && adminTxList.json.data.total === 1, 'admin transaction search', adminTxList.json.data?.total);

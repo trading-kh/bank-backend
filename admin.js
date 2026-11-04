@@ -48,6 +48,12 @@ module.exports = function createAdminRouter(ctx) {
     }
   }
 
+  // បន្ថែម data_version → app ទូរសែព្យដឹងថាទិន្នន័យត្រូវ refresh ភ្លាម
+  async function bumpVersion(userId) {
+    if (!userId) return;
+    await db.prepare('UPDATE users SET data_version = data_version + 1 WHERE id = ?').run(userId);
+  }
+
   // ---------- admin auth ----------
   function adminAuth(req, res, next) {
     const token = (req.headers.authorization || '').replace('Bearer ', '');
@@ -297,6 +303,7 @@ module.exports = function createAdminRouter(ctx) {
 
     values.push(id);
     await db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    await bumpVersion(id);
     await audit(req, 'update_user', 'users', id,
       fields.map((f) => f.split(' = ')[0]).join(','));
     ok(res, await db.prepare('SELECT id, name, email, phone, is_admin, created_at FROM users WHERE id = ?').get(id));
@@ -311,6 +318,7 @@ module.exports = function createAdminRouter(ctx) {
     const hash = await bcrypt.hash(pin, SALT);
     await db.prepare('UPDATE users SET pin_hash = ?, pin_attempts = 0, locked_until = NULL WHERE id = ?')
       .run(hash, id);
+    await bumpVersion(id);
     await audit(req, 'reset_pin', 'users', id);
     ok(res, { id, message: 'បានកំណត់ PIN ថ្មី' });
   }));
@@ -354,6 +362,7 @@ module.exports = function createAdminRouter(ctx) {
 
     if (reseed && seedNewUser) await seedNewUser(id);
 
+    await bumpVersion(id);
     await audit(req, 'reset_user', 'users', id,
       `wipe:${WIPE.filter((t) => removed[t]).join(',')}`);
     ok(res, { id, removed, reseeded: reseed, message: 'បានកំណត់ឡើងវិញ' });
@@ -415,6 +424,15 @@ module.exports = function createAdminRouter(ctx) {
 
     values.push(id);
     await db.prepare(`UPDATE cards SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    await bumpVersion(card.user_id);
+    const after = await db.prepare('SELECT balance FROM cards WHERE id = ?').get(id);
+    const delta = money(Number(after.balance)) - money(Number(card.balance));
+    if (delta !== 0 && sendPushNotification) {
+      sendPushNotification(card.user_id,
+        delta > 0 ? 'ប្រាក់បានបញ្ចូលចូលគណនីរបស់អ្នក' : 'ប្រាក់ត្រូវបានកាត់ចេញ',
+        `កាត ${card.name} · ${delta > 0 ? '+' : '-'}$${Math.abs(delta).toFixed(2)} · សមារាល្ថបន្តិដោយអ្នកគ្រប់គ្រង`,
+        { type: 'admin' });
+    }
     await audit(req, 'update_card', 'cards', id, fields.map((f) => f.split(' = ')[0]).join(','));
     ok(res, await db.prepare('SELECT * FROM cards WHERE id = ?').get(id));
   }));
@@ -434,6 +452,7 @@ module.exports = function createAdminRouter(ctx) {
       (user_id, name, number, expiry, cvv, balance, color1, color2)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(userId, name, number, expiry, cvv, balance, color1, color2);
+    await bumpVersion(userId);
     await audit(req, 'create_card', 'cards', info.lastInsertRowid, `user ${userId}`);
     ok(res, await db.prepare('SELECT * FROM cards WHERE id = ?').get(info.lastInsertRowid));
   }));
@@ -443,6 +462,7 @@ module.exports = function createAdminRouter(ctx) {
     const card = await db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
     if (!card) throw new ApiError('រកមិនឃើញកាត', 404, 'NOT_FOUND');
     await db.prepare('DELETE FROM cards WHERE id = ?').run(id);
+    await bumpVersion(card.user_id);
     await audit(req, 'delete_card', 'cards', id, card.name);
     ok(res, { id, message: 'បានលុបកាត' });
   }));
@@ -524,6 +544,13 @@ module.exports = function createAdminRouter(ctx) {
       return info.lastInsertRowid;
     });
     await audit(req, 'create_transaction', 'transactions', id, `${title} ${amount}`);
+    await bumpVersion(userId);
+    if (sendPushNotification) {
+      sendPushNotification(userId,
+        isExpense ? 'មានប្រតិបត្តិការចំណាយលើគណនីរបស់អ្នក' : 'មានប្រតិបត្តិការបញ្ចូលលុយចូលគណនីរបស់អ្នក',
+        `${title} · ${isExpense ? '-' : '+'}$${amount.toFixed(2)} · សមារាល្ថបន្តិដោយអ្នកគ្រប់គ្រង`,
+        { type: 'admin' });
+    }
     ok(res, { id, new_balance: (await db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id)).balance });
   }));
 
@@ -537,6 +564,13 @@ module.exports = function createAdminRouter(ctx) {
         .run(delta, tx.card_id);
       await db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
     });
+    await bumpVersion(tx.user_id);
+    if (sendPushNotification) {
+      sendPushNotification(tx.user_id,
+        'មានប្រតិបត្តិការត្រូវបានលុប',
+        `${tx.title} · ${tx.is_expense ? '-' : '+'}$${Number(tx.amount).toFixed(2)} · សមារាល្ថបន្តិដោយអ្នកគ្រប់គ្រង`,
+        { type: 'admin' });
+    }
     await audit(req, 'delete_transaction', 'transactions', id, tx.title);
     ok(res, { id, message: 'បានលុបប្រតិបត្តិការ' });
   }));
@@ -581,6 +615,7 @@ module.exports = function createAdminRouter(ctx) {
 
     values.push(id);
     await db.prepare(`UPDATE loans SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    await bumpVersion(loan.user_id);
     await audit(req, 'update_loan', 'loans', id, fields.map((f) => f.split(' = ')[0]).join(','));
     ok(res, await db.prepare('SELECT * FROM loans WHERE id = ?').get(id));
   }));
@@ -595,6 +630,7 @@ module.exports = function createAdminRouter(ctx) {
     const paid = money(Number(loan.paid) + amount);
     const active = paid >= Number(loan.principal) ? 0 : loan.active;
     await db.prepare('UPDATE loans SET paid = ?, active = ? WHERE id = ?').run(paid, active, id);
+    await bumpVersion(loan.user_id);
     await audit(req, 'repay_loan', 'loans', id, `$${amount}`);
     ok(res, await db.prepare('SELECT * FROM loans WHERE id = ?').get(id));
   }));
@@ -604,6 +640,7 @@ module.exports = function createAdminRouter(ctx) {
     const loan = await db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
     if (!loan) throw new ApiError('រកមិនឃើញកម្ចី', 404, 'NOT_FOUND');
     await db.prepare('DELETE FROM loans WHERE id = ?').run(id);
+    await bumpVersion(loan.user_id);
     await audit(req, 'delete_loan', 'loans', id);
     ok(res, { id, message: 'បានលុបកម្ចី' });
   }));
@@ -632,6 +669,7 @@ module.exports = function createAdminRouter(ctx) {
     const info = await db.prepare(`INSERT INTO notifications (user_id, title, body, icon_code)
       VALUES (?, ?, ?, 0)`).run(userId, title, body);
     if (sendPushNotification) sendPushNotification(userId, title, body, { type: 'admin' });
+    await bumpVersion(userId);
     await audit(req, 'send_notification', 'users', userId, title);
     ok(res, { id: info.lastInsertRowid });
   }));
@@ -693,7 +731,9 @@ module.exports = function createAdminRouter(ctx) {
     }
     if (!fields.length) throw new ApiError('គ្មានអ្វីត្រូវកែប្ដូរ', 400, 'NOTHING_TO_UPDATE');
     values.push(id);
+    const row = await db.prepare(`SELECT user_id FROM ${name} WHERE id = ?`).get(id);
     await db.prepare(`UPDATE ${name} SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    await bumpVersion(row && row.user_id);
     await audit(req, 'update_table', name, id, fields.map((f) => f.split(' = ')[0]).join(','));
     ok(res, { id, message: 'បានកែប្ដូរ' });
   }));
@@ -702,7 +742,9 @@ module.exports = function createAdminRouter(ctx) {
     const name = String(req.params.name);
     if (!EDITABLE_TABLES[name]) throw new ApiError('តារាងនេះមិនអាចលុប', 400, 'NOT_DELETABLE');
     const id = int(req.params.id);
+    const row = await db.prepare(`SELECT user_id FROM ${name} WHERE id = ?`).get(id);
     await db.prepare(`DELETE FROM ${name} WHERE id = ?`).run(id);
+    await bumpVersion(row && row.user_id);
     await audit(req, 'delete_table', name, id);
     ok(res, { id, message: 'បានលុប' });
   }));
