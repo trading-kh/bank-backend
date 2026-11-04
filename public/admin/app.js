@@ -9,6 +9,8 @@ let page = 'dashboard';
 let search = '';
 let offset = 0;
 const LIMIT = 25;
+const userFilters = { status: 'all', sort: 'created', order: 'desc', showAll: false };
+
 
 /* ---------- utils ---------- */
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
@@ -35,10 +37,51 @@ const dateOnly = (s) => {
   return Number.isNaN(d.getTime()) ? esc(s) : d.toLocaleDateString('km-KH', { dateStyle: 'medium' });
 };
 const initials = (name) => String(name || '?').trim().charAt(0).toUpperCase();
-const avatarHtml = (name, thumb) => {
-  if (thumb) return `<img class="avatar" src="data:image/jpeg;base64,${esc(thumb)}" alt="">`;
-  return `<span class="avatar">${esc(initials(name))}</span>`;
+
+// រូបភាពតូចជា base64 (ដកផ្លូវមិនមាន data: prefix) — រកឃើញប្រភេទដោយស្តាប់ពិត
+const thumbSrc = (b64) => {
+  if (!b64) return '';
+  let mime = 'jpeg';
+  try {
+    const head = atob(String(b64).slice(0, 16));
+    if (head.startsWith('\x89PNG')) mime = 'png';
+    else if (head.startsWith('RIFF') && head.slice(8, 12) === 'WEBP') mime = 'webp';
+  } catch (_) { /* ប្រើ jpeg ធម្មតា */ }
+  return `data:image/${mime};base64,${b64}`;
 };
+
+const avatarHtml = (name, thumb, status) => {
+  const img = thumb
+    ? `<img class="avatar" src="${thumbSrc(thumb)}" alt="">`
+    : `<span class="avatar">${esc(initials(name))}</span>`;
+  if (status === undefined || status === null) return img;
+  return `<span class="avatar-wrap">${img}<span class="dot ${status ? 'on' : 'off'}"></span></span>`;
+};
+
+/* ---------- live / offline ---------- */
+const liveBadge = (r) => r.online
+  ? '<span class="live on"><i></i>Live</span>'
+  : '<span class="live off"><i></i>Offline</span>';
+
+const ago = (s) => {
+  if (!s) return '—';
+  const ms = Date.now() - new Date(s).getTime();
+  if (!Number.isFinite(ms)) return '—';
+  if (ms < 0) return 'ឥឡូវនេះ';
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec} វិនាទីមុន`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} នាទីមុន`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr} ម៉ោងមុន`;
+  return `${Math.floor(hr / 24)} ថ្ងៃមុន`;
+};
+
+const lastSeenHtml = (r) => r.last_seen_at
+  ? `<div class="last-seen">ចុងចាស់ ${ago(r.last_seen_at)}</div>
+     <div class="last-seen">${dt(r.last_seen_at)}</div>`
+  : '<div class="last-seen">មិនដែលចូលកម្ម</div>';
+
 
 function toast(msg, type = '') {
   const el = $('#toast');
@@ -69,11 +112,12 @@ async function api(path, opts = {}) {
 
 /* ---------- modal ---------- */
 let modalSaveHandler = null;
-function openModal({ title, body, onSave, wide }) {
+function openModal({ title, body, onSave, wide, saveLabel }) {
   $('#modalTitle').textContent = title;
   $('#modalBody').innerHTML = body;
   modalSaveHandler = onSave || null;
   $('#modalSave').style.display = onSave ? '' : 'none';
+  $('#modalSave').textContent = saveLabel || 'រក្សាទុក';
   $('.modal-box').classList.toggle('wide', !!wide);
   $('#modal').classList.remove('hidden');
 }
@@ -98,6 +142,16 @@ function confirmDelete(text, fn) {
     title: 'បញ្ជាក់ការលុប',
     body: `<p>${esc(text)}</p><p class="muted">សកម្មនេះមិនអាចត្រឡប់វិញបាន។</p>`,
     onSave: fn,
+    saveLabel: 'បញ្ជាក់',
+  });
+}
+
+function confirmAction(title, text, fn) {
+  openModal({
+    title,
+    body: `<p>${esc(text)}</p>`,
+    onSave: fn,
+    saveLabel: 'បញ្ជាក់',
   });
 }
 
@@ -180,13 +234,18 @@ async function renderDashboard() {
   const s = await api('/stats');
   const t = s.totals;
   $('#content').innerHTML = `
-    <div class="grid k4">
+    <div class="grid k3">
       <div class="card kpi accent">
         <div class="kpi-label">អ្នកប្រើសរុប</div>
         <div class="kpi-value">${t.users}</div>
         <div class="kpi-sub">ថ្មី ${t.new_users_7d} នាក់ (7 ថ្ងៃ)</div>
       </div>
       <div class="card kpi ok">
+        <div class="kpi-label">🟢 កំពុងប្រើឥឡូវ (Live)</div>
+        <div class="kpi-value">${t.online_users || 0}</div>
+        <div class="kpi-sub">បន្ថែមពេលវេលា ${s.online_minutes || 5} នាទី</div>
+      </div>
+      <div class="card kpi">
         <div class="kpi-label">សម្រាប់ការទាក់ទង</div>
         <div class="kpi-value">${money0(t.total_balance)}</div>
         <div class="kpi-sub">${t.cards} កាត</div>
@@ -200,7 +259,24 @@ async function renderDashboard() {
         <div class="kpi-label">កម្ចីកំពុងបញ្ចាស់</div>
         <div class="kpi-value">${money0(t.loan_outstanding)}</div>
         <div class="kpi-sub">${t.active_loans} កម្ចី · ${t.external_transfers} ផ្ទេរក្រៅបទេស</div>
+        </div>
+      <div class="card kpi">
+        <div class="kpi-label">🔒 ត្រូវបានផ្អាក</div>
+        <div class="kpi-value">${t.locked_users || 0}</div>
+        <div class="kpi-sub">គណនីដែលត្រូវបានផ្អាក</div>
+
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>🟢 អ្នកប្រើកំពុងប្រើឥឡូវ</h3>
+        <span class="muted">${s.liveUsers.length} នាក់ · បន្ថែមពេលវេលា ${s.online_minutes || 5} នាទី</span></div>
+      ${s.liveUsers.length ? `<div class="live-list">${s.liveUsers.map((u) => `
+        <span class="live-chip" data-user-view="${u.id}" style="cursor:pointer">
+          ${avatarHtml(u.name, u.avatar_thumb, true)}
+          <span><b>${esc(u.name)}</b><br><span class="t">ចុងចាស់ ${ago(u.last_seen_at)}</span></span>
+        </span>`).join('')}</div>`
+        : '<div class="empty">គ្មានអ្នកប្រើកំពុងប្រើឥឡូវ</div>'}
     </div>
 
     <div class="grid k2">
@@ -220,7 +296,7 @@ async function renderDashboard() {
       <div class="card">
         <div class="card-head"><h3>អ្នកប្រើថ្មីៗ</h3></div>
         ${tableHtml([
-    { label: 'ឈ្មោះ', render: (r) => `<div class="cell-user">${avatarHtml(r.name)}<span>${esc(r.name)}</span></div>` },
+    { label: 'ឈ្មោះ', render: (r) => `<div class="cell-user">${avatarHtml(r.name, r.avatar_thumb)}<span>${esc(r.name)}</span></div>` },
     { label: 'អ៊ីមែល', render: (r) => `<span class="muted">${esc(r.email)}</span>` },
     { label: 'ចូលថ្ងៃ', num: true, render: (r) => dateOnly(r.created_at) },
   ], s.recentUsers)}
@@ -257,7 +333,8 @@ async function renderDashboard() {
     window.addEventListener('resize', draw, { once: true });
   }
   const maxCat = Math.max(...s.categories.map((c) => Number(c.total)), 1);
-  $('#catBars').innerHTML = s.categories.length ? s.categories.map((c) => `
+    $$('[data-user-view]').forEach((b) => b.onclick = () => showUser(b.dataset.userView));
+$('#catBars').innerHTML = s.categories.length ? s.categories.map((c) => `
     <div class="bar-row">
       <span>${esc(c.category)}</span>
       <span class="bar-track"><span class="bar-fill" style="width:${(Number(c.total) / maxCat * 100).toFixed(1)}%"></span></span>
@@ -266,46 +343,101 @@ async function renderDashboard() {
 }
 
 async function renderUsers() {
-  const d = await api(`/users?limit=${LIMIT}&offset=${offset}&q=${encodeURIComponent(search)}`);
+  const limit = userFilters.showAll ? 1000 : LIMIT;
+  const d = await api(`/users?limit=${limit}&offset=${offset}&q=${encodeURIComponent(search)}&sort=${userFilters.sort}&order=${userFilters.order}`);
+
+  let rows = d.rows;
+  if (userFilters.status === 'live') rows = rows.filter((r) => r.online);
+  else if (userFilters.status === 'offline') rows = rows.filter((r) => !r.online);
+  else if (userFilters.status === 'locked') rows = rows.filter((r) => r.is_locked);
+  else if (userFilters.status === 'admin') rows = rows.filter((r) => r.is_admin);
+
+  const onlineCount = d.rows.filter((r) => r.online).length;
+  const lockedCount = d.rows.filter((r) => r.is_locked).length;
+  const sortOpts = [
+    ['created', 'ថ្មីដែរ'], ['name', 'ឈ្មោះ'], ['balance', 'សម្រាប្រាប់'],
+    ['tx', 'ប្រតិបត្តិការ'], ['seen', 'ចុងចាស់ប្រើថ្មី'], ['id', 'ID'],
+  ].map(([v, n]) => `<option value="${v}" ${userFilters.sort === v ? 'selected' : ''}>${n}</option>`).join('');
+
   $('#content').innerHTML = `
     <div class="card">
-      <div class="card-head"><h3>អ្នកប្រើ ${d.total} នាក់</h3>
-        <span class="muted">ចុចលើឈ្មោះ ដើម្បីមើលព័ត៌មានលម្អិត</span></div>
+      <div class="card-head">
+        <h3>អ្នកប្រើ ${d.total} នាក់</h3>
+        <span class="muted">🟢 Live ${onlineCount} · 🔒 ត្រូវបានផ្អាក ${lockedCount} · បន្ថែមពេលវេលា ${d.online_minutes} នាទី</span>
+      </div>
+      <div class="toolbar" style="margin-bottom:14px">
+        <div class="seg">
+          <button class="${userFilters.status === 'all' ? 'active' : ''}" data-ustatus="all">ទាំងអស់</button>
+          <button class="${userFilters.status === 'live' ? 'active' : ''}" data-ustatus="live">Live</button>
+          <button class="${userFilters.status === 'offline' ? 'active' : ''}" data-ustatus="offline">Offline</button>
+          <button class="${userFilters.status === 'locked' ? 'active' : ''}" data-ustatus="locked">ត្រូវបានផ្អាក</button>
+          <button class="${userFilters.status === 'admin' ? 'active' : ''}" data-ustatus="admin">Admin</button>
+        </div>
+        <select id="u_sort">${sortOpts}</select>
+        <button class="btn ghost sm" id="u_order">${userFilters.order === 'desc' ? '↓ ចុះ' : '↑ ឡើង'}</button>
+        <div class="spacer"></div>
+        <button class="btn ghost sm" id="u_all">${userFilters.showAll ? 'បង្ហាញ 25 នាក់ក្នុងមួយទំព័រ' : 'បង្ហាញទាំងអស់'}</button>
+      </div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
     {
-      label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.name)}<div>
-        <div>${esc(r.name)} ${r.is_admin ? '<span class="pill info">admin</span>' : ''}</div>
+      label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user"><span data-user-view="${r.id}" style="cursor:pointer" title="មើលព័ត៌មាន">${avatarHtml(r.name, r.avatar_thumb, r.online)}</span><div>
+        <div>${esc(r.name)} ${r.is_admin ? '<span class="pill info">admin</span>' : ''} ${r.is_locked ? '<span class="pill bad">ផ្អាក</span>' : ''}</div>
         <div class="muted" style="font-size:11.5px">${esc(r.email)} · ${esc(r.phone || '—')}</div></div></div>`
     },
+    { label: 'ស្ថានភាព', render: (r) => `<div>${liveBadge(r)}</div>${lastSeenHtml(r)}` },
     { label: 'កាត', num: true, render: (r) => r.card_count },
     { label: 'សម្រាប្រាប់', num: true, render: (r) => money(r.balance) },
     { label: 'ប្រតិបត្តិការ', num: true, render: (r) => r.tx_count },
-    {
-      label: 'ស្ថានភាព', render: (r) => {
-        const locked = r.locked_until && new Date(r.locked_until) > new Date();
-        if (locked) return '<span class="pill bad">ចាក់សោ</span>';
-        if (r.auth_provider === 'google') return '<span class="pill info">Google</span>';
-        return '<span class="pill ok">ធម្មតា</span>';
-      }
-    },
     { label: 'ចុលថ្ងៃ', num: true, render: (r) => `<span class="muted">${dateOnly(r.created_at)}</span>` },
     {
       label: 'សកម្ម', render: (r) => `<div class="row-actions">
-        <button class="btn ghost sm" data-user-edit="${r.id}">កែ</button>
-        <button class="btn ghost sm" data-user-view="${r.id}">លម្អិត</button>
+        <button class="btn ghost sm" data-user-view="${r.id}" title="មើលព័ត៌មាន">លម្អិត</button><button class="btn ghost sm" data-user-edit="${r.id}" title="កែសម្រួល">កែ</button>
+        <button class="btn ghost sm" data-user-lock="${r.id}" data-locked="${r.is_locked ? 1 : 0}" title="${r.is_locked ? 'ដោះសោ' : 'ផ្អាកគណនី'}">${r.is_locked ? '🔓' : '🔒'}</button>
+        <button class="btn ghost sm" data-user-reset="${r.id}" title="Reset ទិន្នន័យ">⟲</button>
+        <button class="btn danger sm" data-user-del="${r.id}" title="លុបគណនី">🗑</button>
       </div>`
     },
-  ], d.rows, { empty: 'រកមិនឃើញអ្នកប្រើ' })}
-      ${pagerHtml(d.total, offset, LIMIT)}
+  ], rows, { empty: 'រកមិនឃើញអ្នកប្រើ' })}
+      ${pagerHtml(d.total, offset, limit)}
     </div>`;
+
   bindPager(d.total);
+  $$('[data-ustatus]').forEach((b) => b.onclick = () => {
+    userFilters.status = b.dataset.ustatus; offset = 0; render();
+  });
+  $('#u_sort').onchange = (e) => { userFilters.sort = e.target.value; offset = 0; render(); };
+  $('#u_order').onclick = () => {
+    userFilters.order = userFilters.order === 'desc' ? 'asc' : 'desc'; offset = 0; render();
+  };
+  $('#u_all').onclick = () => { userFilters.showAll = !userFilters.showAll; offset = 0; render(); };
   $$('[data-user-view]').forEach((b) => b.onclick = () => showUser(b.dataset.userView));
   $$('[data-user-edit]').forEach((b) => b.onclick = () => editUser(b.dataset.userEdit));
-  $$('[data-cell-user]').forEach(() => {});
-  $$('tbody tr').forEach((tr) => {
-    const id = tr.querySelector('[data-user-edit]')?.dataset.userEdit;
-    if (id) tr.style.cursor = 'pointer';
+  $$('[data-user-lock]').forEach((b) => b.onclick = async () => {
+    const lock = b.dataset.locked !== '1';
+    try {
+      await api(`/users/${b.dataset.userLock}`, { method: 'PATCH', body: { is_locked: lock } });
+      toast(lock ? 'បានផ្អាកគណនី' : 'បានដោះសោ', 'ok');
+      render();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  $$('[data-user-reset]').forEach((b) => b.onclick = () => {
+    confirmAction('Reset ទិន្នន័យអ្នកប្រើ',
+      'លុបទិន្នន័យទាំងអស់របស់អ្នកប្រើនេះ (កាត, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតកាត + គោលបំណងថ្មីវិញ។ សម្រាប្រាប់កាតនឹងត្រូវបានកំណត់ជា 0។',
+      async () => {
+        await api(`/users/${b.dataset.userReset}/reset`, { method: 'POST', body: { reseed: true } });
+        toast('បានកំណត់ទិន្នន័យឡើងវិញ', 'ok');
+        render();
+      });
+  });
+  $$('[data-user-del]').forEach((b) => b.onclick = () => {
+    confirmAction('បញ្ជាក់ការលុប',
+      `លុបគណនី "${b.closest('tr')?.querySelector('[data-user-edit]')?.textContent || ''}"? ទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
+      async () => {
+        await api(`/users/${b.dataset.userDel}`, { method: 'DELETE' });
+        toast('បានលុបគណនី', 'ok');
+        render();
+      });
   });
 }
 
@@ -315,6 +447,13 @@ async function editUser(id) {
   openModal({
     title: `កែសម្រួលគណនី · ${u.name}`,
     body: `
+      <div style="display:flex;gap:14px;align-items:center">
+        ${avatarHtml(u.name, u.avatar_thumb, u.online)}
+        <div>
+          <div>${liveBadge(u)}</div>
+          ${lastSeenHtml(u)}
+        </div>
+      </div>
       <label class="field"><span>ឈ្មោះ</span><input id="f_name" value="${esc(u.name)}"></label>
       <label class="field"><span>អ៊ីមែល</span><input id="f_email" value="${esc(u.email)}"></label>
       <label class="field"><span>លេខទូរស័ព្ទ</span><input id="f_phone" value="${esc(u.phone || '')}"></label>
@@ -322,8 +461,12 @@ async function editUser(id) {
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input type="checkbox" id="f_admin" ${u.is_admin ? 'checked' : ''} style="width:18px;height:18px">
         <span>សិទ្ធិ Admin (គ្រប់គ្រងទិន្នថយទាំងអស់)</span></label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:10px">
+        <input type="checkbox" id="f_locked" ${u.is_locked ? 'checked' : ''} style="width:18px;height:18px">
+        <span>🔒 ផ្អាកគណនី (មិនអាចចូលប្រើប្រើវិញ)</span></label>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ok sm" id="f_unlock">🔓 ដោះសោ (unlock)</button>
+        <button class="btn ghost sm" id="f_reset">⟲ Reset ទិន្នន័យ</button>
         <button class="btn danger sm" id="f_delete">🗑 លុបគណនី</button>
       </div>`,
     onSave: async () => {
@@ -332,6 +475,7 @@ async function editUser(id) {
         email: $('#f_email').value.trim(),
         phone: $('#f_phone').value.trim(),
         is_admin: $('#f_admin').checked,
+        is_locked: $('#f_locked').checked,
       };
       await api(`/users/${id}`, { method: 'PATCH', body });
       const pin = $('#f_pin').value.trim();
@@ -341,18 +485,30 @@ async function editUser(id) {
     },
   });
   $('#f_unlock').onclick = async () => {
-    await api(`/users/${id}`, { method: 'PATCH', body: { unlock: true } });
+    await api(`/users/${id}`, { method: 'PATCH', body: { unlock: true, is_locked: false } });
     toast('បានដោះសោ', 'ok');
     closeModal();
     render();
   };
+  $('#f_reset').onclick = () => {
+    closeModal();
+    confirmAction('Reset ទិន្នន័យអ្នកប្រើ',
+      'លុបទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតកាត + គោលបំណងថ្មីវិញ។',
+      async () => {
+        await api(`/users/${id}/reset`, { method: 'POST', body: { reseed: true } });
+        toast('បានកំណត់ទិន្នន័យឡើងវិញ', 'ok');
+        render();
+      });
+  };
   $('#f_delete').onclick = () => {
     closeModal();
-    confirmDelete(`លុបគណនី "${u.name}"? ទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`, async () => {
-      await api(`/users/${id}`, { method: 'DELETE' });
-      toast('បានលុបគណនី', 'ok');
-      render();
-    });
+    confirmAction('បញ្ជាក់ការលុប',
+      `លុបគណនី "${u.name}"? ទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
+      async () => {
+        await api(`/users/${id}`, { method: 'DELETE' });
+        toast('បានលុបគណនី', 'ok');
+        render();
+      });
   };
 }
 
@@ -408,13 +564,29 @@ async function showUser(id) {
     title: `${u.name} · ព័ត៌មានលម្អិត`,
     wide: true,
     body: `
-      <div class="detail-grid">
+      <div style="display:flex;gap:16px;align-items:center">
+        ${avatarHtml(u.name, u.avatar_thumb, u.online)}
+        <div>
+          <div style="font-size:17px;font-weight:700;margin-bottom:4px">${esc(u.name)}</div>
+          <div>${liveBadge(u)}</div>
+          ${lastSeenHtml(u)}
+        </div>
+      </div>
+      <div class="detail-grid" style="margin-top:12px">
         <div class="detail-item"><div class="k">ID</div><div class="v">#${u.id}</div></div>
         <div class="detail-item"><div class="k">អ៊ីមែល</div><div class="v">${esc(u.email)}</div></div>
         <div class="detail-item"><div class="k">ទូរស័ព្ទ</div><div class="v">${esc(u.phone || '—')}</div></div>
         <div class="detail-item"><div class="k">ចូលដោយ</div><div class="v">${esc(u.auth_provider || 'email')}</div></div>
         <div class="detail-item"><div class="k">សិទ្ធិ</div><div class="v">${u.is_admin ? 'Admin' : 'អ្នកប្រើ'}</div></div>
+        <div class="detail-item"><div class="k">ស្ថានភាព</div><div class="v">${u.is_locked ? '<span class="pill bad">ត្រូវបានផ្អាក</span>' : '<span class="pill ok">ធម្មតា</span>'}</div></div>
         <div class="detail-item"><div class="k">ចុលថ្ងៃ</div><div class="v">${dateOnly(u.created_at)}</div></div>
+        <div class="detail-item"><div class="k">ចុងចាស់ប្រើ</div><div class="v">${u.last_seen_at ? dt(u.last_seen_at) : '—'}</div></div>
+      </div>
+      <div class="toolbar" style="margin:14px 0">
+        <button class="btn ghost sm" id="u_edit">✎ កែសម្រួល</button>
+        <button class="btn ghost sm" id="u_lock">${u.is_locked ? '🔓 ដោះសោ' : '🔒 ផ្អាកគណនី'}</button>
+        <button class="btn ghost sm" id="u_reset">⟲ Reset ទិន្នន័យ</button>
+        <button class="btn danger sm" id="u_del">🗑 លុបគណនី</button>
       </div>
       <div class="tabs" id="dTabs">${tabs.map((t, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div>
       <div id="dPanel" class="sub-table"></div>`,
@@ -426,6 +598,34 @@ async function showUser(id) {
     b.classList.add('active');
     panel.innerHTML = bodyFor(b.dataset.tab);
   });
+  $('#u_edit').onclick = () => { closeModal(); editUser(id); };
+  $('#u_lock').onclick = async () => {
+    const lock = !u.is_locked;
+    await api(`/users/${id}`, { method: 'PATCH', body: { is_locked: lock } });
+    toast(lock ? 'បានផ្អាកគណនី' : 'បានដោះសោ', 'ok');
+    closeModal();
+    render();
+  };
+  $('#u_reset').onclick = () => {
+    closeModal();
+    confirmAction('Reset ទិន្នន័យអ្នកប្រើ',
+      'លុបទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតកាត + គោលបំណងថ្មីវិញ។',
+      async () => {
+        await api(`/users/${id}/reset`, { method: 'POST', body: { reseed: true } });
+        toast('បានកំណត់ទិន្នន័យឡើងវិញ', 'ok');
+        render();
+      });
+  };
+  $('#u_del').onclick = () => {
+    closeModal();
+    confirmAction('បញ្ជាក់ការលុប',
+      `លុបគណនី "${u.name}"? ទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
+      async () => {
+        await api(`/users/${id}`, { method: 'DELETE' });
+        toast('បានលុបគណនី', 'ok');
+        render();
+      });
+  };
 }
 
 async function renderCards() {
@@ -436,7 +636,7 @@ async function renderCards() {
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
     { label: 'ម្មាន', render: (r) => esc(r.name) },
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name)}<span>${esc(r.user_name)}</span></div>` },
+    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
     { label: 'លេខកាត', render: (r) => `<span class="muted">${esc(r.number)}</span>` },
     { label: 'សម្រាប្រាប់', num: true, render: (r) => money(r.balance) },
     { label: 'ដីហទិត/ថ្ងៃ', num: true, render: (r) => money(r.daily_limit) },
@@ -523,7 +723,7 @@ async function renderTransactions() {
     <div class="card">
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name)}<span>${esc(r.user_name)}</span></div>` },
+    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
     { label: 'ចំណាង', render: (r) => esc(r.title) },
     { label: 'ប្រភេទ', render: (r) => `<span class="pill">${esc(r.category)}</span>` },
     { label: 'កាត', render: (r) => `<span class="muted">${esc(r.card_name || '—')}</span>` },
@@ -603,7 +803,7 @@ async function renderLoans() {
       <div class="card-head"><h3>កម្ចី ${d.rows.length} សំបុត្រ</h3></div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name)}<div>
+    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<div>
       <div>${esc(r.user_name)}</div><div class="muted" style="font-size:11.5px">${esc(r.user_phone || '')}</div></div></div>` },
     { label: 'ចំនួន', num: true, render: (r) => money(r.principal) },
     { label: 'បានបង់', num: true, render: (r) => money(r.paid) },
@@ -677,7 +877,7 @@ async function renderNotifications() {
         <button class="btn primary sm" id="n_new">+ ផ្ញើសេចក្តីសារ</button></div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name)}<span>${esc(r.user_name)}</span></div>` },
+    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
     { label: 'ចំណាង', render: (r) => esc(r.title) },
     { label: 'អត្ថបទ', render: (r) => `<span class="muted">${esc(r.body)}</span>` },
     { label: 'បានអាន', render: (r) => r.read ? '<span class="pill ok">អាន</span>' : '<span class="pill">ថ្មី</span>' },
@@ -725,7 +925,7 @@ async function renderData() {
     `<button class="tab ${k === dataTable ? 'active' : ''}" data-table="${k}">${n}</button>`).join('')}</div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id ?? r.user_id ?? '—'}` },
-    { label: 'អ្នកប្រើ', render: (r) => r.user_name ? `<div class="cell-user">${avatarHtml(r.user_name)}<span>${esc(r.user_name)}</span></div>` : '—' },
+    { label: 'អ្នកប្រើ', render: (r) => r.user_name ? `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` : '—' },
     ...cols.map((c) => ({
       label: c, render: (r) => {
         const v = r[c];
@@ -854,6 +1054,18 @@ $('#loginForm').onsubmit = async (e) => {
 };
 
 $('#logoutBtn').onclick = logout;
+$('#refreshBtn').onclick = () => render();
+
+// ផ្អាសស្ថានភាព Live/Offline ជាភាពត្រឹមតែគេ ដូចវាឯករាងៗ
+setInterval(() => {
+  if (!token) return;
+  if (!$('#modal').classList.contains('hidden')) return;
+  const a = document.activeElement;
+  if (a && ['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName)) return;
+  if (page === 'users' || page === 'dashboard') render();
+}, 20000);
+
+
 $('#menuBtn').onclick = () => $('.sidebar').classList.toggle('open');
 $$('.nav-item').forEach((b) => b.onclick = () => {
   page = b.dataset.page;

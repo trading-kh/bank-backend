@@ -101,6 +101,8 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_thumb TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_locked INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
     CREATE TABLE IF NOT EXISTS cards (
       id SERIAL PRIMARY KEY,
@@ -387,12 +389,33 @@ const handle = (fn) => (req, res) =>
 function auth(req, res, next) {
   const token = (req.headers.authorization || '').replace('Bearer ', '');
   if (!token) return res.status(401).json({ success: false, error: 'No token' });
+  let payload;
   try {
-    req.userId = jwt.verify(token, SECRET).id;
-    next();
+    payload = jwt.verify(token, SECRET);
   } catch {
-    res.status(401).json({ success: false, error: 'Invalid token' });
+    return res.status(401).json({ success: false, error: 'Invalid token' });
   }
+  req.userId = payload.id;
+
+  // គណនីត្រូវបានផ្អាកដោយ admin? → ហាមមិនឲ្យប្រើបន្ត
+  db.prepare('SELECT is_locked FROM users WHERE id = ?').get(req.userId)
+    .then((u) => {
+      if (u && u.is_locked) {
+        return res.status(403).json({
+          success: false, error: 'គណនីត្រូវបានផ្អាកដោយអ្នកគ្រប់គ្រង', code: 'ACCOUNT_LOCKED',
+        });
+      }
+      next();
+    })
+    .catch((e) => {
+      console.error('❌ lock check failed:', e.message);
+      next();
+    });
+
+  // កត់ពេលសកម្ម (Live/Offline) — មួយដងក្នុង ៦០ វិនាទី ដើម្បីកុំឲ្យទាក់ទង DB ច្រើនពេក
+  db.prepare(`UPDATE users SET last_seen_at = now() WHERE id = ?
+    AND (last_seen_at IS NULL OR last_seen_at < now() - interval '60 seconds')`)
+    .run(req.userId).catch(() => {});
 }
 
 // លុយ: បម្លែងជាលេខ ២ខ្ទង់ ឬ NaN
@@ -570,11 +593,15 @@ app.post('/auth/login', handle(async (req, res) => {
   const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   if (!user) throw new ApiError('User not found', 404, 'NOT_FOUND');
 
+  if (user.is_locked) {
+    throw new ApiError('គណនីត្រូវបានផ្អាកដោយអ្នកគ្រប់គ្រង', 403, 'ACCOUNT_LOCKED');
+  }
   if (user.auth_provider === 'google') {
     throw new ApiError('This account is linked with Google. Please use Google Login.', 400, 'USE_GOOGLE');
   }
   await checkPin(user.id, pin);
 
+  await db.prepare('UPDATE users SET last_seen_at = now() WHERE id = ?').run(user.id);
   const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: '30d' });
   ok(res, {
     token,
@@ -601,6 +628,10 @@ app.post('/auth/google', handle(async (req, res) => {
 
   let user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   let generatedPin = null;
+
+  if (user && user.is_locked) {
+    throw new ApiError('គណនីត្រូវបានផ្អាកដោយអ្នកគ្រប់គ្រង', 403, 'ACCOUNT_LOCKED');
+  }
 
   if (!user) {
     generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
@@ -1710,7 +1741,7 @@ app.get('/currency/rates', auth, async (req, res) => {
 const path = require('path');
 const createAdminRouter = require('./admin');
 app.use('/admin/api', createAdminRouter({
-  db, ok, fail, ApiError, handle, SECRET, sendPushNotification,
+  db, ok, fail, ApiError, handle, SECRET, sendPushNotification, seedNewUser,
 }));
 app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
 

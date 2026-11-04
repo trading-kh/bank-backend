@@ -429,6 +429,40 @@ async function main() {
   const relogin = await api('POST', '/auth/login', { email: 'sokha@test.com', pin: '4321' });
   assert(relogin.status === 200, 'user logs in with admin-set PIN', relogin.json);
 
+  // ---------- LIVE STATUS / LOCK / RESET ----------
+  const liveList = await api('GET', '/admin/api/users?q=dara', undefined, adminToken);
+  assert(liveList.status === 200 && liveList.json.data.rows.length === 1, 'admin finds user to test live status');
+  const daraId = liveList.json.data.rows[0].id;
+  assert(liveList.json.data.rows[0].last_seen_at, 'last_seen_at recorded after login');
+  assert(liveList.json.data.rows[0].online === true, 'user is Live right after login');
+  const liveStats = await api('GET', '/admin/api/stats', undefined, adminToken);
+  assert(liveStats.json.data.totals.online_users >= 1, 'stats counts live users', liveStats.json.data?.totals);
+  assert(Array.isArray(liveStats.json.data.liveUsers), 'stats lists live users');
+
+  const lockDara = await api('PATCH', `/admin/api/users/${daraId}`, { is_locked: true }, adminToken);
+  assert(lockDara.status === 200, 'admin locks a user', lockDara.json);
+  const lockedLogin = await api('POST', '/auth/login', { email: 'dara@test.com', pin: '4321' });
+  assert(lockedLogin.status === 403 && lockedLogin.json.code === 'ACCOUNT_LOCKED',
+    'locked user cannot log in', lockedLogin.json);
+  const unlockDara = await api('PATCH', `/admin/api/users/${daraId}`, { is_locked: false }, adminToken);
+  assert(unlockDara.status === 200, 'admin unlocks a user', unlockDara.json);
+  const daraLogin = await api('POST', '/auth/login', { email: 'dara@test.com', pin: '4321' });
+  assert(daraLogin.status === 200, 'unlocked user can log in again', daraLogin.json);
+
+  const resetDara = await api('POST', `/admin/api/users/${daraId}/reset`, { reseed: true }, adminToken);
+  assert(resetDara.status === 200, 'admin resets a user', resetDara.json);
+  const daraAfter = await api('GET', `/admin/api/users/${daraId}`, undefined, adminToken);
+  assert(daraAfter.json.data.transactions.length === 0,
+    'reset wipes transactions', daraAfter.json.data?.transactions?.length);
+  assert(daraAfter.json.data.cards.length === 3,
+    'reset re-seeds default cards', daraAfter.json.data?.cards?.length);
+  assert(daraAfter.json.data.goals.length === 3,
+    'reset re-seeds default goals', daraAfter.json.data?.goals?.length);
+
+  const selfLock = await api('PATCH', `/admin/api/users/${adminUserId}`, { is_locked: true }, adminToken);
+  assert(selfLock.status === 400 && selfLock.json.code === 'SELF_LOCK',
+    'admin cannot lock their own account', selfLock.json);
+
   const adminDash = await fetch(BASE + '/admin/');
   const dashHtml = await adminDash.text();
   assert(adminDash.status === 200 && dashHtml.includes('ផ្ទាំងគ្រប់គ្រង'), 'admin dashboard page served', adminDash.status);

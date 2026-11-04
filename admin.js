@@ -9,11 +9,15 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 module.exports = function createAdminRouter(ctx) {
-  const { db, ok, fail, ApiError, handle, SECRET, sendPushNotification } = ctx;
+  const { db, ok, fail, ApiError, handle, SECRET, sendPushNotification, seedNewUser } = ctx;
   const router = express.Router();
 
   const ADMIN_TTL = '12h';
   const SALT = 10;
+  // អ្នកប្រើ "Live" បើចុងសកម្មតាមមួយនៅក្នុង N នាទីមកចម្លង
+  const ONLINE_MINUTES = Math.max(parseInt(process.env.ADMIN_ONLINE_MINUTES, 10) || 5, 1);
+  const isOnline = (lastSeen) => !!lastSeen &&
+    (Date.now() - new Date(lastSeen).getTime()) < ONLINE_MINUTES * 60 * 1000;
 
   // ---------- helpers ----------
   const num = (v) => {
@@ -117,7 +121,11 @@ module.exports = function createAdminRouter(ctx) {
         (SELECT COALESCE(SUM(principal - paid), 0) FROM loans WHERE active = 1) AS loan_outstanding,
         (SELECT COUNT(*) FROM goals) AS goals,
         (SELECT COUNT(*) FROM notifications) AS notifications,
-        (SELECT COUNT(*) FROM external_transfers) AS external_transfers
+        (SELECT COUNT(*) FROM external_transfers) AS external_transfers,
+        (SELECT COUNT(*) FROM users WHERE is_locked = 1) AS locked_users,
+        (SELECT COUNT(*) FROM users
+          WHERE last_seen_at IS NOT NULL
+            AND last_seen_at > now() - (${ONLINE_MINUTES} || ' minutes')::interval) AS online_users
     `).get();
 
     const daily = await db.prepare(`
@@ -145,8 +153,15 @@ module.exports = function createAdminRouter(ctx) {
     `).all();
 
     const recentUsers = await db.prepare(`
-      SELECT id, name, email, phone, created_at FROM users
+      SELECT id, name, email, phone, created_at, avatar_thumb, last_seen_at FROM users
       ORDER BY created_at DESC LIMIT 6
+    `).all();
+
+    const liveUsers = await db.prepare(`
+      SELECT id, name, email, avatar_thumb, last_seen_at FROM users
+      WHERE last_seen_at IS NOT NULL
+        AND last_seen_at > now() - (${ONLINE_MINUTES} || ' minutes')::interval
+      ORDER BY last_seen_at DESC LIMIT 20
     `).all();
 
     const recentTx = await db.prepare(`
@@ -156,7 +171,8 @@ module.exports = function createAdminRouter(ctx) {
       ORDER BY t.created_at DESC LIMIT 8
     `).all();
 
-    ok(res, { totals, daily, categories, topUsers, recentUsers, recentTx });
+    ok(res, { totals, daily, categories, topUsers, recentUsers, liveUsers, recentTx,
+      online_minutes: ONLINE_MINUTES });
   }));
 
   // ============================================================
@@ -164,31 +180,40 @@ module.exports = function createAdminRouter(ctx) {
   // ============================================================
   router.get('/users', adminAuth, handle(async (req, res) => {
     const q = String(req.query.q || '').trim();
-    const limit = Math.min(Math.max(int(req.query.limit, 25), 1), 200);
+    const limit = Math.min(Math.max(int(req.query.limit, 25), 1), 1000);
     const offset = Math.max(int(req.query.offset, 0), 0);
+    const sortKey = {
+      id: 'u.id', name: 'lower(u.name)', balance: 'balance', tx: 'tx_count',
+      created: 'u.created_at', seen: 'u.last_seen_at',
+    }[String(req.query.sort || 'created')] || 'u.id';
+    const dir = String(req.query.order || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+
     const rows = await db.prepare(`
-      SELECT u.id, u.name, u.email, u.phone, u.auth_provider, u.is_admin,
-             u.pin_attempts, u.locked_until, u.created_at,
+      SELECT u.id, u.name, u.email, u.phone, u.auth_provider, u.is_admin, u.is_locked,
+             u.pin_attempts, u.locked_until, u.created_at, u.last_seen_at, u.avatar_thumb,
              (SELECT COUNT(*) FROM cards c WHERE c.user_id = u.id) AS card_count,
              (SELECT COALESCE(SUM(c.balance), 0) FROM cards c WHERE c.user_id = u.id) AS balance,
              (SELECT COUNT(*) FROM transactions t WHERE t.user_id = u.id) AS tx_count,
              (SELECT MAX(t.created_at) FROM transactions t WHERE t.user_id = u.id) AS last_tx
       FROM users u
       WHERE (?::text = '' OR lower(u.name) LIKE ? OR lower(u.email) LIKE ? OR u.phone LIKE ?)
-      ORDER BY u.id DESC LIMIT ? OFFSET ?
+      ORDER BY ${sortKey} ${dir}, u.id DESC LIMIT ? OFFSET ?
     `).all(q, like(q), like(q), like(q), limit, offset);
     const total = (await db.prepare(`
       SELECT COUNT(*) AS n FROM users u
       WHERE (?::text = '' OR lower(u.name) LIKE ? OR lower(u.email) LIKE ? OR u.phone LIKE ?)
     `).get(q, like(q), like(q), like(q))).n;
-    ok(res, { rows, total, limit, offset });
+    ok(res, {
+      rows: rows.map((r) => ({ ...r, online: isOnline(r.last_seen_at) })),
+      total, limit, offset, online_minutes: ONLINE_MINUTES,
+    });
   }));
 
   router.get('/users/:id', adminAuth, handle(async (req, res) => {
     const id = int(req.params.id);
     const user = await db.prepare(`
-      SELECT id, name, email, phone, auth_provider, is_admin, pin_attempts,
-             locked_until, created_at, avatar_thumb
+      SELECT id, name, email, phone, auth_provider, is_admin, is_locked, pin_attempts,
+             locked_until, created_at, avatar_thumb, last_seen_at
       FROM users WHERE id = ?`).get(id);
     if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
 
@@ -203,7 +228,10 @@ module.exports = function createAdminRouter(ctx) {
         ORDER BY created_at DESC LIMIT 30`).all(id),
       db.prepare('SELECT * FROM referrals WHERE user_id = ?').all(id),
     ]);
-    ok(res, { user, cards, transactions, loans, goals, budgets, notifications, referrals });
+    ok(res, {
+      user: { ...user, online: isOnline(user.last_seen_at) },
+      cards, transactions, loans, goals, budgets, notifications, referrals,
+    });
   }));
 
   router.patch('/users/:id', adminAuth, handle(async (req, res) => {
@@ -232,6 +260,13 @@ module.exports = function createAdminRouter(ctx) {
       }
       push('is_admin', isAdmin ? 1 : 0);
     }
+    if (req.body.is_locked !== undefined) {
+      const locked = req.body.is_locked === true || req.body.is_locked === 1 || req.body.is_locked === '1';
+      if (id === req.admin.id && locked) {
+        throw new ApiError('មិនអាចផ្អាកគណនីខ្លួនឯង', 400, 'SELF_LOCK');
+      }
+      push('is_locked', locked ? 1 : 0);
+    }
     if (req.body.unlock === true) {
       push('pin_attempts', 0);
       push('locked_until', null);
@@ -258,6 +293,50 @@ module.exports = function createAdminRouter(ctx) {
     ok(res, { id, message: 'បានកំណត់ PIN ថ្មី' });
   }));
 
+  // Reset — លុបទិន្នថយទាំងអស់របស់អ្នកប្រើ ហើយបង្កើតឡើងវិញ (កាត + គោលបំណង)
+  router.post('/users/:id/reset', adminAuth, handle(async (req, res) => {
+    const id = int(req.params.id);
+    const user = await db.prepare('SELECT id, name, email FROM users WHERE id = ?').get(id);
+    if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
+
+    const keepAvatar = req.body.keep_avatar === true;
+    const reseed = req.body.reseed !== false;
+    const newPin = req.body.pin ? String(req.body.pin) : null;
+    if (newPin && !/^\d{4}$/.test(newPin)) {
+      throw new ApiError('PIN ត្រូវមាន 4 ខ្ទង់', 400, 'BAD_PIN');
+    }
+
+    const WIPE = [
+      'external_transfers', 'transactions', 'cards', 'loans', 'goals', 'budgets',
+      'reminders', 'recurring', 'splits', 'virtual_cards', 'cashback',
+      'notifications', 'streaks', 'achievements', 'referrals', 'fcm_tokens',
+      'idempotency_keys',
+    ];
+    const removed = {};
+    await db.transaction(async () => {
+      for (const t of WIPE) {
+        const r = await db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+        removed[t] = r.changes;
+      }
+      if (!keepAvatar) {
+        await db.prepare('UPDATE users SET avatar = NULL, avatar_thumb = NULL WHERE id = ?').run(id);
+      }
+      await db.prepare(
+        'UPDATE users SET pin_attempts = 0, locked_until = NULL WHERE id = ?'
+      ).run(id);
+      if (newPin) {
+        const hash = await bcrypt.hash(newPin, SALT);
+        await db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(hash, id);
+      }
+    });
+
+    if (reseed && seedNewUser) await seedNewUser(id);
+
+    await audit(req, 'reset_user', 'users', id,
+      `wipe:${WIPE.filter((t) => removed[t]).join(',')}`);
+    ok(res, { id, removed, reseeded: reseed, message: 'បានកំណត់ឡើងវិញ' });
+  }));
+
   router.delete('/users/:id', adminAuth, handle(async (req, res) => {
     const id = int(req.params.id);
     if (id === req.admin.id) throw new ApiError('មិនអាចលុបគណនីខ្លួនឯង', 400, 'SELF_DELETE');
@@ -276,7 +355,7 @@ module.exports = function createAdminRouter(ctx) {
     const limit = Math.min(Math.max(int(req.query.limit, 50), 1), 300);
     const offset = Math.max(int(req.query.offset, 0), 0);
     const rows = await db.prepare(`
-      SELECT c.*, u.name AS user_name, u.email AS user_email
+      SELECT c.*, u.name AS user_name, u.email AS user_email, u.avatar_thumb
       FROM cards c JOIN users u ON u.id = c.user_id
       WHERE (?::text = '' OR lower(u.name) LIKE ? OR lower(u.email) LIKE ? OR lower(c.name) LIKE ?)
       ORDER BY c.id DESC LIMIT ? OFFSET ?
@@ -358,7 +437,7 @@ module.exports = function createAdminRouter(ctx) {
     const offset = Math.max(int(req.query.offset, 0), 0);
 
     const rows = await db.prepare(`
-      SELECT t.*, u.name AS user_name, u.email AS user_email, c.name AS card_name
+      SELECT t.*, u.name AS user_name, u.email AS user_email, u.avatar_thumb, c.name AS card_name
       FROM transactions t
       JOIN users u ON u.id = t.user_id
       LEFT JOIN cards c ON c.id = t.card_id
@@ -445,7 +524,7 @@ module.exports = function createAdminRouter(ctx) {
   // ============================================================
   router.get('/loans', adminAuth, handle(async (req, res) => {
     const rows = await db.prepare(`
-      SELECT l.*, u.name AS user_name, u.email AS user_email, u.phone AS user_phone
+      SELECT l.*, u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.avatar_thumb
       FROM loans l JOIN users u ON u.id = l.user_id
       ORDER BY l.created_at DESC LIMIT 200
     `).all();
@@ -513,7 +592,7 @@ module.exports = function createAdminRouter(ctx) {
   router.get('/notifications', adminAuth, handle(async (req, res) => {
     const limit = Math.min(Math.max(int(req.query.limit, 50), 1), 200);
     const rows = await db.prepare(`
-      SELECT n.*, u.name AS user_name, u.email AS user_email
+      SELECT n.*, u.name AS user_name, u.email AS user_email, u.avatar_thumb
       FROM notifications n JOIN users u ON u.id = n.user_id
       ORDER BY n.created_at DESC LIMIT ?
     `).all(limit);
@@ -569,7 +648,7 @@ module.exports = function createAdminRouter(ctx) {
     const label = READONLY_TABLES[name] || EDITABLE_TABLES[name];
     if (!label) throw new ApiError('តារាងមិនទាន់ស្គាល់', 404, 'UNKNOWN_TABLE');
     const limit = Math.min(Math.max(int(req.query.limit, 50), 1), 200);
-    const rows = await db.prepare(`SELECT t.*, u.name AS user_name, u.email AS user_email
+    const rows = await db.prepare(`SELECT t.*, u.name AS user_name, u.email AS user_email, u.avatar_thumb
       FROM ${name} t LEFT JOIN users u ON u.id = t.user_id
       ORDER BY t.id DESC LIMIT ?`).all(limit);
     ok(res, { name, label, editable: !!EDITABLE_TABLES[name], columns: EDITABLE_COLUMNS[name] || [], rows });
