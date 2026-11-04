@@ -54,6 +54,7 @@ async function startServer() {
       DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${PG_PORT}/aura_test`,
       JWT_SECRET: 'local-test-secret',
       QR_SECRET: 'local-test-secret:qr',
+      ADMIN_EMAILS: 'sokha@test.com',
       PORT: String(PORT),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -358,6 +359,79 @@ async function main() {
   assert(login.status === 200 && login.json.data.token, 'login after restart', login.json);
   const txsAfter = await api('GET', '/transactions', undefined, login.json.data.token);
   assert(txsAfter.json.data.length === 4, 'data survived restart', txsAfter.json.data.length);
+
+  // ============ ADMIN DASHBOARD ============
+  const adminNoToken = await api('GET', '/admin/api/stats');
+  assert(adminNoToken.status === 401, 'admin API rejects anonymous', adminNoToken.json);
+
+  const adminBadPin = await api('POST', '/admin/api/login', { email: 'sokha@test.com', pin: '0000' });
+  assert(adminBadPin.status === 401, 'admin login rejects wrong PIN', adminBadPin.json);
+
+  const notAdmin = await api('POST', '/admin/api/login', { email: 'dara@test.com', pin: '4321' });
+  assert(notAdmin.status === 403, 'non-admin cannot log into admin', notAdmin.json);
+
+  const adminLogin = await api('POST', '/admin/api/login', { email: 'sokha@test.com', pin: '5678' });
+  assert(adminLogin.status === 200 && adminLogin.json.data.token, 'admin login (auto-promote via ADMIN_EMAILS)', adminLogin.json);
+  const adminToken = adminLogin.json.data.token;
+
+  const stats = await api('GET', '/admin/api/stats', undefined, adminToken);
+  assert(stats.status === 200 && stats.json.data.totals.users >= 2, 'admin stats', stats.json.data?.totals);
+  assert(Array.isArray(stats.json.data.daily) && Array.isArray(stats.json.data.categories), 'admin stats charts data');
+
+  const adminUsers = await api('GET', '/admin/api/users?q=sokha', undefined, adminToken);
+  assert(adminUsers.status === 200 && adminUsers.json.data.rows.length === 1, 'admin user search', adminUsers.json);
+  const adminUserId = adminUsers.json.data.rows[0].id;
+
+  const adminUserDetail = await api('GET', `/admin/api/users/${adminUserId}`, undefined, adminToken);
+  assert(adminUserDetail.status === 200 && adminUserDetail.json.data.cards.length === 3, 'admin user detail', Object.keys(adminUserDetail.json.data || {}));
+
+  const adminEdit = await api('PATCH', `/admin/api/users/${adminUserId}`, { name: 'Sokha Admin' }, adminToken);
+  assert(adminEdit.status === 200 && adminEdit.json.data.name === 'Sokha Admin', 'admin edits user', adminEdit.json);
+
+  const adminCards = await api('GET', '/admin/api/cards', undefined, adminToken);
+  assert(adminCards.status === 200 && adminCards.json.data.rows.length >= 3, 'admin cards list', adminCards.json.data?.rows?.length);
+  const ownCard = adminCards.json.data.rows.find((c) => c.user_id === adminUserId);
+  const adminCardId = ownCard.id;
+
+  const adminCardPatch = await api('PATCH', `/admin/api/cards/${adminCardId}`, { balance: 5000, frozen: true }, adminToken);
+  assert(adminCardPatch.status === 200 && adminCardPatch.json.data.balance === 5000 && adminCardPatch.json.data.frozen === 1,
+    'admin adjusts card balance/freezes', adminCardPatch.json);
+
+  const adminTx = await api('POST', '/admin/api/transactions', {
+    user_id: adminUserId, card_id: adminCardId, title: 'Admin credit', category: 'ផ្សេងៗ', amount: 25, is_expense: false,
+  }, adminToken);
+  assert(adminTx.status === 200 && adminTx.json.data.new_balance === 5025, 'admin creates transaction (credits card)', adminTx.json);
+
+  const adminTxList = await api('GET', '/admin/api/transactions?q=Admin credit', undefined, adminToken);
+  assert(adminTxList.status === 200 && adminTxList.json.data.total === 1, 'admin transaction search', adminTxList.json.data?.total);
+
+  const adminTxDel = await api('DELETE', `/admin/api/transactions/${adminTx.json.data.id}`, undefined, adminToken);
+  assert(adminTxDel.status === 200, 'admin deletes transaction');
+  const cardAfter = await api('GET', '/admin/api/cards', undefined, adminToken);
+  assert(Number(cardAfter.json.data.rows.find((c) => c.id === adminCardId).balance) === 5000, 'balance restored after delete');
+
+  const adminLoans = await api('GET', '/admin/api/loans', undefined, adminToken);
+  assert(adminLoans.status === 200 && Array.isArray(adminLoans.json.data.rows), 'admin loans list');
+
+  const adminNotify = await api('POST', '/admin/api/notify', {
+    user_id: adminUserId, title: 'សារពី admin', body: 'សូមពិនិត្យការប្រតិបត្តិការ',
+  }, adminToken);
+  assert(adminNotify.status === 200, 'admin sends notification', adminNotify.json);
+
+  const adminGoals = await api('GET', '/admin/api/tables/goals', undefined, adminToken);
+  assert(adminGoals.status === 200 && adminGoals.json.data.rows.length >= 3, 'admin generic table (goals)', adminGoals.json.data?.rows?.length);
+
+  const adminAudit = await api('GET', '/admin/api/audit', undefined, adminToken);
+  assert(adminAudit.status === 200 && adminAudit.json.data.rows.length > 0, 'admin audit log', adminAudit.json.data?.rows?.length);
+
+  const adminSetPin = await api('POST', `/admin/api/users/${adminUserId}/pin`, { pin: '4321' }, adminToken);
+  assert(adminSetPin.status === 200, 'admin resets user PIN', adminSetPin.json);
+  const relogin = await api('POST', '/auth/login', { email: 'sokha@test.com', pin: '4321' });
+  assert(relogin.status === 200, 'user logs in with admin-set PIN', relogin.json);
+
+  const adminDash = await fetch(BASE + '/admin/');
+  const dashHtml = await adminDash.text();
+  assert(adminDash.status === 200 && dashHtml.includes('ផ្ទាំងគ្រប់គ្រង'), 'admin dashboard page served', adminDash.status);
 
   console.log('\n🎉 ALL LOCAL TESTS PASSED');
 }

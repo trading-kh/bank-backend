@@ -100,6 +100,7 @@ async function initDb() {
 
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_thumb TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS cards (
       id SERIAL PRIMARY KEY,
@@ -299,12 +300,23 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS admin_audit_log (
+      id SERIAL PRIMARY KEY,
+      admin_email TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_id TEXT,
+      detail TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_tx_user_created ON transactions(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_tx_card ON transactions(card_id, is_expense);
     CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
     CREATE INDEX IF NOT EXISTS idx_users_name ON users(lower(name));
     CREATE INDEX IF NOT EXISTS idx_tx_user_cp ON transactions(user_id, counterparty_id);
     CREATE INDEX IF NOT EXISTS idx_ext_user_created ON external_transfers(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_audit_created ON admin_audit_log(created_at DESC);
   `);
 
   // SQLite មាន ROUND(x, 2) សម្រាប់ REAL — Postgres មានតែ round(numeric, int)
@@ -1691,6 +1703,16 @@ app.post('/fcm/unregister', auth, async (req, res) => {
 app.get('/currency/rates', auth, async (req, res) => {
   ok(res, { USD_KHR: 4100, KHR_USD: 1 / 4100 });
 });
+
+// ============================================================
+// ADMIN DASHBOARD (គ្រប់គ្រងទិន្នថយទាំងអស់)
+// ============================================================
+const path = require('path');
+const createAdminRouter = require('./admin');
+app.use('/admin/api', createAdminRouter({
+  db, ok, fail, ApiError, handle, SECRET, sendPushNotification,
+}));
+app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
 
 // ============================================================
 // ERROR HANDLERS & START

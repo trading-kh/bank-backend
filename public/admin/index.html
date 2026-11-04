@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aura Bank · ផ្ទាំងគ្រប់គ្រង</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%233B9AD9'/><text x='50' y='70' font-size='58' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'>A</text></svg>">
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login" class="login-wrap">
+  <form class="login-card" id="loginForm">
+    <div class="login-logo">A</div>
+    <h1>ផ្ទាំងគ្រប់គ្រង</h1>
+    <p class="muted">Aura Bank Admin · ចូលដោយគណនីដែលមានសិទ្ធិ admin</p>
+    <label>អ៊ីមែល
+      <input type="email" id="loginEmail" autocomplete="username" placeholder="admin@example.com" required>
+    </label>
+    <label>PIN 4 ខ្ទង់
+      <input type="password" id="loginPin" inputmode="numeric" maxlength="4" placeholder="••••" required>
+    </label>
+    <div class="login-error" id="loginError"></div>
+    <button class="btn primary block" type="submit" id="loginBtn">ចូលប្រើ</button>
+    <a class="login-back" href="/">← ត្រឡប់ទៅ app</a>
+  </form>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark">A</span><span>Aura Bank<br><small>ផ្ទាំងគ្រប់គ្រង</small></span></div>
+    <nav id="nav">
+      <button class="nav-item active" data-page="dashboard"><span class="ico">▤</span>ផ្ទាំងដើម</button>
+      <button class="nav-item" data-page="users"><span class="ico">👤</span>អ្នកប្រើ</button>
+      <button class="nav-item" data-page="cards"><span class="ico">💳</span>កាត</button>
+      <button class="nav-item" data-page="transactions"><span class="ico">💸</span>ប្រតិបត្តិការ</button>
+      <button class="nav-item" data-page="loans"><span class="ico">📋</span>កម្ចី</button>
+      <button class="nav-item" data-page="notifications"><span class="ico">🔔</span>សេចក្តីសារ</button>
+      <button class="nav-item" data-page="data"><span class="ico">🗂</span>ទិន្នថយផ្សេង</button>
+      <button class="nav-item" data-page="audit"><span class="ico">🕓</span>កំណត់ត្រា</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="admin-box">
+        <div class="admin-name" id="adminName">—</div>
+        <div class="admin-mail muted" id="adminMail"></div>
+        <button class="btn ghost sm block" id="logoutBtn">ចាកចេញ</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <h2 id="pageTitle">ផ្ទាំងដើម</h2>
+      <div class="topbar-right">
+        <input type="search" id="search" placeholder="ស្វែងរក…" class="hidden">
+        <button class="btn primary sm" id="actionBtn" hidden>+ បង្កើត</button>
+        <button class="btn ghost sm only-mobile" id="menuBtn">☰</button>
+      </div>
+    </header>
+    <section id="content" class="content"></section>
+  </main>
+</div>
+
+<!-- ============ MODAL ============ -->
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="modalTitle">—</h3>
+      <button class="icon-btn" id="modalClose">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="modalCancel">បោះបង់</button>
+      <button class="btn primary" id="modalSave">រក្សាទុក</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
