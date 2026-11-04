@@ -7,6 +7,7 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const createLoanAdminRouter = require('./loan-admin');
 
 module.exports = function createAdminRouter(ctx) {
   const { db, ok, fail, ApiError, handle, SECRET, sendPushNotification, seedNewUser } = ctx;
@@ -576,73 +577,10 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // ============================================================
-  // LOANS
+  // LOANS (ພດຘີຜຂຕຍຕ຃ຣຸ຅ຘີຓາທ່— pipeline, ຏມາປາງາຜິບຣຕຸ, ບຸຘຜຼາຸ, ບານຏມບຓຎຽຸ)
   // ============================================================
-  router.get('/loans', adminAuth, handle(async (req, res) => {
-    const rows = await db.prepare(`
-      SELECT l.*, u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.avatar_thumb
-      FROM loans l JOIN users u ON u.id = l.user_id
-      ORDER BY l.created_at DESC LIMIT 200
-    `).all();
-    ok(res, { rows });
-  }));
-
-  router.patch('/loans/:id', adminAuth, handle(async (req, res) => {
-    const id = int(req.params.id);
-    const loan = await db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
-    if (!loan) throw new ApiError('រកមិនឃើញកម្ចី', 404, 'NOT_FOUND');
-
-    const fields = [];
-    const values = [];
-    const push = (col, val) => { fields.push(`${col} = ?`); values.push(val); };
-    if (req.body.active !== undefined) push('active', req.body.active ? 1 : 0);
-    if (req.body.principal !== undefined) {
-      const p = num(req.body.principal);
-      if (p === null || p <= 0) throw new ApiError('ចំនួនប្រាក់ត្រូវតែ > 0', 400, 'BAD_AMOUNT');
-      push('principal', money(p));
-    }
-    if (req.body.months !== undefined) {
-      const m = int(req.body.months);
-      if (m < 1 || m > 120) throw new ApiError('រយៈខែត្រូវតែ 1–120', 400, 'BAD_MONTHS');
-      push('months', m);
-    }
-    if (req.body.annual_rate !== undefined) {
-      const r = num(req.body.annual_rate);
-      if (r === null || r < 0 || r > 100) throw new ApiError('កាន្លោះត្រូវតែ 0–100', 400, 'BAD_RATE');
-      push('annual_rate', r);
-    }
-    if (!fields.length) throw new ApiError('គ្មានអ្វីត្រូវកែប្ដូរ', 400, 'NOTHING_TO_UPDATE');
-
-    values.push(id);
-    await db.prepare(`UPDATE loans SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-    await bumpVersion(loan.user_id);
-    await audit(req, 'update_loan', 'loans', id, fields.map((f) => f.split(' = ')[0]).join(','));
-    ok(res, await db.prepare('SELECT * FROM loans WHERE id = ?').get(id));
-  }));
-
-  router.post('/loans/:id/repay', adminAuth, handle(async (req, res) => {
-    const id = int(req.params.id);
-    const amount = money(num(req.body.amount) || 0);
-    if (!(amount > 0)) throw new ApiError('ចំនួនលុយត្រូវតែ > 0', 400, 'BAD_AMOUNT');
-    const loan = await db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
-    if (!loan) throw new ApiError('រកមិនឃើញកម្ចី', 404, 'NOT_FOUND');
-
-    const paid = money(Number(loan.paid) + amount);
-    const active = paid >= Number(loan.principal) ? 0 : loan.active;
-    await db.prepare('UPDATE loans SET paid = ?, active = ? WHERE id = ?').run(paid, active, id);
-    await bumpVersion(loan.user_id);
-    await audit(req, 'repay_loan', 'loans', id, `$${amount}`);
-    ok(res, await db.prepare('SELECT * FROM loans WHERE id = ?').get(id));
-  }));
-
-  router.delete('/loans/:id', adminAuth, handle(async (req, res) => {
-    const id = int(req.params.id);
-    const loan = await db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
-    if (!loan) throw new ApiError('រកមិនឃើញកម្ចី', 404, 'NOT_FOUND');
-    await db.prepare('DELETE FROM loans WHERE id = ?').run(id);
-    await bumpVersion(loan.user_id);
-    await audit(req, 'delete_loan', 'loans', id);
-    ok(res, { id, message: 'បានលុបកម្ចី' });
+  router.use(createLoanAdminRouter({
+    db, ok, ApiError, handle, adminAuth, audit, bumpVersion, sendPushNotification,
   }));
 
   // ============================================================

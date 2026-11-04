@@ -226,7 +226,8 @@ function drawLine(canvas, points, opts = {}) {
    ============================================================ */
 const TITLES = {
   dashboard: 'ផ្ទាំងដើម', users: 'អ្នកប្រើ', cards: 'កាត',
-  transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', notifications: 'សេចក្តីសារ',
+  transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
+  collections: 'ប្រមូល', reports: 'របាយការណ៍', notifications: 'សេចក្តីសារ',
   data: 'ទិន្នថយផ្សេង', audit: 'កំណត់ត្រាក្របរបុប',
 };
 
@@ -796,78 +797,621 @@ async function createTransaction() {
   $('#t_user').onchange = fillCards;
 }
 
+/* ============================================================
+   LOAN PIPELINE — កម្មវិធីកម្ចីមីក្រុយ
+   ============================================================ */
+const LOAN_STATUS = {
+  submitted: { label: 'បានដាក់ស្នើ', cls: 'info' },
+  under_review: { label: 'កំពុងវាយតម្លៃ', cls: 'warn' },
+  approved: { label: 'បានអនុមត្ត', cls: 'ok' },
+  rejected: { label: 'បានបដិសេធ', cls: 'bad' },
+  disbursed: { label: 'បានបញ្ចូល', cls: 'info' },
+  active: { label: 'កំពុងបង់', cls: 'ok' },
+  closed: { label: 'បានបិទ', cls: '' },
+};
+const METHOD_LABEL = { flat: 'Flat', annuity: 'Annuity', reducing: 'Declining' };
+// ប្រាក់/ខែដែលរក្សាទុកគឺវីនុបទទី ១ — សម្រាប់ Flat/Declining ប្រាក់ថយថយជាតិតាមវីនុបទ
+const payNote = (m) => m === 'annuity' ? 'វីនុបទស្មើគ្នា'
+  : m === 'flat' ? 'វីនុបទទី ១ · កាន្លោះថេត'
+    : 'វីនុបទទី ១ · ប្រាក់ថយថយ';
+const statusPill = (s) => {
+  const m = LOAN_STATUS[s] || { label: s || '—', cls: '' };
+  return `<span class="pill ${m.cls}">${esc(m.label)}</span>`;
+};
+const scorePill = (r) => {
+  if (r.score === null || r.score === undefined) return '<span class="muted">—</span>';
+  const cls = r.score >= 80 ? 'ok' : r.score >= 65 ? 'info' : r.score >= 50 ? 'warn' : 'bad';
+  return `<span class="pill ${cls}">${r.score} · ${esc(r.score_band || '')}</span>`;
+};
+
+let loanFilter = 'all';
+
 async function renderLoans() {
-  const d = await api('/loans');
+  const q = search ? `&q=${encodeURIComponent(search)}` : '';
+  const d = await api(`/loans?status=${loanFilter}${q}`);
+  const rows = d.rows || [];
+  const c = d.by_status || {};
+  const active = (c.disbursed || 0) + (c.active || 0);
+  const pending = (c.submitted || 0) + (c.under_review || 0);
+  const overdue = rows.filter((r) => Number(r.overdue_count) > 0).length;
+  const outstanding = rows
+    .filter((r) => ['disbursed', 'active'].includes(r.status))
+    .reduce((s, r) => s + Number(r.outstanding || 0), 0);
+
+  const tabs = [['all', 'ទាំងអស់', rows.length]]
+    .concat(Object.keys(LOAN_STATUS).map((k) => [k, LOAN_STATUS[k].label, c[k] || 0]));
+
   $('#content').innerHTML = `
     <div class="card">
-      <div class="card-head"><h3>កម្ចី ${d.rows.length} សំបុត្រ</h3></div>
+      <div class="tabs">
+        ${tabs.map(([k, l, n]) => `<button class="tab ${loanFilter === k ? 'active' : ''}" data-lstatus="${k}">${esc(l)} (${n})</button>`).join('')}
+      </div>
+    </div>
+    <div class="grid k4">
+      <div class="card kpi"><div class="kpi-label">សាកលកម្មរង់ចាំ</div><div class="kpi-value">${pending}</div><div class="kpi-sub">រង់ចាំវាយតម្លៃ/អនុមត្ត</div></div>
+      <div class="card kpi ok"><div class="kpi-label">កម្ចីកំពុងបង់</div><div class="kpi-value">${active}</div><div class="kpi-sub">បានបញ្ចូល ឬ កំពុងបង់</div></div>
+      <div class="card kpi warn"><div class="kpi-label">នៅសល់ត្រូវបង់</div><div class="kpi-value">${money0(outstanding)}</div><div class="kpi-sub">${overdue} កម្ចីមានវីនុបទផុតកំណត់</div></div>
+      <div class="card kpi"><div class="kpi-label">បានបដិសេធ</div><div class="kpi-value">${c.rejected || 0}</div><div class="kpi-sub">សាកលកម្មស្រាប់</div></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>បញ្ជីកម្ចី (${rows.length})</h3>
+        <div class="row-actions">
+          <button class="btn ghost sm" data-loan-intake="1">ទទួលកម្ចីដោយ CO</button>
+          <span class="muted">ចុច "ពិនិត្យ" ដើម្បីមើលតារាងសងប្រាក់តាមខែ</span>
+        </div></div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
     { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<div>
       <div>${esc(r.user_name)}</div><div class="muted" style="font-size:11.5px">${esc(r.user_phone || '')}</div></div></div>` },
     { label: 'ចំនួន', num: true, render: (r) => money(r.principal) },
-    { label: 'បានបង់', num: true, render: (r) => money(r.paid) },
-    { label: 'នៅសល់', num: true, render: (r) => money(Number(r.principal) - Number(r.paid)) },
-    { label: 'ខែ', num: true, render: (r) => r.months },
-    { label: 'កាន្លោះ', num: true, render: (r) => r.annual_rate + '%' },
-    { label: 'ទីតាំង', render: (r) => `<span class="muted" style="font-size:11.5px">${[r.province, r.district, r.commune, r.village].filter(Boolean).join(' / ') || '—'}</span>` },
-    { label: 'ស្ថានភាព', render: (r) => r.active ? '<span class="pill ok">កំពុង</span>' : '<span class="pill bad">បានបញ្ចប់</span>' },
+    { label: 'ប្រាក់/ខែ', num: true, render: (r) => `<span title="${esc(payNote(r.interest_method))}">${money(r.monthly_payment)}</span>` },
+    { label: 'វិធី', render: (r) => `<span class="muted">${esc(METHOD_LABEL[r.interest_method] || r.interest_method || '—')}</span>` },
+    { label: 'ខែ/កាន្លោះ', num: true, render: (r) => `${r.months} ខែ · ${r.annual_rate}%` },
+    { label: 'វាយតម្លៃ', render: (r) => scorePill(r) },
+    { label: 'វីនុបទ', num: true, render: (r) => `${r.paid_count || 0}/${r.schedule_count || r.months}` },
+    { label: 'ស្ថានភាព', render: (r) => statusPill(r.status) },
     {
       label: 'សកម្ម', render: (r) => `<div class="row-actions">
-        <button class="btn ghost sm" data-loan-edit="${r.id}">កែ</button>
-        <button class="btn ghost sm" data-loan-pay="${r.id}">បង់</button>
-        <button class="btn danger sm" data-loan-del="${r.id}">លុប</button></div>`
+        <button class="btn ghost sm" data-loan-view="${r.id}">ពិនិត្យ</button>
+        ${['submitted', 'under_review'].includes(r.status) ? `<button class="btn primary sm" data-loan-approve="${r.id}">អនុមត្ត</button>
+        <button class="btn ghost sm" data-loan-score="${r.id}">វាយតម្លៃ</button>
+        <button class="btn danger sm" data-loan-reject="${r.id}">បដិសេធ</button>` : ''}
+        ${r.status === 'approved' ? `<button class="btn primary sm" data-loan-disburse="${r.id}">បញ្ចូល</button>` : ''}
+        ${['disbursed', 'active'].includes(r.status) ? `<button class="btn ghost sm" data-loan-pay="${r.id}">បង់</button>` : ''}
+      </div>`
     },
-  ], d.rows, { empty: 'រកមិនឃើញកម្ចី' })}
+  ], rows, { empty: 'រកមិនឃើញកម្ចី' })}
     </div>`;
-  $$('[data-loan-edit]').forEach((b) => b.onclick = () => {
-    const loan = d.rows.find((l) => String(l.id) === b.dataset.loanEdit);
+
+  $$('[data-lstatus]').forEach((b) => b.onclick = () => { loanFilter = b.dataset.lstatus; render(); });
+  $$('[data-loan-view]').forEach((b) => b.onclick = () => showLoan(b.dataset.loanView));
+  $$('[data-loan-score]').forEach((b) => b.onclick = () => scoreLoan(b.dataset.loanScore));
+  $$('[data-loan-approve]').forEach((b) => b.onclick = () => approveLoan(b.dataset.loanApprove));
+  $$('[data-loan-reject]').forEach((b) => b.onclick = () => rejectLoan(b.dataset.loanReject));
+  $$('[data-loan-disburse]').forEach((b) => b.onclick = () => disburseLoan(b.dataset.loanDisburse));
+  $$('[data-loan-pay]').forEach((b) => b.onclick = () => repayLoan(b.dataset.loanPay));
+  $$('[data-loan-intake]').forEach((b) => b.onclick = () => intakeLoan());
+}
+
+/* ---------- ទទួលកម្ចីដោយ Credit Officer ---------- */
+async function intakeLoan() {
+  const kyc = await api('/kyc');
+  const candidates = (kyc.rows || []).filter((k) => ['submitted', 'verified'].includes(k.status));
+  if (!candidates.length) {
+    toast('មិនមានអ្នកប្រើដែលដាក់ KYC រួចហើយ', 'err');
+    return;
+  }
+  const provinces = ['ភ្នំពេញ', 'បន្ទវីតេង្យ', 'កំពត', 'ស្វីត្គីមួ', 'កែវន', 'ព្រះសីហមប', 'ស្តែក', 'បន្ទវិញ', 'រាជធានីភ្នំពេញ'];
+  openModal({
+    title: 'ទទួលកម្ចីដោយ Credit Officer (CO)',
+    body: `<label class="field"><span>អ្នកប្រើ</span>
+        <select id="i_user">
+          ${candidates.map((k) => `<option value="${k.user_id}">${esc(k.user_name)} · ${esc(k.email)}</option>`).join('')}
+        </select></label>
+      <label class="field"><span>ឈ្មោះ Credit Officer</span><input id="i_co" placeholder="ឧ. ព្រះសារណៈ ស៊ិន"></label>
+      <label class="field"><span>លេខទូរសែព្យ CO</span><input id="i_cophone"></label>
+      <label class="field"><span>សង្កាត់</span><input id="i_branch" placeholder="ឧ. សង្កាត់កណ្តាល"></label>
+      <label class="field"><span>ចំនួនកម្ចី</span><input id="i_principal" type="number" min="1" max="50000" value="2000"></label>
+      <label class="field"><span>រយៈខែ</span><input id="i_months" type="number" min="1" max="60" value="12"></label>
+      <label class="field"><span>កាន្លោះ (%/ឆ្នាំ)</span><input id="i_rate" type="number" step="0.01" value="18"></label>
+      <label class="field"><span>វិធីគណនា</span>
+        <select id="i_method">
+          <option value="annuity">Annuity — ស្មើគ្នា</option>
+          <option value="flat">Flat — កាន្លោះថេត</option>
+          <option value="reducing">Declining — កាន្លោះថយថយ</option>
+        </select></label>
+      <label class="field"><span>ខេត្ត</span>
+        <select id="i_province">${provinces.map((p) => `<option>${p}</option>`).join('')}</select></label>
+      <label class="field"><span>ស្រុក</span><input id="i_district"></label>
+      <label class="field"><span>ឃុំ</span><input id="i_commune"></label>
+      <label class="field"><span>ភូមិ</span><input id="i_village"></label>
+      <label class="field"><span>គោលកម្ចី</span><input id="i_purpose"></label>`,
+    wide: true,
+    saveLabel: 'បង្កើតសាកលកម្ម',
+    onSave: async () => {
+      const res = await api('/loans/intake', {
+        method: 'POST',
+        body: {
+          user_id: Number($('#i_user').value),
+          co_name: $('#i_co').value.trim(),
+          co_phone: $('#i_cophone').value.trim(),
+          co_branch: $('#i_branch').value.trim(),
+          principal: Number($('#i_principal').value),
+          months: Number($('#i_months').value),
+          annual_rate: Number($('#i_rate').value),
+          interest_method: $('#i_method').value,
+          province: $('#i_province').value,
+          district: $('#i_district').value.trim(),
+          commune: $('#i_commune').value.trim(),
+          village: $('#i_village').value.trim(),
+          purpose: $('#i_purpose').value.trim(),
+        },
+      });
+      toast(`បានបង្កើតសាកលកម្ចី #${res.id}`, 'ok');
+      render();
+    },
+  });
+}
+
+/* ---------- ព័ត៌មានលម្អិត + តារាងសងប្រាក់ ---------- */
+async function showLoan(id) {
+  const d = await api(`/loans/${id}`);
+  const l = d.loan;
+  const sched = d.schedule || [];
+  const scoreParts = (d.score_detail || []).map((p) => `
+    <div class="bar-row"><span>${esc(p.label)}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${Math.round((p.points / p.max) * 100)}%"></span></span>
+      <span class="bar-val">${p.points}/${p.max}</span></div>`).join('');
+
+  const body = `
+    <div class="detail-grid">
+      <div class="detail-item"><div class="k">អ្នកប្រើ</div><div class="v">${esc(l.user_name)}</div></div>
+      <div class="detail-item"><div class="k">ស្ថានភាព</div><div class="v">${statusPill(l.status)}</div></div>
+      <div class="detail-item"><div class="k">ចំនួនប្រាក់</div><div class="v">${money(l.principal)}</div></div>
+      <div class="detail-item"><div class="k">ប្រាក់ប្រចាំខែ</div><div class="v">${money(l.monthly_payment)} <span class="muted" style="font-size:11px">${esc(payNote(l.interest_method))}</span></div></div>
+      <div class="detail-item"><div class="k">រយៈខែ / កាន្លោះ</div><div class="v">${l.months} ខែ · ${l.annual_rate}%</div></div>
+      <div class="detail-item"><div class="k">វិធីគណនា</div><div class="v">${esc(METHOD_LABEL[l.interest_method] || '—')}</div></div>
+      <div class="detail-item"><div class="k">ប្រាក់ដាក់សរុប</div><div class="v">${money(l.total_interest)}</div></div>
+      <div class="detail-item"><div class="k">ត្រូវបង់សរុប</div><div class="v">${money(l.total_payable)}</div></div>
+      <div class="detail-item"><div class="k">នៅសល់</div><div class="v">${money(l.outstanding)}</div></div>
+      <div class="detail-item"><div class="k">បានបង់</div><div class="v">${l.paid || 0}/${l.months} វីនុបទ</div></div>
+      <div class="detail-item"><div class="k">ថ្លៃសេវកម្ម</div><div class="v">${money(l.fee_amount)} (${l.fee_percent || 0}%)</div></div>
+      <div class="detail-item"><div class="k">វាយតម្លៃ</div><div class="v">${scorePill(l)}</div></div>
+      <div class="detail-item"><div class="k">CBC</div><div class="v">${esc(l.cbc_status || '—')}</div></div>
+      <div class="detail-item"><div class="k">កាលបរិច្ឆេទបង់ដំបូង</div><div class="v">${dateOnly(l.first_due_date)}</div></div>
+      <div class="detail-item"><div class="k">ទីតាំង</div><div class="v">${esc([l.province, l.district, l.commune, l.village].filter(Boolean).join(' / ') || '—')}</div></div>
+      <div class="detail-item"><div class="k">ប្រភាព</div><div class="v">${l.channel === 'co' ? `Credit Officer — ${esc(l.co_name || '')} ${esc(l.co_branch || '')}` : 'Online'}</div></div>
+      <div class="detail-item"><div class="k">បង់ស្វត្តកម្ម</div><div class="v">${l.auto_debit ? '<span class="pill ok">បានបើក</span>' : '<span class="pill warn">បិទ</span>'}</div></div>
+    </div>
+    ${['disbursed', 'active'].includes(l.status) ? `<div class="row-actions" style="margin:8px 0">
+        <button class="btn ghost sm" data-loan-autodebit="${l.id}" data-on="${l.auto_debit ? '1' : '0'}">${l.auto_debit ? 'បិទបង់ស្វត្តកម្ម' : 'បើកបង់ស្វត្តកម្ម'}</button>
+        <button class="btn ghost sm" data-loan-runautodebit="1">ដំណើរការបង់ស្វត្តកម្ម</button>
+      </div>` : ''}
+    ${l.reject_reason ? `<div class="detail-item"><div class="k">មូលហេតុបដិសេធ</div><div class="v">${esc(l.reject_reason)}</div></div>` : ''}
+    ${scoreParts ? `<div><h4 style="margin:6px 0">ការវាយតម្លៃឥណទិសជាតិ</h4><div class="bars">${scoreParts}</div></div>` : ''}
+    ${d.kyc ? `<div><h4 style="margin:6px 0">KYC / CRM</h4>
+      <div class="detail-grid">
+        <div class="detail-item"><div class="k">ឈ្មោះ</div><div class="v">${esc(d.kyc.full_name)}</div></div>
+        <div class="detail-item"><div class="k">អត្តសញ្ញាណ</div><div class="v">${esc(d.kyc.national_id)}</div></div>
+        <div class="detail-item"><div class="k">លេខទូរសែព្យ</div><div class="v">${esc(d.kyc.phone)}</div></div>
+        <div class="detail-item"><div class="k">មុខរដ្ឋាន</div><div class="v">${esc(d.kyc.occupation)}</div></div>
+        <div class="detail-item"><div class="k">អាជីវណ៍</div><div class="v">${esc(d.kyc.business_name || '—')} (${d.kyc.business_years || 0} ឆ្នាំ)</div></div>
+        <div class="detail-item"><div class="k">ប្រាក់ចូល/ចំណាយ</div><div class="v">${money(d.kyc.monthly_income)} / ${money(d.kyc.monthly_expense)}</div></div>
+        <div class="detail-item"><div class="k">គណនីបញ្ចូល</div><div class="v">${esc(d.kyc.bank_name || '—')} ${esc(d.kyc.bank_account || '')} ${l.account_verified ? '✓ បានផ្ទៀងផ្ទាត់' : '✗ មិនទាន់ផ្ទៀងផ្ទាត់'}</div></div>
+        <div class="detail-item"><div class="k">KYC ស្ថានភាព</div><div class="v">${esc(d.kyc.status)}</div></div>
+      </div></div>` : '<div class="muted">អ្នកប្រើនេះមិនទាន់បានបំពេញ KYC</div>'}
+    <div><h4 style="margin:6px 0">តារាងសងប្រាក់តាមខែ (${sched.length})</h4>
+      ${tableHtml([
+    { label: 'វីនុបទ', num: true, render: (r) => r.installment_no },
+    { label: 'កាលបរិច្ឆេទ', render: (r) => dateOnly(r.due_date) },
+    { label: 'ប្រាក់ដាក់', num: true, render: (r) => money(r.principal_part) },
+    { label: 'កាន្លោះ', num: true, render: (r) => money(r.interest_part) },
+    { label: 'សរុប', num: true, render: (r) => money(r.total_due) },
+    { label: 'បានបង់', num: true, render: (r) => money(r.paid_amount) },
+    {
+      label: 'ស្ថានភាព', render: (r) => r.status === 'paid'
+        ? '<span class="pill ok">បានបង់</span>'
+        : r.status === 'overdue' ? `<span class="pill bad">ផុត ${r.days_late} ថ្ងៃ</span>`
+          : r.status === 'partial' ? '<span class="pill warn">បានបង់ខ្លះ</span>'
+            : '<span class="pill info">រង់ចាំ</span>'
+    },
+  ], sched, { empty: 'មិនទាន់មានតារាងសងប្រាក់ (អនុមត្តជាមុន)' })}
+    </div>
+    ${(d.payments || []).length ? `<div><h4 style="margin:6px 0">កំណត់ចំនាំការបង់</h4>
+      ${tableHtml([
+    { label: 'ថ្ងៃ', render: (r) => dt(r.created_at) },
+    { label: 'វីនុបទ', num: true, render: (r) => r.installment_no },
+    { label: 'ប្រាក់', num: true, render: (r) => money(r.amount) },
+    { label: 'បរិយាកា', render: (r) => esc(r.method) },
+  ], d.payments, {})}
+    </div>` : ''}`;
+
+  openModal({
+    title: `កម្ចី #${l.id} — ${esc(l.user_name)}`,
+    body,
+    wide: true,
+    onSave: null,
+  });
+
+  $$('[data-loan-autodebit]').forEach((b) => b.onclick = async () => {
+    const on = b.dataset.on === '1';
+    await api(`/loans/${l.id}/auto-debit`, { method: 'PATCH', body: { enabled: !on } });
+    toast(on ? 'បានបិទបង់ស្វត្តកម្ម' : 'បានបើកបង់ស្វត្តកម្ម', 'ok');
+    showLoan(id);
+  });
+  $$('[data-loan-runautodebit]').forEach((b) => b.onclick = async () => {
+    const out = await api('/loans/run-auto-debit', { method: 'POST', body: {} });
+    const results = out.results || [];
+    const paid = results.filter((r) => r.status === 'paid');
+    const label = {
+      no_due: 'មិនមានវីនុបទដល់កាល',
+      not_due: 'វីនុបទទីមិនទាន់ដល់កាល',
+      no_card: 'គ្មានកាត',
+      insufficient_funds: 'បន្រាក់ក្នុងកាតមិនគ្រប់គ្នា',
+      bad_amount: 'ចំនួនមិនត្រឹមត្រាន',
+    };
+    const skipped = results.filter((r) => r.status !== 'paid')
+      .map((r) => `#${r.loan_id} ${label[r.status] || r.status}`);
+    if (paid.length) {
+      toast(`បង់ស្វត្តកម្ម ${paid.length} វីនុបទ`, 'ok');
+    } else {
+      toast(results.length ? skipped.join(' · ') : 'មិនមានវីនុបទដល់កាល', 'ok');
+    }
+    showLoan(id);
+  });
+}
+
+/* ---------- វាយតម្លៃ ---------- */
+async function scoreLoan(id) {
+  const d = await api(`/loans/${id}/score`, { method: 'POST' });
+  const parts = (d.parts || []).map((p) => `
+    <div class="bar-row"><span>${esc(p.label)}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${Math.round((p.points / p.max) * 100)}%"></span></span>
+      <span class="bar-val">${p.points}/${p.max}</span></div>`).join('');
+  openModal({
+    title: 'លទ្ធផលវាយតម្លៃឥណទិសជាតិ',
+    body: `<div class="detail-grid">
+        <div class="detail-item"><div class="k">ពិន្ទ្រ</div><div class="v">${d.score} / 100</div></div>
+        <div class="detail-item"><div class="k">ក្រុម</div><div class="v">${esc(d.band)}</div></div>
+        <div class="detail-item"><div class="k">CBC</div><div class="v">${esc(d.cbc?.status || '—')}</div></div>
+        <div class="detail-item"><div class="k">សម្គាល់</div><div class="v">${esc(d.recommendation)}</div></div>
+      </div>
+      <div class="bars">${parts}</div>`,
+    wide: true,
+  });
+}
+
+/* ---------- អនុមត្ត → បង្កើតតារាងសងប្រាក់ ---------- */
+async function approveLoan(id) {
+  const d = await api(`/loans/${id}`);
+  const l = d.loan;
+  const firstDue = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  openModal({
+    title: `អនុមត្តកម្ចី #${l.id} — បង្កើតតារាងសងប្រាក់តាមខែ`,
+    body: `<p class="muted" style="margin:0">អ្នកប្រើ: <b>${esc(l.user_name)}</b> · ចំនួន ${money(l.principal)}</p>
+      <label class="field"><span>រយៈខែ</span><input id="a_months" type="number" min="1" max="60" value="${l.months}"></label>
+      <label class="field"><span>កាន្លោះ (%/ឆ្នាំ)</span><input id="a_rate" type="number" step="0.01" value="${l.annual_rate}"></label>
+      <label class="field"><span>វិធីគណនា</span>
+        <select id="a_method">
+          <option value="annuity" ${l.interest_method === 'annuity' ? 'selected' : ''}>Annuity — វីនុបទស្មើគ្នា</option>
+          <option value="flat" ${l.interest_method === 'flat' ? 'selected' : ''}>Flat — កាន្លោះថ្តា</option>
+          <option value="reducing" ${l.interest_method === 'reducing' ? 'selected' : ''}>Declining — កាន្លោះថ្នាក់</option>
+        </select></label>
+      <label class="field"><span>ថ្លៃសេវកម្ម (%)</span><input id="a_fee" type="number" step="0.1" min="0" max="20" value="${l.fee_percent || 0}"></label>
+      <label class="field"><span>កាលបរិច្ឆេទបង់ដំបូង</span><input id="a_due" type="date" value="${firstDue}"></label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:10px">
+        <input type="checkbox" id="a_verified" style="width:18px;height:18px"><span>គណនីបញ្ចូលបានផ្ទៀងផ្ទាត់</span></label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:10px">
+        <input type="checkbox" id="a_autodebit" style="width:18px;height:18px"><span>បង់ស្វត្តកម្ម (ដកចំនួនពេលវីនុបទដល់កាល)</span></label>
+      <p class="muted" style="margin:0">ថ្លៃសេវកម្មត្រូវបានកាត់ចេញពីប្រាក់ដែលបញ្ចូលទៅអ្នកប្រើ។</p>`,
+    wide: true,
+    saveLabel: 'អនុមត្ត និងបង្កើតតារាង',
+    onSave: async () => {
+      const res = await api(`/loans/${l.id}/approve`, {
+        method: 'POST',
+        body: {
+          months: Number($('#a_months').value),
+          annual_rate: Number($('#a_rate').value),
+          interest_method: $('#a_method').value,
+          fee_percent: Number($('#a_fee').value),
+          first_due_date: $('#a_due').value,
+          account_verified: $('#a_verified').checked,
+          auto_debit: $('#a_autodebit').checked,
+        },
+      });
+      toast(`បានអនុមត្ត · បង្កើតតារាង ${res.schedule_count} វីនុបទ · ${money(res.monthly_payment)}/ខែ`, 'ok');
+      render();
+    },
+  });
+}
+
+/* ---------- បដិសេធ ---------- */
+function rejectLoan(id) {
+  openModal({
+    title: `បដិសេធកម្ចី #${id}`,
+    body: `<label class="field"><span>មូលហេតុបដិសេធ</span>
+      <textarea id="r_reason" rows="3" placeholder="ឧ. ប្រាក់ចូលមិនគ្រប់គ្រាន់, ប្រវត្តិឥណទិសជាតិមិនស្រប…"></textarea></label>`,
+    saveLabel: 'បដិសេធ',
+    onSave: async () => {
+      const reason = $('#r_reason').value.trim();
+      if (!reason) throw new Error('សូមសម្គាល់មូលហេតុបដិសេធ');
+      await api(`/loans/${id}/reject`, { method: 'POST', body: { reason } });
+      toast('បានបដិសេធកម្ចី', 'ok');
+      render();
+    },
+  });
+}
+
+/* ---------- បញ្ចូលស្រាប់ ---------- */
+function disburseLoan(id) {
+  confirmAction('បញ្ចូលស្រាប់កម្ចី',
+    'ប្រាក់នឹងបញ្ចូលទៅកាតដំបូងរបស់អ្នកប្រើ (បន្ថយដោយថ្លៃសេវកម្ម)។',
+    async () => {
+      const d = await api(`/loans/${id}/disburse`, { method: 'POST', body: { account_verified: true } });
+      toast(`បានបញ្ចូល ${money(d.net_disbursed)} (ថ្លៃ ${money(d.fee)})`, 'ok');
+      render();
+    });
+}
+
+/* ---------- បង់កម្ចី (សាច់ការ) ---------- */
+async function repayLoan(id) {
+  const d = await api(`/loans/${id}`);
+  const l = d.loan;
+  const next = (d.schedule || []).find((r) => r.status !== 'paid');
+  openModal({
+    title: `បង់កម្ចី #${l.id}`,
+    body: `${next ? `<p class="muted" style="margin:0">វីនុបទទី ${next.installment_no} · ត្រូវបង់ ${money(Number(next.total_due) - Number(next.paid_amount))}</p>` : ''}
+      <label class="field"><span>ចំនួនបង់</span>
+        <input id="p_amount" type="number" step="0.01" value="${next ? (Number(next.total_due) - Number(next.paid_amount)).toFixed(2) : ''}"></label>`,
+    saveLabel: 'កត់ត្រាការបង់',
+    onSave: async () => {
+      const amount = Number($('#p_amount').value);
+      if (!(amount > 0)) throw new Error('ចំនួនបង់ត្រូវតែ > 0');
+      await api(`/loans/${id}/repay`, { method: 'POST', body: { amount } });
+      toast('បានកត់ត្រាការបង់ប្រាក់', 'ok');
+      render();
+    },
+  });
+}
+
+/* ============================================================
+   KYC
+   ============================================================ */
+async function renderKyc() {
+  const d = await api('/kyc');
+  const rows = d.rows || [];
+  $('#content').innerHTML = `
+    <div class="card">
+      <div class="card-head"><h3>KYC / CRM (${rows.length})</h3>
+        <span class="muted">ព័ត៌មានអត្តសញ្ញាណសម្រាប់កម្ចីមីក្រុយ</span></div>
+      ${tableHtml([
+    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
+    { label: 'អត្តសញ្ញាណ', render: (r) => `<span class="muted">${esc(r.national_id || '—')}</span>` },
+    { label: 'អាជីវណ៍', render: (r) => `<div>${esc(r.business_name || '—')}<div class="muted" style="font-size:11.5px">${esc(r.business_type || '')} · ${r.business_years || 0} ឆ្នាំ</div></div>` },
+    { label: 'ប្រាក់ចូល/ចំណាយ', num: true, render: (r) => `${money0(r.monthly_income)} / ${money0(r.monthly_expense)}` },
+    { label: 'គណនី', render: (r) => `<span class="muted">${esc(r.bank_name || '—')} ${esc(r.bank_account || '')}</span>` },
+    { label: 'ស្ថានភាព', render: (r) => `<span class="pill ${r.status === 'verified' ? 'ok' : r.status === 'rejected' ? 'bad' : 'warn'}">${esc(r.status)}</span>` },
+    {
+      label: 'សកម្ម', render: (r) => `<div class="row-actions">
+        <button class="btn ghost sm" data-kyc-view="${r.user_id}">មើល</button>
+        <button class="btn primary sm" data-kyc-verify="${r.user_id}">ផ្ទៀងផ្ទាត់</button>
+        <button class="btn danger sm" data-kyc-reject="${r.user_id}">បដិសេធ</button></div>`
+    },
+  ], rows, { empty: 'មិនទាន់មានទិន្ននថ្យី KYC' })}
+    </div>`;
+  $$('[data-kyc-view]').forEach((b) => b.onclick = () => {
+    const r = rows.find((x) => String(x.user_id) === b.dataset.kycView);
     openModal({
-      title: `កែសម្រួលកម្ចី #${loan.id}`,
-      body: `
-        <label class="field"><span>ចំនួនប្រាក់</span><input id="l_principal" type="number" step="0.01" value="${loan.principal}"></label>
-        <label class="field"><span>រយៈខែ</span><input id="l_months" type="number" min="1" max="120" value="${loan.months}"></label>
-        <label class="field"><span>កាន្លោះ (%/ឆ្នាំ)</span><input id="l_rate" type="number" step="0.01" value="${loan.annual_rate}"></label>
-        <label class="field" style="flex-direction:row;align-items:center;gap:10px">
-          <input type="checkbox" id="l_active" ${loan.active ? 'checked' : ''} style="width:18px;height:18px"><span>កំពុងបញ្ចាស់</span></label>`,
+      title: `KYC — ${esc(r.user_name)}`,
+      body: `<div class="detail-grid">
+          <div class="detail-item"><div class="k">ឈ្មោះ</div><div class="v">${esc(r.full_name)}</div></div>
+          <div class="detail-item"><div class="k">អត្តសញ្ញាណ</div><div class="v">${esc(r.national_id || '—')}</div></div>
+          <div class="detail-item"><div class="k">ថ្ងៃខែឆ្នាំកើត</div><div class="v">${esc(r.dob || '—')}</div></div>
+          <div class="detail-item"><div class="k">លេខទូរសែព្យ</div><div class="v">${esc(r.phone || '—')}</div></div>
+          <div class="detail-item"><div class="k">អាសយដ្ឋាន</div><div class="v">${esc(r.address || '—')}</div></div>
+          <div class="detail-item"><div class="k">មុខរដ្ឋាន</div><div class="v">${esc(r.occupation || '—')}</div></div>
+          <div class="detail-item"><div class="k">អាជីវណ៍</div><div class="v">${esc(r.business_name || '—')} · ${r.business_years || 0} ឆ្នាំ</div></div>
+          <div class="detail-item"><div class="k">ប្រាក់ចូល/ចំណាយ/ប្រាក់ខ្ពុក</div><div class="v">${money(r.monthly_income)} / ${money(r.monthly_expense)} / ${money(r.existing_debt)}</div></div>
+          <div class="detail-item"><div class="k">គណនីបញ្ចូល</div><div class="v">${esc(r.bank_name || '—')} ${esc(r.bank_account || '')}</div></div>
+        </div>`,
+      wide: true,
+    });
+  });
+  $$('[data-kyc-verify]').forEach((b) => b.onclick = () => {
+    api(`/kyc/${b.dataset.kycVerify}`, { method: 'PATCH', body: { status: 'verified' } })
+      .then(() => { toast('បានផ្ទៀងផ្ទាត់ KYC', 'ok'); render(); })
+      .catch((e) => toast(e.message, 'err'));
+  });
+  $$('[data-kyc-reject]').forEach((b) => b.onclick = () => {
+    api(`/kyc/${b.dataset.kycReject}`, { method: 'PATCH', body: { status: 'rejected', notes: 'ព័ត៌មានមិនពេញលេញ' } })
+      .then(() => { toast('បានបដិសេធ KYC', 'ok'); render(); })
+      .catch((e) => toast(e.message, 'err'));
+  });
+}
+
+/* ============================================================
+   COLLECTIONS — ការប្រមូល
+   ============================================================ */
+let collectionFilter = 'all';
+
+async function renderCollections() {
+  const d = await api(`/collections?status=${collectionFilter}`);
+  const rows = d.rows || [];
+  const c = d.by_status || {};
+  const teams = (await api('/collection-teams')).rows || [];
+  const totalDue = rows.reduce((s, r) => s + Number(r.amount_due || 0), 0);
+  $('#content').innerHTML = `
+    <div class="grid k4">
+      <div class="card kpi"><div class="kpi-label">កាតក្រង់សម្រាប់ប្រមូល</div><div class="kpi-value">${(c.open || 0) + (c.in_progress || 0)}</div><div class="kpi-sub">បើក ${c.open || 0} · កំពុងធ្វើ ${c.in_progress || 0}</div></div>
+      <div class="card kpi warn"><div class="kpi-label">ប្រាក់ត្រូវប្រមូល</div><div class="kpi-value">${money0(totalDue)}</div><div class="kpi-sub">សរុបកាតក្រង់ទាំងអស់</div></div>
+      <div class="card kpi ok"><div class="kpi-label">បានដំណោះស្រាយ</div><div class="kpi-value">${c.resolved || 0}</div><div class="kpi-sub">ការប្រមូលបានបញ្ចប់</div></div>
+      <div class="card kpi"><div class="kpi-label">លុបចេញ</div><div class="kpi-value">${c.written_off || 0}</div><div class="kpi-sub">សារព្យាបាត់បង់</div></div>
+    </div>
+    <div class="card">
+      <div class="tabs">
+        ${[['all', 'ទាំងអស់'], ['open', 'បើក'], ['in_progress', 'កំពុងធ្វើ'], ['resolved', 'បានដំណោះ'], ['written_off', 'លុបចេញ']]
+      .map(([k, l]) => `<button class="tab ${collectionFilter === k ? 'active' : ''}" data-cstatus="${k}">${esc(l)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>កាតក្រង់សម្រាប់ប្រមូល (${rows.length})</h3>
+        <button class="btn ghost sm" data-team-new="1">បង្កើតក្រុមប្រមូល</button></div>
+      ${tableHtml([
+    { label: 'ID', render: (r) => `#${r.id}` },
+    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<div>
+      <div>${esc(r.user_name)}</div><div class="muted" style="font-size:11.5px">${esc(r.user_phone || '')}</div></div></div>` },
+    { label: 'កម្ចី', render: (r) => `<span class="muted">#${r.loan_id} · ${money0(r.principal)}</span>` },
+    { label: 'ផុតថ្ងៃ', num: true, render: (r) => `<span style="color:${Number(r.days_arrears) >= 90 ? '#ff9b9b' : Number(r.days_arrears) >= 30 ? '#ffc48f' : '#8fa6c4'}">${r.days_arrears}</span>` },
+    { label: 'ត្រូវបង់', num: true, render: (r) => money(r.amount_due) },
+    { label: 'អាទិភាព', render: (r) => `<span class="pill ${r.priority === 'high' ? 'bad' : r.priority === 'normal' ? 'warn' : 'info'}">${esc(r.priority)}</span>` },
+    { label: 'ក្រុម', render: (r) => `<span class="muted">${esc(r.team_name || 'មិនទាន់ចែក')}</span>` },
+    { label: 'ប្រគល់', render: (r) => `<span class="muted">${esc(r.officer || 'មិនទាន់ចាត់')}</span>` },
+    { label: 'ស្ថានភាព', render: (r) => `<span class="pill ${r.status === 'resolved' ? 'ok' : r.status === 'in_progress' ? 'info' : 'warn'}">${esc(r.status)}</span>` },
+    {
+      label: 'សកម្ម', render: (r) => `<div class="row-actions">
+        <button class="btn ghost sm" data-col-edit="${r.id}">ធ្វើការ</button></div>`
+    },
+  ], rows, { empty: 'គ្មានកាតក្រង់ប្រមូល' })}
+    </div>`;
+  $$('[data-cstatus]').forEach((b) => b.onclick = () => { collectionFilter = b.dataset.cstatus; render(); });
+  $$('[data-team-new]').forEach((b) => b.onclick = () => {
+    openModal({
+      title: 'បង្កើតក្រុមប្រមូល',
+      body: `<label class="field"><span>ឈ្មោះក្រុម</span><input id="t_name" placeholder="ឧ. សង្កាត់កណ្តាល"></label>
+        <label class="field"><span>សាខា</span><input id="t_branch" placeholder="ឧ. សាខាកណ្តាល"></label>
+        <label class="field"><span>ប្រគល់ការប្រមូល</span><input id="t_officer" placeholder="ឈ្មោះប្រគល់"></label>
+        <label class="field"><span>លេខទូរស័ព្ទ</span><input id="t_phone" placeholder="+855..."></label>`,
+      saveLabel: 'បង្កើត',
       onSave: async () => {
-        await api(`/loans/${loan.id}`, {
-          method: 'PATCH',
+        await api('/collection-teams', {
+          method: 'POST',
           body: {
-            principal: Number($('#l_principal').value),
-            months: Number($('#l_months').value),
-            annual_rate: Number($('#l_rate').value),
-            active: $('#l_active').checked,
+            name: $('#t_name').value.trim(),
+            branch: $('#t_branch').value.trim(),
+            officer: $('#t_officer').value.trim(),
+            phone: $('#t_phone').value.trim(),
           },
         });
-        toast('បានរក្សាទុកកម្ចី', 'ok');
+        toast('បានបង្កើតក្រុមប្រមូល', 'ok');
         render();
       },
     });
   });
-  $$('[data-loan-pay]').forEach((b) => b.onclick = () => {
-    const loan = d.rows.find((l) => String(l.id) === b.dataset.loanPay);
+  $$('[data-col-edit]').forEach((b) => b.onclick = () => {
+    const r = rows.find((x) => String(x.id) === b.dataset.colEdit);
     openModal({
-      title: `បង់កម្ចី #${loan.id}`,
-      body: `<label class="field"><span>ចំនួនប្រាក់</span><input id="l_amount" type="number" step="0.01" value="${(Number(loan.principal) - Number(loan.paid)).toFixed(2)}"></label>
-        <p class="muted" style="margin:0">បានបង់ ${money(loan.paid)} នៃ ${money(loan.principal)}</p>`,
+      title: `កាតក្រង់ប្រមូល #${r.id} — ${esc(r.user_name)}`,
+      body: `<p class="muted" style="margin:0">ផុត ${r.days_arrears} ថ្ងៃ · ត្រូវបង់ ${money(r.amount_due)} · ដកប្រសប់ ${r.contact_count || 0} ដង</p>
+        <label class="field"><span>ក្រុមប្រមូល</span>
+          <select id="c_team">
+            <option value="">— មិនទាន់ចែក —</option>
+            ${teams.map((t) => `<option value="${t.id}" ${String(r.team_id) === String(t.id) ? 'selected' : ''}>${esc(t.name)}${t.branch ? ' · ' + esc(t.branch) : ''}</option>`).join('')}
+          </select></label>
+        <label class="field"><span>ប្រគល់ការប្រមូល</span><input id="c_officer" value="${esc(r.officer || '')}" placeholder="ឈ្មោះប្រគល់"></label>
+        <label class="field"><span>ស្ថានភាព</span>
+          <select id="c_status">
+            <option value="open" ${r.status === 'open' ? 'selected' : ''}>បើក</option>
+            <option value="in_progress" ${r.status === 'in_progress' ? 'selected' : ''}>កំពុងធ្វើ</option>
+            <option value="resolved" ${r.status === 'resolved' ? 'selected' : ''}>បានដំណោះ</option>
+            <option value="written_off" ${r.status === 'written_off' ? 'selected' : ''}>លុបចេញ</option>
+          </select></label>
+        <label class="field"><span>អាទិភាព</span>
+          <select id="c_priority">
+            <option value="low" ${r.priority === 'low' ? 'selected' : ''}>ទាប</option>
+            <option value="normal" ${r.priority === 'normal' ? 'selected' : ''}>ធម្មតា</option>
+            <option value="high" ${r.priority === 'high' ? 'selected' : ''}>ខ្ពស់</option>
+          </select></label>
+        <label class="field"><span>កំណត់ចំនាំ</span><textarea id="c_notes" rows="3">${esc(r.notes || '')}</textarea></label>`,
+      saveLabel: 'រក្សាទុក',
       onSave: async () => {
-        await api(`/loans/${loan.id}/repay`, {
-          method: 'POST', body: { amount: Number($('#l_amount').value) },
+        await api(`/collections/${r.id}`, {
+          method: 'PATCH',
+          body: {
+            officer: $('#c_officer').value.trim(),
+            status: $('#c_status').value,
+            priority: $('#c_priority').value,
+            team_id: $('#c_team').value ? Number($('#c_team').value) : null,
+            notes: $('#c_notes').value.trim(),
+            last_action: 'បានទាក់ទងអ្នកប្រើ',
+          },
         });
-        toast('បានកត់ត្រាការបង់ប្រាក់', 'ok');
+        toast('បានរក្សាទុកកាតក្រង់', 'ok');
         render();
       },
-    });
-  });
-  $$('[data-loan-del]').forEach((b) => b.onclick = () => {
-    confirmDelete('លុបកម្ចីនេះ?', async () => {
-      await api(`/loans/${b.dataset.loanDel}`, { method: 'DELETE' });
-      toast('បានលុបកម្ចី', 'ok');
-      render();
     });
   });
 }
+
+/* ============================================================
+   REPORTS — របាយការណ៍
+   ============================================================ */
+async function renderReports() {
+  const [pf, inc, npl] = await Promise.all([
+    api('/reports/portfolio'), api('/reports/income'), api('/reports/npl'),
+  ]);
+  const t = pf.totals;
+  const b = npl.buckets;
+  const buckets = [
+    ['1–30 ថ្ងៃ', b.d1_30, b.amt_d1_30, 'warn'],
+    ['31–60 ថ្ងៃ', b.d31_60, b.amt_d31_60, 'warn'],
+    ['61–89 ថ្ងៃ', b.d61_89, b.amt_d61_89, 'bad'],
+    ['90+ ថ្ងៃ (NPL)', b.d90_plus, b.amt_d90_plus, 'bad'],
+  ];
+  const statusRows = pf.by_status || [];
+  const maxStatus = Math.max(...statusRows.map((s) => Number(s.n)), 1);
+
+  $('#content').innerHTML = `
+    <div class="grid k4">
+      <div class="card kpi"><div class="kpi-label">ប្រាក់ដែលបានបញ្ចូល</div><div class="kpi-value">${money0(t.disbursed)}</div><div class="kpi-sub">${t.n_loans} កម្ចី</div></div>
+      <div class="card kpi warn"><div class="kpi-label">នៅសល់ត្រូវបង់</div><div class="kpi-value">${money0(t.outstanding)}</div><div class="kpi-sub">ប្រាក់ដាក់សរុប ${money0(t.interest_booked)}</div></div>
+      <div class="card kpi ok"><div class="kpi-label">ប្រាក់ដាក់បានបញ្ចូល</div><div class="kpi-value">${money0(inc.interest.interest)}</div><div class="kpi-sub">ថ្លៃសេវកម្ម ${money0(inc.fees.fees)}</div></div>
+      <div class="card kpi ${npl.npl.n > 0 ? 'warn' : 'ok'}"><div class="kpi-label">NPL</div><div class="kpi-value">${npl.npl.n}</div><div class="kpi-sub">${money0(npl.npl.outstanding)} នៅសល់</div></div>
+    </div>
+
+    <div class="grid k2">
+      <div class="card">
+        <div class="card-head"><h3>ស្ទារាយកម្ចីតាមស្ថានភាព</h3></div>
+        <div class="bars">
+          ${statusRows.map((s) => `
+            <div class="bar-row"><span>${esc((LOAN_STATUS[s.status] || {}).label || s.status)}</span>
+              <span class="bar-track"><span class="bar-fill" style="width:${Math.round((Number(s.n) / maxStatus) * 100)}%"></span></span>
+              <span class="bar-val">${s.n} · ${money0(s.outstanding)}</span></div>`).join('') || '<div class="empty">មិនទាន់មានទិន្នន័យ</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>វីនុបទផុតកំណត់ (Aging)</h3></div>
+        <div class="bars">
+          ${buckets.map(([l, n, amt, cls]) => `
+            <div class="bar-row"><span>${esc(l)}</span>
+              <span class="bar-track"><span class="bar-fill" style="width:${Math.min(100, Number(n) * 12)}%;background:${cls === 'bad' ? '#ef4444' : '#f59e0b'}"></span></span>
+              <span class="bar-val">${n} · ${money0(amt)}</span></div>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="grid k2">
+      <div class="card">
+        <div class="card-head"><h3>ប្រាក់ចូលពីកម្ចី (12 ខែ)</h3></div>
+        <div class="chart-box"><canvas id="loanIncomeChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>កម្ចី NPL</h3></div>
+        ${tableHtml([
+    { label: 'ID', render: (r) => `#${r.id}` },
+    { label: 'អ្នកប្រើ', render: (r) => esc(r.user_name) },
+    { label: 'ប្រាក់ដាក់', num: true, render: (r) => money(r.principal) },
+    { label: 'នៅសល់', num: true, render: (r) => money(r.outstanding) },
+    { label: 'ផុតថ្ងៃ', num: true, render: (r) => `<span style="color:#ff9b9b">${r.arrears_days}</span>` },
+  ], npl.loans, { empty: 'គ្មានកម្ចី NPL — ល្អណាស់' })}
+      </div>
+    </div>`;
+
+  const monthly = (inc.monthly || []).slice().reverse();
+  drawLine($('#loanIncomeChart'), monthly.map((m) => ({
+    label: m.month, value: Number(m.total),
+  })), { color: '#22c55e' });
+}
+
 
 async function renderNotifications() {
   const d = await api('/notifications?limit=100');
@@ -972,7 +1516,8 @@ async function renderAudit() {
    ============================================================ */
 const RENDERERS = {
   dashboard: renderDashboard, users: renderUsers, cards: renderCards,
-  transactions: renderTransactions, loans: renderLoans,
+  transactions: renderTransactions, loans: renderLoans, kyc: renderKyc,
+  collections: renderCollections, reports: renderReports,
   notifications: renderNotifications, data: renderData, audit: renderAudit,
 };
 
@@ -986,7 +1531,7 @@ function bindPager(total) {
 async function render() {
   $('#pageTitle').textContent = TITLES[page];
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
-  $('#search').classList.toggle('hidden', !['users', 'cards'].includes(page));
+  $('#search').classList.toggle('hidden', !['users', 'cards', 'loans'].includes(page));
   const action = $('#actionBtn');
   if (page === 'transactions') {
     action.hidden = false; action.textContent = '+ ប្រតិបត្តិការ';

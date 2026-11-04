@@ -16,7 +16,7 @@ let restarting = false;
 let stopping = false;
 
 function startServer() {
-  child = spawn(process.execPath, ['server.js'], {
+  const spawned = spawn(process.execPath, ['server.js'], {
     cwd: ROOT,
     env: {
       ...process.env,
@@ -24,11 +24,17 @@ function startServer() {
       JWT_SECRET: process.env.JWT_SECRET || 'dev-secret',
       QR_SECRET: process.env.QR_SECRET || 'dev-secret:qr',
       PORT: String(PORT),
+      // គណនី admin សម្រាប់ dev តែតែ (មិនប៉ះពាល់ production — Render ប្រើ env ផ្ទាល់ខ្លួន)
+      ADMIN_EMAIL: process.env.ADMIN_EMAIL || 'admin@local.dev',
+      ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || 'local-dev-admin',
     },
     stdio: 'inherit',
   });
+  child = spawned;
   child.on('exit', (code) => {
     if (!restarting && !stopping) console.log(`\n🛑 Server stopped (${code})`);
+    // បើ server crash ដោយសារកំហុស → child = null ឲ្យការកែកូដបន្ទាប់មកចាប់ផ្តើមវាងថ្មីបាន
+    if (child === spawned) child = null;
   });
 }
 
@@ -117,6 +123,8 @@ async function waitForPort(port, timeoutMs) {
     if (!filename) return;
     const f = String(filename).replace(/\\/g, '/');
     if (f.startsWith('node_modules') || f.startsWith('.git') || f.startsWith('scripts')) return;
+    // កូដសំណើរការ (dev.log, .dev.pid) មិនត្រូវបង្ហាញជាការកែកូដ
+    if (f.endsWith('.log') || f.endsWith('.pid') || f.startsWith('.')) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(restart, 120);
   });

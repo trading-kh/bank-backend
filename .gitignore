@@ -1,6 +1,7 @@
 node_modules/
 bank.db*
 *.log
+.dev.pid
 .env
 firebase-service-account.json
 serviceAccountKey.json

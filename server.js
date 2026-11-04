@@ -8,6 +8,8 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const cors = require('cors');
 const db = require('./db');
+const createLoanAppRouter = require('./loan-routes');
+const { initLoanSchema, syncArrears, runAutoDebit } = require('./loan-engine');
 
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
@@ -322,6 +324,9 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_ext_user_created ON external_transfers(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON admin_audit_log(created_at DESC);
   `);
+
+  // កម្មវិធីកម្ចីមីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល
+  await initLoanSchema(db);
 
   // SQLite មាន ROUND(x, 2) សម្រាប់ REAL — Postgres មានតែ round(numeric, int)
   await db.exec(`
@@ -1269,67 +1274,28 @@ app.post('/notifications/read-all', auth, async (req, res) => {
 });
 
 // ============================================================
-// LOANS
+// LOANS (កម្មវិធីកម្ចីមីក្រុយ — KYC → សាកលកម្ម → អនុមត្ត → តារាងសងប្រាក់)
 // ============================================================
-app.get('/loan', auth, async (req, res) => {
-  ok(res, await db.prepare(
-    'SELECT * FROM loans WHERE user_id = ? AND active = 1 ORDER BY id DESC LIMIT 1'
-  ).get(req.userId) || null);
-});
+app.use(createLoanAppRouter({
+  db, ok, ApiError, handle, auth, sendPushNotification, unlockAchievement,
+}));
 
-app.post('/loan', auth, async (req, res) => {
-  const principal = toMoney(req.body.principal);
-  const months = parseInt(req.body.months, 10);
-  const annual_rate = Number(req.body.annual_rate);
-  const addr = ['province', 'district', 'commune', 'village'].map((k) =>
-    typeof req.body[k] === 'string' ? req.body[k].trim() : '');
-  if (!(principal > 0) || principal > MAX_TX || !(months >= 1) || months > 120 ||
-      !Number.isFinite(annual_rate) || annual_rate < 0 || annual_rate > 100)
-    return fail(res, 'Invalid');
-  if (addr.some((s) => !s || s.length > 100))
-    return fail(res, 'សូមជ្រើសរើសទីតាំងខេត្ត ស្រុក ឃុំ ភូមិ', 400, 'BAD_ADDRESS');
-  const [province, district, commune, village] = addr;
-
-  const exists = await db.prepare('SELECT id FROM loans WHERE user_id = ? AND active = 1').get(req.userId);
-  if (exists) return fail(res, 'You already have an active loan');
-
-  const id = await db.transaction(async () => {
-    const info = await db.prepare(
-      'INSERT INTO loans (user_id, principal, months, annual_rate, province, district, commune, village) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(req.userId, principal, months, annual_rate, province, district, commune, village);
-    const firstCard = await db.prepare('SELECT id FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(req.userId);
-    if (firstCard) {
-      await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?').run(principal, firstCard.id);
-    }
-    return info.lastInsertRowid;
-  });
-  await unlockAchievement(req.userId, 'first_loan');
-  ok(res, { id });
-});
-
-app.post('/loan/pay', auth, async (req, res) => {
-  const loan = await db.prepare(
-    'SELECT * FROM loans WHERE user_id = ? AND active = 1 ORDER BY id DESC LIMIT 1'
-  ).get(req.userId);
-  if (!loan) return fail(res, 'No active loan');
-
-  const r = loan.annual_rate / 12 / 100;
-  const monthly = Math.round((r === 0 ? loan.principal / loan.months
-    : loan.principal * r / (1 - Math.pow(1 + r, -loan.months))) * 100) / 100;
-
-  const card = await db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(req.userId);
-  if (!card || card.balance < monthly) return fail(res, 'Insufficient balance', 400, 'INSUFFICIENT_FUNDS');
-
-  const newPaid = loan.paid + 1;
-  const active = newPaid >= loan.months ? 0 : 1;
-  await db.transaction(async () => {
-    await db.prepare('UPDATE cards SET balance = ROUND(balance - ?, 2) WHERE id = ?').run(monthly, card.id);
-    await db.prepare('UPDATE loans SET paid = ?, active = ? WHERE id = ?').run(newPaid, active, loan.id);
-  });
-
-  sendPushNotification(req.userId, 'បង់រំលោះកម្ចី', `បង់បាន $${monthly.toFixed(2)}`, { type: 'loan_paid' });
-  ok(res, { monthly, paid: newPaid, months: loan.months });
-});
+// ============================================================
+// LOAN SCHEDULER — បង់ស្វត្តកម្ម + តាមដានកង់បង់យឺតពេក
+// ============================================================
+async function runLoanJobs() {
+  try {
+    await syncArrears(db);
+    const out = await runAutoDebit(db, { sendPushNotification });
+    const paid = out.results.filter((r) => r.status === 'paid');
+    if (paid.length)
+      console.log(`💳 បង់ស្វត្តកម្មបាន ${paid.length} វីនុបទ`);
+  } catch (e) {
+    console.error('❌ Loan job failed:', e.message);
+  }
+}
+setInterval(runLoanJobs, 15 * 60 * 1000).unref();
+setTimeout(runLoanJobs, 10000).unref();
 
 // ============================================================
 // ANALYTICS
