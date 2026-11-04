@@ -1036,7 +1036,7 @@ $('#loginForm').onsubmit = async (e) => {
   try {
     const d = await api('/login', {
       method: 'POST',
-      body: { email: $('#loginEmail').value.trim(), pin: $('#loginPin').value.trim() },
+      body: { email: $('#loginEmail').value.trim(), password: $('#loginSecret').value },
     });
     token = d.token;
     admin = d.admin;

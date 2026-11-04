@@ -55,6 +55,8 @@ async function startServer() {
       JWT_SECRET: 'local-test-secret',
       QR_SECRET: 'local-test-secret:qr',
       ADMIN_EMAILS: 'sokha@test.com',
+      ADMIN_EMAIL: 'admin@admin.com',
+      ADMIN_PASSWORD: 'admin123',
       PORT: String(PORT),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -373,6 +375,26 @@ async function main() {
   const adminLogin = await api('POST', '/admin/api/login', { email: 'sokha@test.com', pin: '5678' });
   assert(adminLogin.status === 200 && adminLogin.json.data.token, 'admin login (auto-promote via ADMIN_EMAILS)', adminLogin.json);
   const adminToken = adminLogin.json.data.token;
+
+  // គណនី admin ប្រព័ន្ធ (email + password) — បង្កើតដោយ ADMIN_EMAIL/ADMIN_PASSWORD
+  const sysBadPw = await api('POST', '/admin/api/login', { email: 'admin@admin.com', password: 'wrong-pass' });
+  assert(sysBadPw.status === 401, 'admin login rejects wrong password', sysBadPw.json);
+
+  const sysLogin = await api('POST', '/admin/api/login', { email: 'admin@admin.com', password: 'admin123' });
+  assert(sysLogin.status === 200 && sysLogin.json.data.token, 'admin login with password', sysLogin.json);
+  const sysToken = sysLogin.json.data.token;
+
+  const sysStats = await api('GET', '/admin/api/stats', undefined, sysToken);
+  assert(sysStats.status === 200 && sysStats.json.data.totals.users >= 3,
+    'system admin can read stats', sysStats.json.data?.totals?.users);
+
+  const sysAppLogin = await api('POST', '/auth/login', { email: 'admin@admin.com', pin: '1234' });
+  assert(sysAppLogin.status === 403 && sysAppLogin.json.code === 'ADMIN_ACCOUNT',
+    'system admin cannot log into the mobile app', sysAppLogin.json);
+
+  const recips = await api('GET', '/recipients', undefined, login.json.data.token);
+  assert(recips.status === 200 && !recips.json.data.some((r) => r.email === 'admin@admin.com'),
+    'system admin is hidden from the recipient directory', recips.json.data?.map((r) => r.email));
 
   const stats = await api('GET', '/admin/api/stats', undefined, adminToken);
   assert(stats.status === 200 && stats.json.data.totals.users >= 2, 'admin stats', stats.json.data?.totals);

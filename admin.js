@@ -18,6 +18,10 @@ module.exports = function createAdminRouter(ctx) {
   const ONLINE_MINUTES = Math.max(parseInt(process.env.ADMIN_ONLINE_MINUTES, 10) || 5, 1);
   const isOnline = (lastSeen) => !!lastSeen &&
     (Date.now() - new Date(lastSeen).getTime()) < ONLINE_MINUTES * 60 * 1000;
+  // ការព្យាយាមចូល admin ច្រើនពេក → បិទខ្លាំងមួយរយៈពេល
+  const LOGIN_MAX_FAILS = 5;
+  const LOGIN_LOCK_MS = 10 * 60 * 1000;
+  const loginFails = new Map();
 
   // ---------- helpers ----------
   const num = (v) => {
@@ -58,15 +62,23 @@ module.exports = function createAdminRouter(ctx) {
     }
   }
 
-  // ចូល admin — ប្រើ អ៊ីមែល + PIN ធម្មតា ប៉ុន្តែមិនបញ្ចូល pin_attempts (admin មិនត្រូវត្រូវចាក់សោគណនីខ្លួនឯង)
+// ចូល admin — អាចប្រើពាក្យសម្ងាត់ (Password) ឬ PIN 4 ខ្ទង់ (គណនី Aura Bank ធម្មតា)
+  // ការព្យាយាមចូលបរាជ័យ/ចុលត្រូវរាប់ ដើម្បីការពារមិនឱ្យប្រយោគប្រយោគចូល
   router.post('/login', handle(async (req, res) => {
     const email = String(req.body.email || '').trim();
-    const pin = String(req.body.pin || '');
-    if (!email || !/^\d{4}$/.test(pin)) {
-      throw new ApiError('សូមបញ្ចូលអ៊ីមែល និង PIN 4 ខ្ទង់', 400, 'BAD_INPUT');
+    const secret = String(req.body.password ?? req.body.pin ?? '').trim();
+    if (!email || !secret) {
+      throw new ApiError('សូមបញ្ចូលអ៊ីមែល និងពាក្យសម្ងាត់', 400, 'BAD_INPUT');
     }
+    const key = `${email.toLowerCase()}|${req.ip || ''}`;
+    const fails = loginFails.get(key);
+    if (fails && fails.n >= LOGIN_MAX_FAILS && fails.until > Date.now()) {
+      throw new ApiError('ការព្យាយាមចូលច្រើនពេក សូមរង់ចាំខ្លាំងមុន', 429, 'TOO_MANY_ATTEMPTS');
+    }
+
     const u = await db.prepare(
-      'SELECT id, name, email, pin_hash, is_admin, locked_until FROM users WHERE lower(email) = lower(?)'
+      `SELECT id, name, email, pin_hash, password_hash, is_admin, locked_until
+       FROM users WHERE lower(email) = lower(?)`
     ).get(email);
     if (!u) throw new ApiError('រកមិនឃើញគណនី', 404, 'NOT_FOUND');
 
@@ -75,10 +87,20 @@ module.exports = function createAdminRouter(ctx) {
     }
 
     let valid = false;
-    try { valid = await bcrypt.compare(pin, u.pin_hash); } catch { valid = false; }
-    if (!valid) throw new ApiError('PIN មិនត្រឹមត្រូវ', 401, 'WRONG_PIN');
+    if (u.password_hash) {
+      try { valid = await bcrypt.compare(secret, u.password_hash); } catch { valid = false; }
+    }
+    if (!valid && /^\d{4}$/.test(secret)) {
+      try { valid = await bcrypt.compare(secret, u.pin_hash); } catch { valid = false; }
+    }
+    if (!valid) {
+      if (loginFails.size > 500) loginFails.clear();
+      loginFails.set(key, { n: (fails ? fails.n : 0) + 1, until: Date.now() + LOGIN_LOCK_MS });
+      throw new ApiError('ពាក្យសម្ងាត់មិនត្រឹមត្រូវ', 401, 'WRONG_PIN');
+    }
+    loginFails.delete(key);
 
-    // អនុញ្ញាតម្តងនេះ (ADMIN_EMAILS) → ផ្តល់សិទ្ធិ admin ភ្លាម
+    // អនុញ្ញាតមូលនេះ (ADMIN_EMAILS) → ផ្តល៾សិទ្ធិ admin ភ្លាម
     const allow = String(process.env.ADMIN_EMAILS || '')
       .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
     let isAdmin = !!u.is_admin;

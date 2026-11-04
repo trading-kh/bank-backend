@@ -17,12 +17,12 @@
   <form class="login-card" id="loginForm">
     <div class="login-logo">A</div>
     <h1>ផ្ទាំងគ្រប់គ្រង</h1>
-    <p class="muted">Aura Bank Admin · ចូលដោយគណនីដែលមានសិទ្ធិ admin</p>
+    <p class="muted">Aura Bank Admin · ចូលដោយ email + password ឬ PIN គណនី admin</p>
     <label>អ៊ីមែល
       <input type="email" id="loginEmail" autocomplete="username" placeholder="admin@example.com" required>
     </label>
-    <label>PIN 4 ខ្ទង់
-      <input type="password" id="loginPin" inputmode="numeric" maxlength="4" placeholder="••••" required>
+    <label>ពាក្យសម្ងាត់ (PIN ឬ Password)
+      <input type="password" id="loginSecret" autocomplete="current-password" placeholder="••••••" required>
     </label>
     <div class="login-error" id="loginError"></div>
     <button class="btn primary block" type="submit" id="loginBtn">ចូលប្រើ</button>

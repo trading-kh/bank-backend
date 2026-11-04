@@ -103,6 +103,7 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_locked INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 
     CREATE TABLE IF NOT EXISTS cards (
       id SERIAL PRIMARY KEY,
@@ -509,6 +510,34 @@ async function sendPushNotification(userId, title, body, data = {}) {
   }
 }
 
+// គណនី Admin ប្រព័ន្ធ (ចូលដោយ email + password) — បង្កើត/ធ្វើបច្ចុប្បន្នដោយស្វ័យប្រវត្តិ
+// ពី ADMIN_EMAIL + ADMIN_PASSWORD (កំណត់ជា env var នៅ Render — មិនដែលសរសេរក្នុង code)
+async function ensureAdminAccount() {
+  const email = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = String(process.env.ADMIN_PASSWORD || '');
+  if (!email || !password) return;
+  if (!email.includes('@')) {
+    console.warn('⚠️ ADMIN_EMAIL is not a valid email — admin account skipped');
+    return;
+  }
+  const name = String(process.env.ADMIN_NAME || 'Admin');
+  const phone = String(process.env.ADMIN_PHONE || '+85500000000');
+  const hash = await bcrypt.hash(password, SALT);
+  const existing = await db.prepare('SELECT id, auth_provider FROM users WHERE lower(email) = lower(?)').get(email);
+
+  if (existing) {
+    await db.prepare('UPDATE users SET is_admin = 1, password_hash = ? WHERE id = ?')
+      .run(hash, existing.id);
+    console.log(`✅ Admin account ready (existing): ${email}`);
+    return;
+  }
+  // PIN ចៃដន្យ — គណនី admin ប្រព័ន្ធមិនអាចចូលកម្មវិធីទូរសែព្យ
+  const pinHash = await bcrypt.hash(String(Math.floor(1000 + Math.random() * 9000)), SALT);
+  await db.prepare(`INSERT INTO users (name, email, phone, pin_hash, password_hash, auth_provider, is_admin)
+    VALUES (?, ?, ?, ?, ?, 'admin', 1)`).run(name, email, phone, pinHash, hash);
+  console.log(`✅ Admin account created: ${email}`);
+}
+
 async function seedNewUser(userId) {
   const cards = [
     ['ABA Visa Platinum', '4532118800008824', '12/28', '458', 12450, 0xFF0052D4, 0xFF4364F7],
@@ -598,6 +627,9 @@ app.post('/auth/login', handle(async (req, res) => {
   }
   if (user.auth_provider === 'google') {
     throw new ApiError('This account is linked with Google. Please use Google Login.', 400, 'USE_GOOGLE');
+  }
+  if (user.auth_provider === 'admin') {
+    throw new ApiError('គណនីនេះជាគណនីគ្រប់គ្រងប្រព័ន្ធ មិនអាចចូលកម្មវិធីទូរសែព្យបានទេ', 403, 'ADMIN_ACCOUNT');
   }
   await checkPin(user.id, pin);
 
@@ -867,7 +899,7 @@ app.get('/recipients/lookup', auth, handle(async (req, res) => {
 
   let user;
   if (q.includes('@')) {
-    user = await db.prepare('SELECT id, name, email, phone, avatar_thumb FROM users WHERE lower(email) = lower(?) AND id <> ?')
+    user = await db.prepare('SELECT id, name, email, phone, avatar_thumb FROM users WHERE lower(email) = lower(?) AND id <> ? AND COALESCE(auth_provider, \'\') <> \'admin\'')
       .get(q, req.userId);
   } else {
     const digits = q.replace(/[\s\-()+]/g, '');
@@ -875,7 +907,7 @@ app.get('/recipients/lookup', auth, handle(async (req, res) => {
     user = await db.prepare(`
       SELECT id, name, email, phone, avatar_thumb FROM users
       WHERE phone <> '' AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone,' ',''),'-',''),'(',''),')',''),'+','') = ?
-        AND id <> ? LIMIT 1`).get(digits, req.userId);
+        AND id <> ? AND COALESCE(auth_provider, '') <> 'admin' LIMIT 1`).get(digits, req.userId);
   }
   if (!user) throw new ApiError('រកមិនឃើញអ្នកទទួល', 404, 'NOT_FOUND');
 
@@ -898,6 +930,7 @@ app.get('/recipients', auth, handle(async (req, res) => {
          WHERE t.user_id = ? AND t.counterparty_id = u.id) AS last_at
     FROM users u
     WHERE u.id <> ?
+      AND COALESCE(u.auth_provider, '') <> 'admin'
       AND (?::text = '' OR lower(u.name) LIKE ?)
     ORDER BY last_at DESC NULLS LAST, lower(u.name)
     LIMIT ?`).all(req.userId, req.userId, q, `%${q.toLowerCase()}%`, limit);
@@ -933,7 +966,7 @@ app.post('/qr/resolve', auth, handle(async (req, res) => {
   if (p.typ !== 'qr') throw new ApiError('QR មិនត្រឹមត្រូវ', 400, 'BAD_QR');
   if (p.uid === req.userId) throw new ApiError('មិនអាចផ្ទេរទៅខ្លួនឯង', 400, 'SELF_TRANSFER');
 
-  const user = await db.prepare('SELECT id, name, email, phone, avatar_thumb FROM users WHERE id = ?').get(p.uid);
+  const user = await db.prepare("SELECT id, name, email, phone, avatar_thumb FROM users WHERE id = ? AND COALESCE(auth_provider, '') <> 'admin'").get(p.uid);
   if (!user) throw new ApiError('QR មិនត្រឹមត្រូវ', 400, 'BAD_QR');
   ok(res, {
     recipient_id: String(user.id),
@@ -1759,6 +1792,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 initDb()
+  .then(() => ensureAdminAccount())
   .then(() => app.listen(PORT, () => console.log(`🚀 Backend on http://localhost:${PORT}`)))
   .catch((e) => {
     console.error('❌ Database init failed:', e);
