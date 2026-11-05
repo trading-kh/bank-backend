@@ -76,6 +76,7 @@ async function initLoanSchema(db) {
       district TEXT,
       commune TEXT,
       village TEXT,
+      birth_place TEXT,
       occupation TEXT,
       business_name TEXT,
       business_type TEXT,

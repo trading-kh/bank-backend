@@ -140,11 +140,11 @@ module.exports = function createLoanAdminRouter(ctx) {
     const principal = money(loan.principal);
 
     if (!(months >= 1) || months > 60)
-      throw new ApiError('រយៈខែត្រូវតែក្នុងចន្លោះ 1 – 60', 400, 'BAD_MONTHS');
+      throw new ApiError('រយៈខែត្រូវក្នុងចន្លោះ 1 – 60', 400, 'BAD_MONTHS');
     if (annualRate < 0 || annualRate > 60)
-      throw new ApiError('កាន្លោះត្រូវតែក្នុងចន្លោះ 0 – 60%', 400, 'BAD_RATE');
+      throw new ApiError('កាន្លោះត្រូវក្នុងចន្លោះ 0 – 60%', 400, 'BAD_RATE');
     if (feePercent < 0 || feePercent > 20)
-      throw new ApiError('ថ្លៃសេវកម្មត្រូវតែក្នុងចន្លោះ 0 – 20%', 400, 'BAD_FEE');
+      throw new ApiError('ថ្លៃសេវកម្មត្រូវក្នុងចន្លោះ 0 – 20%', 400, 'BAD_FEE');
 
     const firstDue = req.body.first_due_date
       ? new Date(req.body.first_due_date)
@@ -266,7 +266,7 @@ module.exports = function createLoanAdminRouter(ctx) {
       throw new ApiError('កម្ចីមិនទាន់បញ្ចូល', 400, 'BAD_STATUS');
     const amount = money(num(req.body.amount) || 0);
     if (!(amount > 0))
-      throw new ApiError('ចំនួនលុយត្រូវតែ > 0', 400, 'BAD_AMOUNT');
+      throw new ApiError('ចំនួនលុយត្រូវ > 0', 400, 'BAD_AMOUNT');
 
     const rows = await db.prepare(
       `SELECT * FROM loan_schedules WHERE loan_id = ? AND status IN ('pending','partial','overdue')
@@ -276,14 +276,14 @@ module.exports = function createLoanAdminRouter(ctx) {
       throw new ApiError('តារាងសងប្រាក់ត្រូវបានបង់គ្រប់រាល់', 400, 'NO_DUE');
 
     if (!(amount > 0))
-      throw new ApiError('ចំនួនលុយត្រូវតែ > 0', 400, 'BAD_AMOUNT');
+      throw new ApiError('ចំនួនលុយត្រូវ > 0', 400, 'BAD_AMOUNT');
 
     const result = await applyLoanPayment({
       db, loan, amount, rows, card: null, method: 'cash',
       reference: 'ADM-' + Date.now(),
     });
     if (result.error)
-      throw new ApiError('ចំនួនប្រាក់ត្រូវតែ > 0', 400, 'BAD_AMOUNT');
+      throw new ApiError('ចំនួនប្រាក់ត្រូវ > 0', 400, 'BAD_AMOUNT');
     const total = result.total;
 
     await bumpVersion(loan.user_id);
@@ -418,11 +418,11 @@ module.exports = function createLoanAdminRouter(ctx) {
     const annualRate = num(b.annual_rate);
     const method = INTEREST_METHODS.includes(b.interest_method) ? b.interest_method : 'annuity';
     if (!(principal > 0) || principal > MAX_LOAN)
-      throw new ApiError(`ចំនួនកម្ចីត្រូវតែក្នុងចន្លោះ $0.01 – $${MAX_LOAN}`, 400, 'BAD_AMOUNT');
+      throw new ApiError(`ចំនួនកម្ចីត្រូវក្នុងចន្លោះ $0.01 – $${MAX_LOAN}`, 400, 'BAD_AMOUNT');
     if (!(months >= 1) || months > 60)
-      throw new ApiError('រយៈខែត្រូវតែក្នុងចន្លោះ 1 – 60', 400, 'BAD_MONTHS');
+      throw new ApiError('រយៈខែត្រូវក្នុងចន្លោះ 1 – 60', 400, 'BAD_MONTHS');
     if (annualRate === null || annualRate < 0 || annualRate > 60)
-      throw new ApiError('កាន្លោះត្រូវតែក្នុងចន្លោះ 0 – 60%', 400, 'BAD_RATE');
+      throw new ApiError('កាន្លោះត្រូវក្នុងចន្លោះ 0 – 60%', 400, 'BAD_RATE');
 
     const open = await db.prepare(
       `SELECT id FROM loans WHERE user_id = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')}) LIMIT 1`

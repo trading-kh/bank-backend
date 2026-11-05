@@ -174,6 +174,7 @@ async function initDb() {
     ALTER TABLE loans ADD COLUMN IF NOT EXISTS district TEXT;
     ALTER TABLE loans ADD COLUMN IF NOT EXISTS commune TEXT;
     ALTER TABLE loans ADD COLUMN IF NOT EXISTS village TEXT;
+    ALTER TABLE loans ADD COLUMN IF NOT EXISTS birth_place TEXT;
 
     CREATE TABLE IF NOT EXISTS budgets (
       id SERIAL PRIMARY KEY,

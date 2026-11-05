@@ -1,5 +1,5 @@
-// កំណត់គណនីជា Admin (សិទ្ធិគ្រប់គ្រងទិន្នថយទាំងអស់)
-// ផ្តល៾សិទ្ធិ admin ដល់គណនីធម្មតា:  DATABASE_URL=postgres://... node scripts/set-admin.js you@example.com
+// កំណត់គណនីជា Admin (សិទ្ធិគ្រប់គ្រងទិន្នន័យទាំងអស់)
+// ផ្តល់សិទ្ធិ admin ដល់គណនីធម្មតា:  DATABASE_URL=postgres://... node scripts/set-admin.js you@example.com
 // ដកសិទ្ធិ admin:                          node scripts/set-admin.js --remove you@example.com
 // បង្កើតគណនី admin ប្រព័ន្ធ (email + password):
 //   DATABASE_URL=postgres://... node scripts/set-admin.js --password 'your-password' admin@admin.com

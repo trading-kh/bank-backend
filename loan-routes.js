@@ -51,6 +51,7 @@ module.exports = function createLoanAppRouter(ctx) {
       district: str(b.district, 80),
       commune: str(b.commune, 80),
       village: str(b.village, 80),
+      birth_place: str(b.birth_place, 200),
       occupation: str(b.occupation, 60),
       business_name: str(b.business_name, 100),
       business_type: str(b.business_type, 60),
@@ -147,13 +148,13 @@ module.exports = function createLoanAppRouter(ctx) {
 
     const loanId = await db.transaction(async () => {
       const info = await db.prepare(`INSERT INTO loans
-        (user_id, principal, months, annual_rate, province, district, commune, village,
+        (user_id, principal, months, annual_rate, province, district, commune, village, birth_place,
          status, channel, co_name, co_phone, interest_method, fee_percent, fee_amount,
          monthly_payment, total_interest, total_payable, outstanding,
          purpose, monthly_income, monthly_expense, bank_name, bank_account, account_verified)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id`)
-        .run(req.userId, principal, months, annualRate, ...addr,
+        .run(req.userId, principal, months, annualRate, ...addr, str(kyc.birth_place, 200),
           channel, null, null,
           method, feePercent, 0,
           quote.monthly_payment, quote.total_interest, quote.total_payable, principal,

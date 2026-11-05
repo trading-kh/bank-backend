@@ -1,6 +1,6 @@
 // ============================================================
 // ADMIN DASHBOARD API
-// គ្រប់គ្រងទិន្នថយទាំងអស់: អ្នកប្រើ, កាត, ប្រតិបត្តិការ, កម្ចី, សេចក្តីសារ, គោលបំណង...
+// គ្រប់គ្រងទិន្នន័យទាំងអស់: អ្នកប្រើ, កាត, ប្រតិបត្តិការ, កម្ចី, សេចក្តីសារ, គោលបំណង...
 // ចូលដោយគណនីធម្មតា (អ៊ីមែល + PIN) ប៉ុន្តែត្រូវមាន is_admin = 1
 // ត្រូវ mount នៅ server.js:  app.use('/admin/api', require('./admin')(ctx))
 // ============================================================
@@ -107,7 +107,7 @@ module.exports = function createAdminRouter(ctx) {
     }
     loginFails.delete(key);
 
-    // អនុញ្ញាតមូលនេះ (ADMIN_EMAILS) → ផ្តល៾សិទ្ធិ admin ភ្លាម
+    // អនុញ្ញាតមូលនេះ (ADMIN_EMAILS) → ផ្តល់សិទ្ធិ admin ភ្លាម
     const allow = String(process.env.ADMIN_EMAILS || '')
       .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
     let isAdmin = !!u.is_admin;
@@ -324,7 +324,7 @@ module.exports = function createAdminRouter(ctx) {
     ok(res, { id, message: 'បានកំណត់ PIN ថ្មី' });
   }));
 
-  // Reset — លុបទិន្នថយទាំងអស់របស់អ្នកប្រើ ហើយបង្កើតឡើងវិញ (កាត + គោលបំណង)
+  // Reset — លុបទិន្នន័យទាំងអស់របស់អ្នកប្រើ ហើយបង្កើតឡើងវិញ (កាត + គោលបំណង)
   router.post('/users/:id/reset', adminAuth, handle(async (req, res) => {
     const id = int(req.params.id);
     const user = await db.prepare('SELECT id, name, email FROM users WHERE id = ?').get(id);
@@ -411,14 +411,14 @@ module.exports = function createAdminRouter(ctx) {
     if (req.body.name !== undefined) push('name', String(req.body.name).slice(0, 60));
     if (req.body.balance !== undefined) {
       const b = num(req.body.balance);
-      if (b === null || b < 0) throw new ApiError('សម្រាប់ត្រូវតែ ≥ 0', 400, 'BAD_BALANCE');
+      if (b === null || b < 0) throw new ApiError('សម្រាប់ត្រូវ ≥ 0', 400, 'BAD_BALANCE');
       push('balance', money(b));
     }
     if (req.body.frozen !== undefined) push('frozen', req.body.frozen ? 1 : 0);
     if (req.body.online !== undefined) push('online', req.body.online ? 1 : 0);
     if (req.body.daily_limit !== undefined) {
       const l = num(req.body.daily_limit);
-      if (l === null || l < 0) throw new ApiError('ដីហទិតត្រូវតែ ≥ 0', 400, 'BAD_LIMIT');
+      if (l === null || l < 0) throw new ApiError('ដីហទិតត្រូវ ≥ 0', 400, 'BAD_LIMIT');
       push('daily_limit', money(l));
     }
     if (!fields.length) throw new ApiError('គ្មានអ្វីត្រូវកែប្ដូរ', 400, 'NOTHING_TO_UPDATE');
@@ -523,8 +523,8 @@ module.exports = function createAdminRouter(ctx) {
     const category = String(req.body.category || 'ផ្សេងៗ').trim().slice(0, 50);
     const amount = money(num(req.body.amount) || 0);
     const isExpense = req.body.is_expense === true || req.body.is_expense === 1 || req.body.is_expense === '1';
-    if (!title) throw new ApiError('សូមបញ្ចូលចំណាង', 400, 'BAD_INPUT');
-    if (!(amount > 0)) throw new ApiError('ចំនួនលុយត្រូវតែ > 0', 400, 'BAD_AMOUNT');
+    if (!title) throw new ApiError('សូមបញ្ចូលចំណងជើង', 400, 'BAD_INPUT');
+    if (!(amount > 0)) throw new ApiError('ចំនួនលុយត្រូវ > 0', 400, 'BAD_AMOUNT');
 
     const card = await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(cardId, userId);
     if (!card) throw new ApiError('រកមិនឃើញកាត', 404, 'NOT_FOUND');
@@ -600,7 +600,7 @@ module.exports = function createAdminRouter(ctx) {
     const userId = int(req.body.user_id);
     const title = String(req.body.title || '').trim().slice(0, 80);
     const body = String(req.body.body || '').trim().slice(0, 300);
-    if (!title || !body) throw new ApiError('សូមបញ្ចូលចំណាង និងអត្ថបទ', 400, 'BAD_INPUT');
+    if (!title || !body) throw new ApiError('សូមបញ្ចូលចំណងជើង និងអត្ថបទ', 400, 'BAD_INPUT');
     const user = await db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
     if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
 
