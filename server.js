@@ -7,6 +7,8 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 const db = require('./db');
 const createLoanAppRouter = require('./loan-routes');
 const { initLoanSchema, syncArrears, runAutoDebit } = require('./loan-engine');
@@ -325,7 +327,7 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_audit_created ON admin_audit_log(created_at DESC);
   `);
 
-  // កម្មវិធីកម្ចីមីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល
+  // កម្មវិធីកម្ចីវីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល
   await initLoanSchema(db);
 
   // SQLite មាន ROUND(x, 2) សម្រាប់ REAL — Postgres មានតែ round(numeric, int)
@@ -1274,7 +1276,7 @@ app.post('/notifications/read-all', auth, async (req, res) => {
 });
 
 // ============================================================
-// LOANS (កម្មវិធីកម្ចីមីក្រុយ — KYC → សាកលកម្ម → អនុមត្ត → តារាងសងប្រាក់)
+// LOANS (កម្មវិធីកម្ចីវីក្រុយ — KYC → សាកលកម្ម → អនុមត្ត → តារាងសងប្រាក់)
 // ============================================================
 app.use(createLoanAppRouter({
   db, ok, ApiError, handle, auth, sendPushNotification, unlockAchievement,
@@ -1737,9 +1739,24 @@ app.get('/currency/rates', auth, async (req, res) => {
 });
 
 // ============================================================
-// ADMIN DASHBOARD (គ្រប់គ្រងទិន្នថយទាំងអស់)
+// REGIONS / ទីតាំងភូមិសាស្ត្រ (ខេត្ត/ស្រុក/ឃុំ/ភូមិ)
 // ============================================================
-const path = require('path');
+let _regionsCache = null;
+app.get('/regions', async (req, res) => {
+  if (!_regionsCache) {
+    try {
+      const raw = fs.readFileSync(path.join(__dirname, 'data', 'cambodia_admin.json'), 'utf8');
+      _regionsCache = JSON.parse(raw);
+    } catch (e) {
+      return fail(res, 'Region data not found', 500, 'NO_REGIONS');
+    }
+  }
+  ok(res, _regionsCache);
+});
+
+// ============================================================
+// ADMIN DASHBOARD (គ្រប់គ្រងទិន្នន័យទាំងអស់)
+// ============================================================
 const createAdminRouter = require('./admin');
 app.use('/admin/api', createAdminRouter({
   db, ok, fail, ApiError, handle, SECRET, sendPushNotification, seedNewUser,

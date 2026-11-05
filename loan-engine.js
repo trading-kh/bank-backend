@@ -1,5 +1,5 @@
 // ============================================================
-// LOAN ENGINE — កម្មវិធីកម្ចីមីក្រុយ (Microfinance)
+// LOAN ENGINE — កម្មវិធីកម្ចីវីក្រុយ (Microfinance)
 // រួមមាន: គំរូកម្ចី (schema), កាល្បងបុព្វប្បតិច (interest engine),
 // ក្រុមវាយតម្លៃឥណទិសជាតិ (scorecard), CBC adapter, ការតាមដានកង់បង់យឺតពេក (arrears/NPL)
 // ============================================================
@@ -72,7 +72,10 @@ async function initLoanSchema(db) {
       dob TEXT,
       gender TEXT,
       phone TEXT,
-      address TEXT,
+      province TEXT,
+      district TEXT,
+      commune TEXT,
+      village TEXT,
       occupation TEXT,
       business_name TEXT,
       business_type TEXT,
@@ -343,14 +346,14 @@ function computeScore({ principal, months, annualRate, method, kyc, user }) {
   parts.push({ key: 'kyc', label: 'ភាពពេញលេញនៃ KYC', points: p, max: 20 });
   score += p;
 
-  // 4) ប្រវ៏សម្រាប់អាជីវណ៍ (អតិបរមាន 15)
+  // 4) ប្រវត្តិសម្រាប់អាជីវណ៍ (អតិបរមាន 15)
   p = 0;
   const years = Number(kyc?.business_years || 0);
   if (years >= 3) p = 15;
   else if (years >= 2) p = 12;
   else if (years >= 1) p = 8;
   else if (years > 0) p = 4;
-  parts.push({ key: 'business', label: 'ប្រវ៏សម្រាប់អាជីវណ៍', points: p, max: 15 });
+  parts.push({ key: 'business', label: 'ប្រវត្តិសម្រាប់អាជីវណ៍', points: p, max: 15 });
   score += p;
 
   // 5) ប្រវត្តិការបង់កម្ចីមុន (អតិបរមាន 15)

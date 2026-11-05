@@ -12,7 +12,7 @@ const {
 
 const MAX_MONTHS = 60;
 const KYC_REQUIRED = [
-  'full_name', 'national_id', 'phone', 'address', 'occupation',
+  'full_name', 'national_id', 'phone', 'province', 'district', 'commune', 'village', 'occupation',
   'bank_name', 'bank_account',
 ];
 
@@ -47,7 +47,10 @@ module.exports = function createLoanAppRouter(ctx) {
       dob: str(b.dob, 20) || null,
       gender: str(b.gender, 10) || null,
       phone: str(b.phone, 30),
-      address: str(b.address, 200),
+      province: str(b.province, 80),
+      district: str(b.district, 80),
+      commune: str(b.commune, 80),
+      village: str(b.village, 80),
       occupation: str(b.occupation, 60),
       business_name: str(b.business_name, 100),
       business_type: str(b.business_type, 60),
@@ -124,11 +127,11 @@ module.exports = function createLoanAppRouter(ctx) {
     const method = INTEREST_METHODS.includes(b.interest_method) ? b.interest_method : 'annuity';
     const addr = ['province', 'district', 'commune', 'village'].map((k) => str(b[k], 100));
     if (!(principal > 0) || principal > MAX_LOAN)
-      throw new ApiError(`ចំនួនកម្ចីត្រូវតែក្នុងចន្លោះ $0.01 – $${MAX_LOAN}`, 400, 'BAD_AMOUNT');
+      throw new ApiError(`ចំនួនកម្ចីត្រូវក្នុងចន្លោះ $0.01 – $${MAX_LOAN}`, 400, 'BAD_AMOUNT');
     if (!(months >= 1) || months > MAX_MONTHS)
-      throw new ApiError(`រយៈខែត្រូវតែក្នុងចន្លោះ 1 – ${MAX_MONTHS}`, 400, 'BAD_MONTHS');
+      throw new ApiError(`រយៈខែត្រូវក្នុងចន្លោះ 1 – ${MAX_MONTHS}`, 400, 'BAD_MONTHS');
     if (annualRate === null || annualRate < 0 || annualRate > 60)
-      throw new ApiError('កាន្លោះត្រូវតែក្នុងចន្លោះ 0 – 60%', 400, 'BAD_RATE');
+      throw new ApiError('កាន្លោះត្រូវក្នុងចន្លោះ 0 – 60%', 400, 'BAD_RATE');
     if (addr.some((s) => !s))
       throw new ApiError('សូមជ្រើសរើសទីតាំងខេត្ត ស្រុក ឃុំ ភូមិ', 400, 'BAD_ADDRESS');
 
@@ -225,7 +228,7 @@ module.exports = function createLoanAppRouter(ctx) {
     const amount = money(requested === null || requested === undefined
       ? remaining : requested);
     if (!(amount > 0))
-      throw new ApiError('ចំនួនបង់ត្រូវតែជាចំនួនលុយ', 400, 'BAD_AMOUNT');
+      throw new ApiError('ចំនួនបង់ត្រូវជាចំនួនលុយ', 400, 'BAD_AMOUNT');
     if (amount > remaining + 0.009)
       throw new ApiError(`វីនុបទទី ${next.installment_no} ត្រូវបង់តែ $${remaining.toFixed(2)}`,
         400, 'AMOUNT_TOO_LARGE');
@@ -252,7 +255,7 @@ module.exports = function createLoanAppRouter(ctx) {
     if (result.error === 'NO_DUE')
       throw new ApiError('តារាងសងប្រាក់ត្រូវបានបង់គ្រប់រាល់', 400, 'NO_DUE');
     if (result.error)
-      throw new ApiError('ចំនួនបង់ត្រូវតែជាចំនួនលុយ', 400, 'BAD_AMOUNT');
+      throw new ApiError('ចំនួនបង់ត្រូវជាចំនួនលុយ', 400, 'BAD_AMOUNT');
 
     const totalApplied = result.total;
     const applied = result.applied;

@@ -228,7 +228,7 @@ const TITLES = {
   dashboard: 'ផ្ទាំងដើម', users: 'អ្នកប្រើ', cards: 'កាត',
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   collections: 'ប្រមូល', reports: 'របាយការណ៍', notifications: 'សេចក្តីសារ',
-  data: 'ទិន្នថយផ្សេង', audit: 'កំណត់ត្រាក្របរបុប',
+  data: 'ទិន្នន័យផ្សេង', audit: 'កំណត់ត្រាក្របរបុប',
 };
 
 async function renderDashboard() {
@@ -390,7 +390,7 @@ async function renderUsers() {
     { label: 'កាត', num: true, render: (r) => r.card_count },
     { label: 'សម្រាប្រាប់', num: true, render: (r) => money(r.balance) },
     { label: 'ប្រតិបត្តិការ', num: true, render: (r) => r.tx_count },
-    { label: 'ចុលថ្ងៃ', num: true, render: (r) => `<span class="muted">${dateOnly(r.created_at)}</span>` },
+    { label: 'ចូលថ្ងៃ', num: true, render: (r) => `<span class="muted">${dateOnly(r.created_at)}</span>` },
     {
       label: 'សកម្ម', render: (r) => `<div class="row-actions">
         <button class="btn ghost sm" data-user-view="${r.id}" title="មើលព័ត៌មាន">លម្អិត</button><button class="btn ghost sm" data-user-edit="${r.id}" title="កែសម្រួល">កែ</button>
@@ -461,7 +461,7 @@ async function editUser(id) {
       <label class="field"><span>PIN ថ្មី (4 ខ្ទង់ — ទុកទទេដើម្បីមិនប្ដូរ)</span><input id="f_pin" maxlength="4" inputmode="numeric" placeholder="••••"></label>
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input type="checkbox" id="f_admin" ${u.is_admin ? 'checked' : ''} style="width:18px;height:18px">
-        <span>សិទ្ធិ Admin (គ្រប់គ្រងទិន្នថយទាំងអស់)</span></label>
+        <span>សិទ្ធិ Admin (គ្រប់គ្រងទិន្នន័យទាំងអស់)</span></label>
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input type="checkbox" id="f_locked" ${u.is_locked ? 'checked' : ''} style="width:18px;height:18px">
         <span>🔒 ផ្អាកគណនី (មិនអាចចូលប្រើប្រើវិញ)</span></label>
@@ -533,7 +533,7 @@ async function showUser(id) {
       { label: 'ស្ថានភាព', render: (r) => r.frozen ? '<span class="pill bad">បានផ្អាក</span>' : '<span class="pill ok">ធម្មតា</span>' },
     ], d.cards);
     if (key === 'transactions') return tableHtml([
-      { label: 'ចំណាង', render: (r) => esc(r.title) },
+      { label: 'ចំណងជើង', render: (r) => esc(r.title) },
       { label: 'ប្រភេទ', render: (r) => esc(r.category) },
       { label: 'ប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#ff9b9b' : '#7ee2a8'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
       { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
@@ -555,7 +555,7 @@ async function showUser(id) {
       { label: 'ថវិកា', num: true, render: (r) => money(r.amount) },
     ], d.budgets);
     return tableHtml([
-      { label: 'ចំណាង', render: (r) => esc(r.title) },
+      { label: 'ចំណងជើង', render: (r) => esc(r.title) },
       { label: 'អត្ថបទ', render: (r) => `<span class="muted">${esc(r.body)}</span>` },
       { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
     ], d.notifications);
@@ -580,7 +580,7 @@ async function showUser(id) {
         <div class="detail-item"><div class="k">ចូលដោយ</div><div class="v">${esc(u.auth_provider || 'email')}</div></div>
         <div class="detail-item"><div class="k">សិទ្ធិ</div><div class="v">${u.is_admin ? 'Admin' : 'អ្នកប្រើ'}</div></div>
         <div class="detail-item"><div class="k">ស្ថានភាព</div><div class="v">${u.is_locked ? '<span class="pill bad">ត្រូវបានផ្អាក</span>' : '<span class="pill ok">ធម្មតា</span>'}</div></div>
-        <div class="detail-item"><div class="k">ចុលថ្ងៃ</div><div class="v">${dateOnly(u.created_at)}</div></div>
+        <div class="detail-item"><div class="k">ចូលថ្ងៃ</div><div class="v">${dateOnly(u.created_at)}</div></div>
         <div class="detail-item"><div class="k">ចុងចាស់ប្រើ</div><div class="v">${u.last_seen_at ? dt(u.last_seen_at) : '—'}</div></div>
       </div>
       <div class="toolbar" style="margin:14px 0">
@@ -709,7 +709,7 @@ async function renderTransactions() {
   $('#content').innerHTML = `
     <div class="card">
       <div class="filters">
-        <label class="field"><span>ស្វែងរក</span><input id="f_q" value="${esc(txFilters.q)}" placeholder="ចំណាង, ប្រភេទ, អ្នកប្រើ…"></label>
+        <label class="field"><span>ស្វែងរក</span><input id="f_q" value="${esc(txFilters.q)}" placeholder="ចំណងជើង, ប្រភេទ, អ្នកប្រើ…"></label>
         <label class="field"><span>ពីថ្ងៃ</span><input id="f_from" type="date" value="${esc(txFilters.from)}"></label>
         <label class="field"><span>ដល់ថ្ងៃ</span><input id="f_to" type="date" value="${esc(txFilters.to)}"></label>
         <button class="btn primary" id="f_apply">អនុវត្ត</button>
@@ -725,7 +725,7 @@ async function renderTransactions() {
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
     { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
-    { label: 'ចំណាង', render: (r) => esc(r.title) },
+    { label: 'ចំណងជើង', render: (r) => esc(r.title) },
     { label: 'ប្រភេទ', render: (r) => `<span class="pill">${esc(r.category)}</span>` },
     { label: 'កាត', render: (r) => `<span class="muted">${esc(r.card_name || '—')}</span>` },
     { label: 'ប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#ff9b9b' : '#7ee2a8'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
@@ -766,7 +766,7 @@ async function createTransaction() {
       <label class="field"><span>អ្នកប្រើ</span>
         <select id="t_user">${users.map((u) => { const [id, n] = u.split('|'); return `<option value="${id}">${esc(n)}</option>`; }).join('')}</select></label>
       <label class="field"><span>កាត</span><select id="t_card"></select></label>
-      <label class="field"><span>ចំណាង</span><input id="t_title" placeholder="ឧ. កែសម្រួលប្រាក់"></label>
+      <label class="field"><span>ចំណងជើង</span><input id="t_title" placeholder="ឧ. កែសម្រួលប្រាក់"></label>
       <label class="field"><span>ប្រភេទ</span><input id="t_category" value="ផ្សេងៗ"></label>
       <label class="field"><span>ចំនួនប្រាក់</span><input id="t_amount" type="number" step="0.01" min="0.01"></label>
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">
@@ -780,8 +780,8 @@ async function createTransaction() {
         amount: Number($('#t_amount').value),
         is_expense: $('#t_expense').checked,
       };
-      if (!body.title) throw new Error('សូមបញ្ចូលចំណាង');
-      if (!(body.amount > 0)) throw new Error('ចំនួនប្រាក់ត្រូវតែ > 0');
+      if (!body.title) throw new Error('សូមបញ្ចូលចំណងជើង');
+      if (!(body.amount > 0)) throw new Error('ចំនួនប្រាក់ត្រូវ > 0');
       await api('/transactions', { method: 'POST', body });
       toast('បានបង្កើតប្រតិបត្តិការ', 'ok');
       render();
@@ -798,7 +798,7 @@ async function createTransaction() {
 }
 
 /* ============================================================
-   LOAN PIPELINE — កម្មវិធីកម្ចីមីក្រុយ
+   LOAN PIPELINE — កម្មវិធីកម្ចីវីក្រុយ
    ============================================================ */
 const LOAN_STATUS = {
   submitted: { label: 'បានដាក់ស្នើ', cls: 'info' },
@@ -901,7 +901,14 @@ async function intakeLoan() {
     toast('មិនមានអ្នកប្រើដែលដាក់ KYC រួចហើយ', 'err');
     return;
   }
-  const provinces = ['ភ្នំពេញ', 'បន្ទវីតេង្យ', 'កំពត', 'ស្វីត្គីមួ', 'កែវន', 'ព្រះសីហមប', 'ស្តែក', 'បន្ទវិញ', 'រាជធានីភ្នំពេញ'];
+  // Fetch regions data from API
+  let regionsData = null;
+  try {
+    regionsData = await fetch('/regions').then(r => r.json());
+  } catch (e) {
+    console.error('Failed to load regions:', e);
+  }
+  const provinces = regionsData?.p || [];
   openModal({
     title: 'ទទួលកម្ចីដោយ Credit Officer (CO)',
     body: `<label class="field"><span>អ្នកប្រើ</span>
@@ -921,13 +928,94 @@ async function intakeLoan() {
           <option value="reducing">Declining — កាន្លោះថយថយ</option>
         </select></label>
       <label class="field"><span>ខេត្ត</span>
-        <select id="i_province">${provinces.map((p) => `<option>${p}</option>`).join('')}</select></label>
-      <label class="field"><span>ស្រុក</span><input id="i_district"></label>
-      <label class="field"><span>ឃុំ</span><input id="i_commune"></label>
-      <label class="field"><span>ភូមិ</span><input id="i_village"></label>
+        <select id="i_province">
+          <option value="">-- ជ្រើសរើសខេត្ត --</option>
+          ${provinces.map((p) => `<option value="${esc(p.n)}">${esc(p.n)}</option>`).join('')}
+        </select></label>
+      <label class="field"><span>ស្រុក</span>
+        <select id="i_district" disabled><option value="">-- ជ្រើសរើសខេត្តមុន --</option></select></label>
+      <label class="field"><span>ឃុំ</span>
+        <select id="i_commune" disabled><option value="">-- ជ្រើសរើសស្រុកមុន --</option></select></label>
+      <label class="field"><span>ភូមិ</span>
+        <select id="i_village" disabled><option value="">-- ជ្រើសរើសឃុំមុន --</option></select></label>
       <label class="field"><span>គោលកម្ចី</span><input id="i_purpose"></label>`,
     wide: true,
     saveLabel: 'បង្កើតសាកលកម្ម',
+    onOpen: () => {
+      // Cascading dropdown logic
+      const provinceSelect = document.getElementById('i_province');
+      const districtSelect = document.getElementById('i_district');
+      const communeSelect = document.getElementById('i_commune');
+      const villageSelect = document.getElementById('i_village');
+      
+      provinceSelect.addEventListener('change', () => {
+        const provinceName = provinceSelect.value;
+        const province = provinces.find(p => p.n === provinceName);
+        
+        districtSelect.innerHTML = '<option value="">-- ជ្រើសរើសស្រុក --</option>';
+        communeSelect.innerHTML = '<option value="">-- ជ្រើសរើសឃុំ --</option>';
+        villageSelect.innerHTML = '<option value="">-- ជ្រើសរើសភូមិ --</option>';
+        
+        if (province && province.d && province.d.length > 0) {
+          districtSelect.disabled = false;
+          province.d.forEach(d => {
+            districtSelect.innerHTML += `<option value="${esc(d.n)}">${esc(d.n)}</option>`;
+          });
+        } else if (province && province.m && province.m.length > 0) {
+          // Some provinces have communes directly
+          districtSelect.disabled = true;
+          districtSelect.innerHTML = '<option value="">មិនមានស្រុក</option>';
+          communeSelect.disabled = false;
+          province.m.forEach(m => {
+            communeSelect.innerHTML += `<option value="${esc(m.n)}">${esc(m.n)}</option>`;
+          });
+        } else {
+          districtSelect.disabled = true;
+          communeSelect.disabled = true;
+          villageSelect.disabled = true;
+        }
+      });
+      
+      districtSelect.addEventListener('change', () => {
+        const provinceName = provinceSelect.value;
+        const districtName = districtSelect.value;
+        const province = provinces.find(p => p.n === provinceName);
+        const district = province?.d?.find(d => d.n === districtName);
+        
+        communeSelect.innerHTML = '<option value="">-- ជ្រើសរើសឃុំ --</option>';
+        villageSelect.innerHTML = '<option value="">-- ជ្រើសរើសភូមិ --</option>';
+        
+        if (district && district.m && district.m.length > 0) {
+          communeSelect.disabled = false;
+          district.m.forEach(m => {
+            communeSelect.innerHTML += `<option value="${esc(m.n)}">${esc(m.n)}</option>`;
+          });
+        } else {
+          communeSelect.disabled = true;
+          villageSelect.disabled = true;
+        }
+      });
+      
+      communeSelect.addEventListener('change', () => {
+        const provinceName = provinceSelect.value;
+        const districtName = districtSelect.value;
+        const communeName = communeSelect.value;
+        const province = provinces.find(p => p.n === provinceName);
+        const district = province?.d?.find(d => d.n === districtName);
+        const commune = district?.m?.find(m => m.n === communeName);
+        
+        villageSelect.innerHTML = '<option value="">-- ជ្រើសរើសភូមិ --</option>';
+        
+        if (commune && commune.v && commune.v.length > 0) {
+          villageSelect.disabled = false;
+          commune.v.forEach(v => {
+            villageSelect.innerHTML += `<option value="${esc(v)}">${esc(v)}</option>`;
+          });
+        } else {
+          villageSelect.disabled = true;
+        }
+      });
+    },
     onSave: async () => {
       const res = await api('/loans/intake', {
         method: 'POST',
@@ -984,7 +1072,7 @@ async function showLoan(id) {
       <div class="detail-item"><div class="k">បង់ស្វត្តកម្ម</div><div class="v">${l.auto_debit ? '<span class="pill ok">បានបើក</span>' : '<span class="pill warn">បិទ</span>'}</div></div>
     </div>
     ${['disbursed', 'active'].includes(l.status) ? `<div class="row-actions" style="margin:8px 0">
-        <button class="btn ghost sm" data-loan-autodebit="${l.id}" data-on="${l.auto_debit ? '1' : '0'}">${l.auto_debit ? 'បិទបង់ស្វត្តកម្ម' : 'បើកបង់ស្វត្តកម្ម'}</button>
+        <button class="btn ghost sm" data-loan-autodebit="${l.id}" data-on="${l.auto_debit ? '1' : '0'}">${l.auto_debit ? 'បិទស្វត្តកម្ម' : 'បើកស្វត្តកម្ម'}</button>
         <button class="btn ghost sm" data-loan-runautodebit="1">ដំណើរការបង់ស្វត្តកម្ម</button>
       </div>` : ''}
     ${l.reject_reason ? `<div class="detail-item"><div class="k">មូលហេតុបដិសេធ</div><div class="v">${esc(l.reject_reason)}</div></div>` : ''}
@@ -1036,7 +1124,7 @@ async function showLoan(id) {
   $$('[data-loan-autodebit]').forEach((b) => b.onclick = async () => {
     const on = b.dataset.on === '1';
     await api(`/loans/${l.id}/auto-debit`, { method: 'PATCH', body: { enabled: !on } });
-    toast(on ? 'បានបិទបង់ស្វត្តកម្ម' : 'បានបើកបង់ស្វត្តកម្ម', 'ok');
+    toast(on ? 'បានបិទស្វត្តកម្ម' : 'បានបើកស្វត្តកម្ម', 'ok');
     showLoan(id);
   });
   $$('[data-loan-runautodebit]').forEach((b) => b.onclick = async () => {
@@ -1166,7 +1254,7 @@ async function repayLoan(id) {
     saveLabel: 'កត់ត្រាការបង់',
     onSave: async () => {
       const amount = Number($('#p_amount').value);
-      if (!(amount > 0)) throw new Error('ចំនួនបង់ត្រូវតែ > 0');
+      if (!(amount > 0)) throw new Error('ចំនួនបង់ត្រូវ > 0');
       await api(`/loans/${id}/repay`, { method: 'POST', body: { amount } });
       toast('បានកត់ត្រាការបង់ប្រាក់', 'ok');
       render();
@@ -1183,7 +1271,7 @@ async function renderKyc() {
   $('#content').innerHTML = `
     <div class="card">
       <div class="card-head"><h3>KYC / CRM (${rows.length})</h3>
-        <span class="muted">ព័ត៌មានអត្តសញ្ញាណសម្រាប់កម្ចីមីក្រុយ</span></div>
+        <span class="muted">ព័ត៌មានអត្តសញ្ញាណសម្រាប់កម្ចីវីក្រុយ</span></div>
       ${tableHtml([
     { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
     { label: 'អត្តសញ្ញាណ', render: (r) => `<span class="muted">${esc(r.national_id || '—')}</span>` },
@@ -1422,7 +1510,7 @@ async function renderNotifications() {
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
     { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
-    { label: 'ចំណាង', render: (r) => esc(r.title) },
+    { label: 'ចំណងជើង', render: (r) => esc(r.title) },
     { label: 'អត្ថបទ', render: (r) => `<span class="muted">${esc(r.body)}</span>` },
     { label: 'បានអាន', render: (r) => r.read ? '<span class="pill ok">អាន</span>' : '<span class="pill">ថ្មី</span>' },
     { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
@@ -1434,7 +1522,7 @@ async function renderNotifications() {
       title: 'ផ្ញើសេចក្តីសារ',
       body: `
         <label class="field"><span>អ្នកប្រើ</span><select id="m_user">${users.rows.map((u) => `<option value="${u.id}">${esc(u.name)} — ${esc(u.email)}</option>`).join('')}</select></label>
-        <label class="field"><span>ចំណាង</span><input id="m_title"></label>
+        <label class="field"><span>ចំណងជើង</span><input id="m_title"></label>
         <label class="field"><span>អត្ថបទ</span><textarea id="m_body" rows="3"></textarea></label>`,
       onSave: async () => {
         await api('/notify', {
