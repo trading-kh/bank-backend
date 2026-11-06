@@ -647,8 +647,8 @@ async function ensureAdminAccount() {
 
 async function seedNewUser(userId) {
   const cards = [
-    ['ABA Visa Platinum', '4532118800008824', '12/28', '458', 12450, 0xFF0052D4, 0xFF4364F7],
-    ['Mastercard Gold', '5412750000003310', '09/27', '912', 5950, 0xFF0F9D8A, 0xFF38D39F],
+    ['ABA Visa Platinum', '4532118800008824', '12/28', '458', 0, 0xFF0052D4, 0xFF4364F7],
+    ['Mastercard Gold', '5412750000003310', '09/27', '912', 0, 0xFF0F9D8A, 0xFF38D39F],
     ['UnionPay Global', '6212260000005591', '05/29', '734', 0, 0xFF8E2DE2, 0xFF4A00E0],
   ];
   const insCard = db.prepare(`INSERT INTO cards
