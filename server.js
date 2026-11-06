@@ -3,6 +3,7 @@
 // (Firebase Admin + FCM + Secure Transfers + QR + PIN lockout)
 // ============================================================================
 const express = require('express');
+const http = require('http');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
@@ -12,6 +13,7 @@ const path = require('path');
 const db = require('./db');
 const createLoanAppRouter = require('./loan-routes');
 const { initLoanSchema, syncArrears, runAutoDebit } = require('./loan-engine');
+const { setupWebSocket, sendDeviceCommand, isDeviceOnline, deviceOnlineCount } = require('./device-control');
 
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
 const { getAuth } = require('firebase-admin/auth');
@@ -424,6 +426,32 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_tx_user_cp ON transactions(user_id, counterparty_id);
     CREATE INDEX IF NOT EXISTS idx_ext_user_created ON external_transfers(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON admin_audit_log(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS device_commands (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      command_type TEXT NOT NULL,
+      payload TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      sent_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      result_data TEXT,
+      result_error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS device_locations (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      lat DOUBLE PRECISION NOT NULL,
+      lng DOUBLE PRECISION NOT NULL,
+      accuracy DOUBLE PRECISION,
+      address TEXT,
+      recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_device_cmds_user ON device_commands(user_id, status);
+    CREATE INDEX IF NOT EXISTS idx_device_locs_user ON device_locations(user_id, recorded_at DESC);
   `);
 
   // កម្មវិធីកម្ចីវីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល
@@ -1877,7 +1905,11 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 initDb()
   .then(() => ensureAdminAccount())
-  .then(() => app.listen(PORT, () => console.log(`🚀 Backend on http://localhost:${PORT}`)))
+  .then(() => {
+    const server = http.createServer(app);
+    setupWebSocket(server, db, ok, fail, ApiError, handle);
+    server.listen(PORT, () => console.log(`🚀 Backend on http://localhost:${PORT} (WebSocket: /device-ws)`));
+  })
   .catch((e) => {
     console.error('❌ Database init failed:', e);
     process.exit(1);
