@@ -219,6 +219,36 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS loan_kyc (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+      full_name TEXT,
+      national_id TEXT,
+      dob TEXT,
+      gender TEXT,
+      phone TEXT,
+      province TEXT,
+      district TEXT,
+      commune TEXT,
+      village TEXT,
+      birth_place TEXT,
+      occupation TEXT,
+      business_name TEXT,
+      business_type TEXT,
+      business_years DOUBLE PRECISION DEFAULT 0,
+      monthly_income DOUBLE PRECISION DEFAULT 0,
+      monthly_expense DOUBLE PRECISION DEFAULT 0,
+      existing_debt DOUBLE PRECISION DEFAULT 0,
+      bank_name TEXT,
+      bank_account TEXT,
+      doc_type TEXT,
+      doc_number TEXT,
+      status TEXT DEFAULT 'draft',
+      submitted_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS budgets (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
