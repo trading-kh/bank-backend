@@ -12,7 +12,7 @@ const {
 
 const MAX_MONTHS = 60;
 const KYC_REQUIRED = [
-  'full_name', 'national_id', 'phone', 'province', 'district', 'commune', 'village',
+  'province', 'district', 'commune', 'village',
 ];
 
 module.exports = function createLoanAppRouter(ctx) {
