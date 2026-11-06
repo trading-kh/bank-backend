@@ -151,10 +151,10 @@ module.exports = function createLoanAppRouter(ctx) {
          status, channel, co_name, co_phone, interest_method, fee_percent, fee_amount,
          monthly_payment, total_interest, total_payable, outstanding,
          purpose, monthly_income, monthly_expense, bank_name, bank_account, account_verified)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id`)
         .run(req.userId, principal, months, annualRate, ...addr, str(kyc.birth_place, 200),
-          channel, null, null,
+          'submitted', channel, null, null,
           method, feePercent, 0,
           quote.monthly_payment, quote.total_interest, quote.total_payable, principal,
           str(b.purpose, 200), money(kyc.monthly_income), money(kyc.monthly_expense),
