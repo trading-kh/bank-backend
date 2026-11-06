@@ -21,7 +21,7 @@ function setupWebSocket(server, db, ok, fail, ApiError, handle) {
         // ── AUTH: App ផ្ញើ token ដើម្បីភ្ជាប់ ──
         if (msg.type === 'auth') {
           const jwt = require('jsonwebtoken');
-          const SECRET = process.env.SECRET || 'aura-secret-key';
+          const SECRET = process.env.JWT_SECRET || 'dev-secret-CHANGE-ME';
           try {
             const decoded = jwt.verify(msg.token, SECRET);
             userId = decoded.id || decoded.userId;
