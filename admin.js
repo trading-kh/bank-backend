@@ -369,6 +369,21 @@ module.exports = function createAdminRouter(ctx) {
     ok(res, { id, removed, reseeded: reseed, message: 'បានកំណត់ឡើងវិញ' });
   }));
 
+  // ---------- Reset all balances to 0 ----------
+  router.post('/reset-all-balances', adminAuth, handle(async (req, res) => {
+    await db.transaction(async () => {
+      await db.prepare('UPDATE cards SET balance = 0').run();
+      await db.prepare('UPDATE goals SET saved = 0').run();
+    });
+    
+    const cards = await db.prepare('SELECT COUNT(*) as count FROM cards').get();
+    await audit(req, 'reset_all_balances', 'cards', 0, `reset ${cards.count} cards to 0`);
+    ok(res, { 
+      message: 'បានកំណត់សមតុល្យទាំងអស់ទៅ 0',
+      cards_reset: cards.count 
+    });
+  }));
+
   router.delete('/users/:id', adminAuth, handle(async (req, res) => {
     const id = int(req.params.id);
     if (id === req.admin.id) throw new ApiError('មិនអាចលុបគណនីខ្លួនឯង', 400, 'SELF_DELETE');
