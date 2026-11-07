@@ -354,6 +354,48 @@
     position: relative;
   }
   
+  /* Marker Animation */
+  @keyframes markerBounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-20px); }
+  }
+  
+  @keyframes markerPulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7);
+    }
+    70% {
+      box-shadow: 0 0 0 20px rgba(102, 126, 234, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(102, 126, 234, 0);
+    }
+  }
+  
+  .leaflet-marker-icon {
+    animation: markerBounce 1s ease-in-out;
+    transition: all 0.3s ease;
+  }
+  
+  .leaflet-marker-icon:hover {
+    transform: scale(1.2);
+  }
+  
+  .pulse-marker {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #667eea;
+    border: 3px solid white;
+    box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.7);
+    animation: markerPulse 2s infinite;
+  }
+  
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  
   /* Location Details */
   .location-grid {
     display: grid;
@@ -416,6 +458,10 @@
       <button id="mapToggle" class="map-toggle" onclick="toggleMapView()">
         <span id="toggleIcon">🛰️</span>
         <span id="toggleText">Satellite</span>
+      </button>
+      <button id="refreshLocation" class="map-toggle" style="right: 160px;" onclick="refreshLocation()">
+        <span>🔄</span>
+        <span>ផ្ទុកឡើងវិញ</span>
       </button>
     </div>
     <div class="stats" id="locationStats"></div>
@@ -557,8 +603,18 @@ function renderLocation() {
     return;
   }
   
-  // Add marker with popup
-  const marker = L.marker([data.lat, data.lng]).addTo(map);
+  // Add marker with popup and animation
+  const pulseIcon = L.divIcon({
+    className: 'pulse-marker-wrapper',
+    html: '<div class="pulse-marker"></div>',
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+  
+  const marker = L.marker([data.lat, data.lng], {
+    icon: pulseIcon,
+    animation: true,
+  }).addTo(map);
   
   const popupContent = `
     <div style="font-family:'Noto Sans Khmer',sans-serif;min-width:200px">
@@ -578,7 +634,12 @@ function renderLocation() {
   `;
   
   marker.bindPopup(popupContent).openPopup();
-  map.setView([data.lat, data.lng], 16);
+  
+  // Smooth fly to location with animation
+  map.flyTo([data.lat, data.lng], 16, {
+    duration: 1.5,
+    easeLinearity: 0.5,
+  });
   
   document.getElementById('locationStats').innerHTML = `
     <div class="stat-card">
@@ -644,6 +705,50 @@ function toggleMapView() {
     toggleIcon.textContent = '🗺️';
     toggleText.textContent = 'Map';
     toggleBtn.classList.add('active');
+  }
+}
+
+async function refreshLocation() {
+  const btn = document.getElementById('refreshLocation');
+  const originalHTML = btn.innerHTML;
+  
+  // Show loading state
+  btn.innerHTML = '<span style="animation: spin 1s linear infinite">⏳</span> <span>កំពុងផ្ទុក...</span>';
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  
+  try {
+    // Fetch latest location data
+    const commands = await api(`/device/commands?user_id=${userId}&limit=200`);
+    const locationCmd = commands.find(c => c.command_type === 'get_location' && c.result_data);
+    
+    if (locationCmd?.result_data) {
+      commandData.location = locationCmd.result_data;
+      
+      // Clear existing map and re-render with animation
+      if (map) {
+        map.remove();
+      }
+      renderLocation();
+      
+      // Success feedback
+      btn.innerHTML = '<span>✅</span> <span>ជោគជ័យ!</span>';
+      setTimeout(() => {
+        btn.innerHTML = originalHTML;
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }, 1500);
+    } else {
+      throw new Error('មិនមានទិន្នន័យទីតាំង');
+    }
+  } catch (error) {
+    console.error('Refresh error:', error);
+    btn.innerHTML = '<span>❌</span> <span>បរាជ័យ</span>';
+    setTimeout(() => {
+      btn.innerHTML = originalHTML;
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }, 2000);
   }
 }
 
