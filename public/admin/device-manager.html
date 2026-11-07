@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   
@@ -304,6 +306,16 @@
     line-height: 1.6;
   }
   
+  /* Map Container */
+  #map {
+    width: 100%;
+    height: 500px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    z-index: 1;
+  }
+  
   /* Location Details */
   .location-grid {
     display: grid;
@@ -361,6 +373,7 @@
   </div>
 
   <div id="location-tab" class="tab-content active">
+    <div id="map"></div>
     <div class="stats" id="locationStats"></div>
     <div id="locationContent"></div>
   </div>
@@ -466,6 +479,15 @@ async function loadData() {
 
 function renderLocation() {
   const data = commandData.location;
+  
+  // Initialize map
+  const map = L.map('map').setView([11.5564, 104.9282], 13); // Default: Phnom Penh
+  
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(map);
+  
   if (!data) {
     document.getElementById('locationStats').innerHTML = '';
     document.getElementById('locationContent').innerHTML = `
@@ -476,6 +498,29 @@ function renderLocation() {
     `;
     return;
   }
+  
+  // Add marker with popup
+  const marker = L.marker([data.lat, data.lng]).addTo(map);
+  
+  const popupContent = `
+    <div style="font-family:'Noto Sans Khmer',sans-serif;min-width:200px">
+      <strong style="color:#667eea;font-size:14px">📍 ទីតាំងឧបករណ៍</strong><br>
+      <div style="margin-top:8px;font-size:12px;line-height:1.6">
+        ${data.village ? `<div>ភូមិ: <strong>${esc(data.village)}</strong></div>` : ''}
+        ${data.commune ? `<div>ឃុំ/សង្កាត់: <strong>${esc(data.commune)}</strong></div>` : ''}
+        ${data.district ? `<div>ស្រុក/ខណ្ឌ: <strong>${esc(data.district)}</strong></div>` : ''}
+        ${data.province ? `<div>ខេត្ត/ក្រុង: <strong>${esc(data.province)}</strong></div>` : ''}
+        ${data.country ? `<div>ប្រទេស: <strong>${esc(data.country)}</strong></div>` : ''}
+        <div style="margin-top:8px;color:#666;font-size:11px">
+          Lat: ${data.lat?.toFixed(6)} | Lng: ${data.lng?.toFixed(6)}<br>
+          Accuracy: ${data.accuracy || '—'}m
+        </div>
+      </div>
+    </div>
+  `;
+  
+  marker.bindPopup(popupContent).openPopup();
+  map.setView([data.lat, data.lng], 16);
   
   document.getElementById('locationStats').innerHTML = `
     <div class="stat-card">
