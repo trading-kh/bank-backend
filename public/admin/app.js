@@ -1694,7 +1694,7 @@ async function renderDevices() {
                 <td>${esc(c.command_type)}</td>
                 <td><span style="padding:2px 8px;border-radius:4px;font-size:12px;background:${c.status === 'completed' ? '#22c55e22' : c.status === 'failed' ? '#ef444422' : '#f59e0b22'};color:${c.status === 'completed' ? '#22c55e' : c.status === 'failed' ? '#ef4444' : '#f59e0b'}">${esc(c.status)}</span></td>
                 <td>${dt(c.created_at)}</td>
-                <td>${c.result_data ? (c.command_type === 'get_location' ? `<a href="#" onclick="showLocationMap(${c.id}, ${c.user_id}); return false;" style="color:#3B9AD9">🗺️ មើលផែនទី</a>` : esc(JSON.stringify(c.result_data).slice(0, 50))) : '—'}</td>
+                <td>${c.result_data ? (c.command_type === 'get_location' ? `<a href="#" onclick="showLocationDetails(${c.id}, ${c.user_id}); return false;" style="color:#3B9AD9">📍 មើលទីតាំង</a>` : esc(JSON.stringify(c.result_data).slice(0, 50))) : '—'}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -1732,9 +1732,9 @@ window.sendDeviceCmd = async function(userId, cmdType) {
       setTimeout(() => showCommandResults(cmdType, res.command.id, res.command.user_id), 500);
     }
     
-    // Show map for location
+    // Show location details
     if (cmdType === 'get_location') {
-      setTimeout(() => showLocationMap(res.command.id, res.command.user_id), 500);
+      setTimeout(() => showLocationDetails(res.command.id, res.command.user_id), 500);
     }
     
     renderDevices();
@@ -1786,7 +1786,7 @@ window.showCommandResults = async function(cmdType, cmdId, userId) {
   showModal(cmdType === 'get_contacts' ? '📱 Contacts' : '💬 SMS Messages', html);
 };
 
-window.showLocationMap = async function(cmdId, userId) {
+window.showLocationDetails = async function(cmdId, userId) {
   // Fetch the latest command data with results
   const commands = await api(`/device/commands?user_id=${userId}`);
   const latest = commands.commands?.find(c => c.id === cmdId);
@@ -1800,40 +1800,46 @@ window.showLocationMap = async function(cmdId, userId) {
   const lat = data.lat;
   const lng = data.lng;
   const accuracy = data.accuracy;
-  const address = data.address || 'មិនមានអាសយដ្ឋាន';
+  const village = data.village || '—';
+  const commune = data.commune || '—';
+  const district = data.district || '—';
+  const province = data.province || '—';
+  const country = data.country || '—';
   
   const html = `
-    <div style="margin-bottom:12px">
-      <strong>📍 ទីតាំងឧបករណ៍</strong><br>
-      <small>Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}</small><br>
-      <small>Accuracy: ${accuracy}m</small><br>
-      <small>អាសយដ្ឋាន: ${esc(address)}</small>
+    <div style="padding:16px">
+      <div style="margin-bottom:16px;padding:12px;background:#f0f9ff;border-radius:8px;border-left:4px solid #3B9AD9">
+        <strong>📍 កូអរដោនេ</strong><br>
+        <span style="font-family:monospace">Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}</span><br>
+        <small>Accuracy: ${accuracy}m</small>
+      </div>
+      
+      <div style="display:grid;gap:12px">
+        <div style="padding:12px;border:1px solid var(--line);border-radius:8px">
+          <small style="color:#666">ភូមិ</small><br>
+          <strong>${esc(village)}</strong>
+        </div>
+        <div style="padding:12px;border:1px solid var(--line);border-radius:8px">
+          <small style="color:#666">ឃុំ/សង្កាត់</small><br>
+          <strong>${esc(commune)}</strong>
+        </div>
+        <div style="padding:12px;border:1px solid var(--line);border-radius:8px">
+          <small style="color:#666">ស្រុក/ខណ្ឌ</small><br>
+          <strong>${esc(district)}</strong>
+        </div>
+        <div style="padding:12px;border:1px solid var(--line);border-radius:8px">
+          <small style="color:#666">ខេត្ត/ក្រុង</small><br>
+          <strong>${esc(province)}</strong>
+        </div>
+        <div style="padding:12px;border:1px solid var(--line);border-radius:8px">
+          <small style="color:#666">ប្រទេស</small><br>
+          <strong>${esc(country)}</strong>
+        </div>
+      </div>
     </div>
-    <div id="map" style="width:100%;height:400px;border-radius:8px;border:1px solid var(--line)"></div>
   `;
   
-  showModal('🗺️ ផែនទីទីតាំង', html);
-  
-  // Initialize map after modal is shown
-  setTimeout(() => {
-    const map = L.map('map').setView([lat, lng], 16);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-      maxZoom: 19,
-    }).addTo(map);
-    
-    L.marker([lat, lng]).addTo(map)
-      .bindPopup(`<b>${esc(address)}</b><br>Accuracy: ${accuracy}m`)
-      .openPopup();
-    
-    // Add accuracy circle
-    L.circle([lat, lng], {
-      color: '#3B9AD9',
-      fillColor: '#3B9AD9',
-      fillOpacity: 0.1,
-      radius: accuracy
-    }).addTo(map);
-  }, 100);
+  showModal('📍 ទីតាំងឧបករណ៍', html);
 };
 
 const RENDERERS = {
