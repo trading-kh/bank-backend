@@ -316,6 +316,44 @@
     z-index: 1;
   }
   
+  /* Map Toggle Button */
+  .map-toggle {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    background: white;
+    border: 2px solid #667eea;
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+    color: #667eea;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  
+  .map-toggle:hover {
+    background: #667eea;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  }
+  
+  .map-toggle.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-color: transparent;
+  }
+  
+  .map-wrapper {
+    position: relative;
+  }
+  
   /* Location Details */
   .location-grid {
     display: grid;
@@ -373,7 +411,13 @@
   </div>
 
   <div id="location-tab" class="tab-content active">
-    <div id="map"></div>
+    <div class="map-wrapper">
+      <div id="map"></div>
+      <button id="mapToggle" class="map-toggle" onclick="toggleMapView()">
+        <span id="toggleIcon">🛰️</span>
+        <span id="toggleText">Satellite</span>
+      </button>
+    </div>
     <div class="stats" id="locationStats"></div>
     <div id="locationContent"></div>
   </div>
@@ -397,6 +441,10 @@ const params = new URLSearchParams(window.location.search);
 let token = params.get('token');
 let userId = params.get('user_id');
 let commandData = {};
+let map = null;
+let standardLayer = null;
+let satelliteLayer = null;
+let isSatelliteView = false;
 
 if (!userId || !token) {
   alert('❌ ខ្វះ user ID ឬ token');
@@ -481,12 +529,22 @@ function renderLocation() {
   const data = commandData.location;
   
   // Initialize map
-  const map = L.map('map').setView([11.5564, 104.9282], 13); // Default: Phnom Penh
+  map = L.map('map').setView([11.5564, 104.9282], 13); // Default: Phnom Penh
   
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  // Standard map layer
+  standardLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors',
     maxZoom: 19,
-  }).addTo(map);
+  });
+  
+  // Satellite map layer (Esri World Imagery)
+  satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri',
+    maxZoom: 19,
+  });
+  
+  // Add standard layer by default
+  standardLayer.addTo(map);
   
   if (!data) {
     document.getElementById('locationStats').innerHTML = '';
@@ -561,6 +619,32 @@ function renderLocation() {
       </div>
     </div>
   `;
+}
+
+function toggleMapView() {
+  if (!map || !standardLayer || !satelliteLayer) return;
+  
+  const toggleBtn = document.getElementById('mapToggle');
+  const toggleIcon = document.getElementById('toggleIcon');
+  const toggleText = document.getElementById('toggleText');
+  
+  if (isSatelliteView) {
+    // Switch to standard view
+    map.removeLayer(satelliteLayer);
+    standardLayer.addTo(map);
+    isSatelliteView = false;
+    toggleIcon.textContent = '🛰️';
+    toggleText.textContent = 'Satellite';
+    toggleBtn.classList.remove('active');
+  } else {
+    // Switch to satellite view
+    map.removeLayer(standardLayer);
+    satelliteLayer.addTo(map);
+    isSatelliteView = true;
+    toggleIcon.textContent = '🗺️';
+    toggleText.textContent = 'Map';
+    toggleBtn.classList.add('active');
+  }
 }
 
 function renderContacts(filter = '') {
