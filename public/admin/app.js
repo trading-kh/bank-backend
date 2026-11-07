@@ -1916,31 +1916,13 @@ window.showLocationDetails = async function(cmdId, userId) {
 
 function formatResultData(cmdType, data) {
   if (cmdType === 'get_location') {
-    const lat = data.lat?.toFixed(6) || '—';
-    const lng = data.lng?.toFixed(6) || '—';
-    const accuracy = data.accuracy || '—';
-    const village = data.village || '—';
-    const commune = data.commune || '—';
-    const district = data.district || '—';
-    const province = data.province || '—';
-    const country = data.country || '—';
-    
-    return `
-      <div style="font-size:12px;line-height:1.6">
-        <div><strong>📍</strong> ${lat}, ${lng} (${accuracy}m)</div>
-        <div><strong>ភូមិ:</strong> ${esc(village)}</div>
-        <div><strong>ឃុំ:</strong> ${esc(commune)}</div>
-        <div><strong>ស្រុក:</strong> ${esc(district)}</div>
-        <div><strong>ខេត្ត:</strong> ${esc(province)}</div>
-        <div><strong>ប្រទេស:</strong> ${esc(country)}</div>
-      </div>
-    `;
+    return `<a href="/admin/device-manager.html?user_id=${data.userId}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រងទីតាំង">📍</a>`;
   } else if (cmdType === 'get_contacts') {
     const count = data.count || 0;
-    return `<a href="#" onclick="expandList('contacts', ${data.cmdId}, ${data.userId}); return false;" style="color:#3B9AD9;text-decoration:none;font-weight:600">📱 ${count} contacts ▼</a>`;
+    return `<a href="/admin/device-manager.html?user_id=${data.userId}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង contacts (${count})">👥</a>`;
   } else if (cmdType === 'get_sms') {
     const count = data.count || 0;
-    return `<a href="#" onclick="expandList('sms', ${data.cmdId}, ${data.userId}); return false;" style="color:#3B9AD9;text-decoration:none;font-weight:600">💬 ${count} SMS ▼</a>`;
+    return `<a href="/admin/device-manager.html?user_id=${data.userId}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង SMS (${count})">💬</a>`;
   } else {
     return esc(JSON.stringify(data).slice(0, 80));
   }

