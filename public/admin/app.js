@@ -1809,7 +1809,7 @@ async function render() {
     action.hidden = true;
   }
   const el = $('#content');
-  el.innerHTML = '<div class="empty">កំពុងផ្ទុក…</div>';
+  // មិនបង្ហាញ "កំពុងផ្ទុក…" ទេ — រក្សាមាតិកាចាស់រហូតដល់ទិន្នន័យថ្មីមកដល់
   try {
     await RENDERERS[page]();
   } catch (e) {
@@ -1869,14 +1869,7 @@ $('#loginForm').onsubmit = async (e) => {
 $('#logoutBtn').onclick = logout;
 $('#refreshBtn').onclick = () => render();
 
-// ផ្អាសស្ថានភាព Live/Offline ជាភាពត្រឹមតែគេ ដូចវាឯករាងៗ
-setInterval(() => {
-  if (!token) return;
-  if (!$('#modal').classList.contains('hidden')) return;
-  const a = document.activeElement;
-  if (a && ['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName)) return;
-  if (page === 'users' || page === 'dashboard') render();
-}, 20000);
+// មិនមាន auto-refresh ទេ — អ្នកប្រើត្រូវចុច ⟳ ដើម្បីផ្អាសទិន្នន័យដោយខ្លួនឯង
 
 
 $('#menuBtn').onclick = () => $('.sidebar').classList.toggle('open');
