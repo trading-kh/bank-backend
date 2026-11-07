@@ -463,6 +463,10 @@
         <span>🔄</span>
         <span>ផ្ទុកឡើងវិញ</span>
       </button>
+      <button id="openGoogleMaps" class="map-toggle" style="right: 320px; background: #4285F4; color: white; border-color: #4285F4;" onclick="openInGoogleMaps()">
+        <span>🗺️</span>
+        <span>Google Maps</span>
+      </button>
     </div>
     <div class="stats" id="locationStats"></div>
     <div id="locationContent"></div>
@@ -750,6 +754,32 @@ async function refreshLocation() {
       btn.style.opacity = '1';
     }, 2000);
   }
+}
+
+function openInGoogleMaps() {
+  const data = commandData.location;
+  
+  if (!data || !data.lat || !data.lng) {
+    alert('❌ មិនមានទិន្នន័យទីតាំង\nសូមចុច 🔄 ផ្ទុកឡើងវិញ ឬ 📍 Location ក្នុង admin panel');
+    return;
+  }
+  
+  // Use geo intent for Android (opens Google Maps app if installed)
+  // Fallback to web URL for desktop/other devices
+  const isAndroid = /Android/i.test(navigator.userAgent);
+  const lat = data.lat.toFixed(6);
+  const lng = data.lng.toFixed(6);
+  
+  let url;
+  if (isAndroid) {
+    // Android geo intent - opens in Google Maps app
+    url = `geo:${lat},${lng}?z=18`;
+  } else {
+    // Web URL - opens in browser
+    url = `https://www.google.com/maps?q=${lat},${lng}&z=18`;
+  }
+  
+  window.open(url, '_blank');
 }
 
 function renderContacts(filter = '') {
