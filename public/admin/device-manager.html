@@ -76,16 +76,17 @@
 
 <script>
 const API = '/admin/api';
-let token = localStorage.getItem('admin_token');
-let userId = null;
-let commandData = {};
-
-// Get user ID from URL params
 const params = new URLSearchParams(window.location.search);
-userId = params.get('user_id');
+let token = params.get('token');
+let userId = params.get('user_id');
 
 if (!userId) {
   alert('❌ មិនមាន user ID');
+  window.close();
+}
+
+if (!token) {
+  alert('❌ មិនមាន token សម្រាប់ authentication');
   window.close();
 }
 

