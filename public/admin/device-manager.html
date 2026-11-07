@@ -574,10 +574,30 @@ async function loadData() {
     
     document.getElementById('pageMeta').textContent = `User ID: ${userId}`;
     
-    renderLocation();
-    renderPhotos();
-    renderContacts();
-    renderSMS();
+    // Render each tab with its own error handling
+    try {
+      renderLocation();
+    } catch (err) {
+      console.error('renderLocation error:', err);
+    }
+    
+    try {
+      renderPhotos();
+    } catch (err) {
+      console.error('renderPhotos error:', err);
+    }
+    
+    try {
+      renderContacts();
+    } catch (err) {
+      console.error('renderContacts error:', err);
+    }
+    
+    try {
+      renderSMS();
+    } catch (err) {
+      console.error('renderSMS error:', err);
+    }
     
     // Activate the target tab
     activateTab(targetTab);
@@ -601,8 +621,20 @@ function activateTab(tabName) {
 function renderLocation() {
   const data = commandData.location;
   
+  // Check if map container exists
+  const mapContainer = document.getElementById('map');
+  if (!mapContainer) {
+    console.error('Map container not found');
+    return;
+  }
+  
   // Initialize map
-  map = L.map('map').setView([11.5564, 104.9282], 13); // Default: Phnom Penh
+  try {
+    map = L.map('map').setView([11.5564, 104.9282], 13); // Default: Phnom Penh
+  } catch (err) {
+    console.error('Map initialization error:', err);
+    return;
+  }
   
   // Standard map layer
   standardLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -630,8 +662,13 @@ function renderLocation() {
     return;
   }
   
+  // Validate coordinates before using them
+  const lat = parseFloat(data.lat);
+  const lng = parseFloat(data.lng);
+  const hasValidCoords = !isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+  
   // Add marker with popup and animation
-  if (data.lat && data.lng && !isNaN(data.lat) && !isNaN(data.lng)) {
+  if (hasValidCoords) {
     const pulseIcon = L.divIcon({
       className: 'pulse-marker-wrapper',
       html: '<div class="pulse-marker"></div>',
@@ -639,7 +676,7 @@ function renderLocation() {
       iconAnchor: [10, 10],
     });
     
-    const marker = L.marker([data.lat, data.lng], {
+    const marker = L.marker([lat, lng], {
       icon: pulseIcon,
       animation: true,
     }).addTo(map);
@@ -654,7 +691,7 @@ function renderLocation() {
           ${data.province ? `<div>ខេត្ត/ក្រុង: <strong>${esc(data.province)}</strong></div>` : ''}
           ${data.country ? `<div>ប្រទេស: <strong>${esc(data.country)}</strong></div>` : ''}
           <div style="margin-top:8px;color:#666;font-size:11px">
-            Lat: ${data.lat?.toFixed(6)} | Lng: ${data.lng?.toFixed(6)}<br>
+            Lat: ${lat.toFixed(6)} | Lng: ${lng.toFixed(6)}<br>
             Accuracy: ${data.accuracy || '—'}m
           </div>
         </div>
@@ -664,21 +701,25 @@ function renderLocation() {
     marker.bindPopup(popupContent).openPopup();
     
     // Smooth fly to location with animation
-    map.flyTo([data.lat, data.lng], 16, {
-      duration: 1.5,
-      easeLinearity: 0.5,
-    });
+    try {
+      map.flyTo([lat, lng], 16, {
+        duration: 1.5,
+        easeLinearity: 0.5,
+      });
+    } catch (err) {
+      console.error('flyTo error:', err);
+    }
   } else {
     console.warn('Invalid location coordinates:', data.lat, data.lng);
   }
   
   document.getElementById('locationStats').innerHTML = `
     <div class="stat-card">
-      <div class="stat-value">${data.lat && !isNaN(data.lat) ? data.lat.toFixed(6) : '—'}</div>
+      <div class="stat-value">${hasValidCoords ? lat.toFixed(6) : '—'}</div>
       <div class="stat-label">🌍 Latitude</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value">${data.lng && !isNaN(data.lng) ? data.lng.toFixed(6) : '—'}</div>
+      <div class="stat-value">${hasValidCoords ? lng.toFixed(6) : '—'}</div>
       <div class="stat-label">🌍 Longitude</div>
     </div>
     <div class="stat-card">
