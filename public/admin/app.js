@@ -1724,7 +1724,7 @@ window.sendDeviceCmd = async function(userId, cmdType) {
     payload = { query };
   }
   try {
-    const res = await api('/device/command', 'POST', { user_id: userId, command_type: cmdType, payload });
+    const res = await api('/device/command', { method: 'POST', body: { user_id: userId, command_type: cmdType, payload } });
     toast(`✅ Command បានផ្ញើ (${res.online ? 'online' : 'offline'})`);
     
     // Show results for contacts/SMS reading
