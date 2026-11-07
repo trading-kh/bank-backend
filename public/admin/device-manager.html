@@ -780,6 +780,10 @@ function renderPhotos() {
       <div class="stat-value">${(photos.reduce((sum, p) => sum + (p.size || 0), 0) / 1024 / 1024).toFixed(2)} MB</div>
       <div class="stat-label">💾 ទំហំសរុប</div>
     </div>
+    <div class="stat-card" style="cursor: pointer; transition: all 0.3s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'" onclick="downloadAllPhotos()">
+      <div class="stat-value" style="font-size: 24px; padding: 10px 0;">⬇️ Download All</div>
+      <div class="stat-label">ទាញយករូបភាពទាំងអស់</div>
+    </div>
   `;
   
   document.getElementById('photosContent').innerHTML = `
@@ -847,6 +851,37 @@ function viewPhotoDetail(photoId) {
   `;
   
   showModal('🖼️ ព័ត៌មានរូបភាព', html);
+}
+
+function downloadAllPhotos() {
+  const photos = commandData.photos?.photos || [];
+  if (photos.length === 0) {
+    alert('មិនមានរូបភាពសម្រាប់ download');
+    return;
+  }
+  
+  if (!confirm(`ទាញយករូបភាព ${photos.length} សន្លឹក?`)) return;
+  
+  let downloaded = 0;
+  const total = photos.length;
+  
+  photos.forEach((photo, index) => {
+    if (!photo.thumbnail) return;
+    
+    setTimeout(() => {
+      const link = document.createElement('a');
+      link.href = `data:image/jpeg;base64,${photo.thumbnail}`;
+      link.download = photo.name || `photo_${photo.id}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      downloaded++;
+      if (downloaded === total) {
+        alert(`✅ បានទាញយករូបភាព ${downloaded} សន្លឹករួចរាល់!`);
+      }
+    }, index * 300); // Delay 300ms between each download to avoid browser blocking
+  });
 }
 
 function toggleMapView() {
