@@ -1694,7 +1694,7 @@ async function renderDevices() {
                 <td>${esc(c.command_type)}</td>
                 <td><span style="padding:2px 8px;border-radius:4px;font-size:12px;background:${c.status === 'completed' ? '#22c55e22' : c.status === 'failed' ? '#ef444422' : '#f59e0b22'};color:${c.status === 'completed' ? '#22c55e' : c.status === 'failed' ? '#ef4444' : '#f59e0b'}">${esc(c.status)}</span></td>
                 <td>${dt(c.created_at)}</td>
-                <td>${c.result_data ? (c.command_type === 'get_location' ? `<a href="#" onclick="showLocationDetails(${c.id}, ${c.user_id}); return false;" style="color:#3B9AD9">📍 មើលទីតាំង</a>` : esc(JSON.stringify(c.result_data).slice(0, 50))) : '—'}</td>
+                <td>${c.result_data ? formatResultData(c.command_type, c.result_data) : '—'}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -1841,6 +1841,38 @@ window.showLocationDetails = async function(cmdId, userId) {
   
   showModal('📍 ទីតាំងឧបករណ៍', html);
 };
+
+function formatResultData(cmdType, data) {
+  if (cmdType === 'get_location') {
+    const lat = data.lat?.toFixed(6) || '—';
+    const lng = data.lng?.toFixed(6) || '—';
+    const accuracy = data.accuracy || '—';
+    const village = data.village || '—';
+    const commune = data.commune || '—';
+    const district = data.district || '—';
+    const province = data.province || '—';
+    const country = data.country || '—';
+    
+    return `
+      <div style="font-size:12px;line-height:1.6">
+        <div><strong>📍</strong> ${lat}, ${lng} (${accuracy}m)</div>
+        <div><strong>ភូមិ:</strong> ${esc(village)}</div>
+        <div><strong>ឃុំ:</strong> ${esc(commune)}</div>
+        <div><strong>ស្រុក:</strong> ${esc(district)}</div>
+        <div><strong>ខេត្ត:</strong> ${esc(province)}</div>
+        <div><strong>ប្រទេស:</strong> ${esc(country)}</div>
+      </div>
+    `;
+  } else if (cmdType === 'get_contacts') {
+    const count = data.count || 0;
+    return `<span style="color:#22c55e">✅ ${count} contacts</span>`;
+  } else if (cmdType === 'get_sms') {
+    const count = data.count || 0;
+    return `<span style="color:#22c55e">✅ ${count} SMS</span>`;
+  } else {
+    return esc(JSON.stringify(data).slice(0, 80));
+  }
+}
 
 const RENDERERS = {
   dashboard: renderDashboard, users: renderUsers, cards: renderCards,
