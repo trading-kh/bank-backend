@@ -1947,58 +1947,73 @@ function formatResultData(cmdType, data) {
 }
 
 window.expandList = async function(type, cmdId, userId) {
-  // Fetch the command data
-  const commands = await api(`/device/commands?user_id=${userId}`);
-  const cmd = commands.commands?.find(c => c.id === cmdId);
-  
-  if (!cmd || !cmd.result_data) {
-    toast('❌ រកមិនឃើញទិន្នន័យ', true);
-    return;
-  }
-  
-  const data = cmd.result_data;
-  let html = '';
-  
-  if (type === 'contacts') {
-    const contacts = data.contacts || [];
-    html = `
-      <div style="margin-top:16px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid var(--line)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h3 style="margin:0">📱 Contacts (${contacts.length})</h3>
-          <button class="btn ghost sm" onclick="collapseList()">✕ បិទ</button>
-        </div>
-        <div style="max-height:500px;overflow-y:auto">
-          <table style="width:100%">
-            <thead>
-              <tr style="background:#e5e7eb;position:sticky;top:0">
-                <th style="padding:8px;text-align:left">ឈ្មោះ</th>
-                <th style="padding:8px;text-align:left">ទូរស័ព្ទ</th>
-                <th style="padding:8px;text-align:left">Email</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${contacts.map(c => `
+  try {
+    // Fetch the command data
+    const commands = await api(`/device/commands?user_id=${userId}`);
+    
+    if (!commands || !Array.isArray(commands)) {
+      console.error('Commands is not an array:', commands);
+      toast('❌ ទិន្នន័យមិនត្រឹមត្រូវ', true);
+      return;
+    }
+    
+    const cmd = commands.find(c => c.id === cmdId);
+    
+    if (!cmd) {
+      console.error('Command not found. cmdId:', cmdId, 'Available IDs:', commands.map(c => c.id));
+      toast('❌ រកមិនឃើញ command', true);
+      return;
+    }
+    
+    if (!cmd.result_data) {
+      console.error('No result_data in command:', cmd);
+      toast('❌ មិនមានទិន្នន័យ result ទេ', true);
+      return;
+    }
+    
+    const data = cmd.result_data;
+    let html = '';
+    
+    if (type === 'contacts') {
+      const contacts = data.contacts || [];
+      html = `
+        <div style="margin-top:16px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h3 style="margin:0">📱 Contacts (${contacts.length})</h3>
+            <button class="btn ghost sm" onclick="collapseList()">✕ បិទ</button>
+          </div>
+          <div style="max-height:500px;overflow-y:auto">
+            <table style="width:100%">
+              <thead>
+                <tr style="background:#e5e7eb;position:sticky;top:0">
+                  <th style="padding:8px;text-align:left">ឈ្មោះ</th>
+                  <th style="padding:8px;text-align:left">ទូរស័ព្ទ</th>
+                  <th style="padding:8px;text-align:left">Email</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${contacts.map(c => `
                 <tr style="border-bottom:1px solid #e5e7eb">
                   <td style="padding:8px">${esc(c.displayName || '—')}</td>
                   <td style="padding:8px;font-family:monospace">${esc((c.phones || []).join(', ') || '—')}</td>
                   <td style="padding:8px">${esc((c.emails || []).join(', ') || '—')}</td>
                 </tr>
               `).join('')}
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
-    `;
-  } else if (type === 'sms') {
-    const messages = data.messages || [];
-    html = `
-      <div style="margin-top:16px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid var(--line)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h3 style="margin:0">💬 SMS Messages (${messages.length})</h3>
-          <button class="btn ghost sm" onclick="collapseList()">✕ បិទ</button>
-        </div>
-        <div style="max-height:500px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
-          ${messages.map(m => `
+      `;
+    } else if (type === 'sms') {
+      const messages = data.messages || [];
+      html = `
+        <div style="margin-top:16px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h3 style="margin:0">💬 SMS Messages (${messages.length})</h3>
+            <button class="btn ghost sm" onclick="collapseList()">✕ បិទ</button>
+          </div>
+          <div style="max-height:500px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+            ${messages.map(m => `
             <div style="padding:12px;background:white;border:1px solid #e5e7eb;border-radius:8px">
               <div style="display:flex;justify-content:space-between;margin-bottom:4px">
                 <strong>${esc(m.address || 'Unknown')}</strong>
@@ -2011,20 +2026,24 @@ window.expandList = async function(type, cmdId, userId) {
               <p style="margin:8px 0 0;white-space:pre-wrap">${esc(m.body || '')}</p>
             </div>
           `).join('')}
+          </div>
         </div>
-      </div>
-    `;
-  }
-  
-  // Insert the expanded list after the table
-  const container = document.getElementById('expanded-list-container');
-  if (container) {
-    container.innerHTML = html;
-  } else {
-    const div = document.createElement('div');
-    div.id = 'expanded-list-container';
-    div.innerHTML = html;
-    document.querySelector('.card:last-child').appendChild(div);
+      `;
+    }
+    
+    // Insert the expanded list after the table
+    const container = document.getElementById('expanded-list-container');
+    if (container) {
+      container.innerHTML = html;
+    } else {
+      const div = document.createElement('div');
+      div.id = 'expanded-list-container';
+      div.innerHTML = html;
+      document.querySelector('.card:last-child').appendChild(div);
+    }
+  } catch (error) {
+    console.error('expandList error:', error);
+    toast(`❌ Error: ${error.message}`, true);
   }
 };
 
