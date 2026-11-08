@@ -2186,7 +2186,7 @@ async function boot() {
     admin = await api('/me');
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
-    $('#adminTooltip').textContent = admin.email;
+    renderAdminIdentity();
     applyRolePermissions();
     render();
     loadBadges();
@@ -2219,7 +2219,7 @@ $('#loginForm').onsubmit = async (e) => {
     localStorage.setItem('aura_admin_token', token);
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
-    $('#adminTooltip').textContent = admin.email;
+    renderAdminIdentity();
     applyRolePermissions();
     render();
     loadBadges();
@@ -2246,6 +2246,82 @@ function applyRolePermissions() {
 
 $('#logoutBtn').onclick = logout;
 $('#refreshBtn').onclick = () => { render(); loadBadges(); };
+
+/* ---------- admin identity ---------- */
+const ADMIN_ROLES = {
+  management: { icon: '👑', label: 'Management / Executive', kh: 'ថ្នាក់ដឹកនាំ / នាយកប្រតិបត្តិ', cls: 'ok',
+    perms: ['គ្រប់គ្រងទិន្នន័យទាំងស្រុង', 'គ្រប់គ្រងទូរស័ព្ទ (Device)', 'កែប្ដូរ Role អ្នកប្រើ', 'ចូលគ្រប់មុខងារ Admin'] },
+  administration: { icon: '🏢', label: 'Administration', kh: 'ថ្នាក់រដ្ឋបាល / គ្រប់គ្រង', cls: 'info',
+    perms: ['គ្រប់គ្រងអ្នកប្រើ + កាត', 'កម្ចី + KYC + ប្រមូល', 'របាយការណ៍ + សេចក្តីសារ', 'មិនអាចគ្រប់គ្រងទូរស័ព្ទ'] },
+  operations: { icon: '⚙️', label: 'Operations / Staff', kh: 'ថ្នាក់ប្រតិបត្តិការ / បុគ្គលិក', cls: 'warn',
+    perms: ['ប្រតិបត្តិការប្រចាំថ្ងៃ', 'មើលទិន្នន័យអ្នកប្រើ', 'ជួយសម្រួលការងារផ្នែក', 'មិនអាចគ្រប់គ្រងទូរស័ព្ទ'] },
+};
+const adminRoleInfo = (role) => ADMIN_ROLES[role] || ADMIN_ROLES.operations;
+
+function renderAdminIdentity() {
+  if (!admin) return;
+  const btn = $('#adminProfileBtn');
+  const [a, b] = avGradient(admin.name || admin.email);
+  const ri = adminRoleInfo(admin.role);
+  btn.classList.add('admin-av-btn');
+  btn.innerHTML = `
+    <span class="admin-av-wrap">
+      <span class="avatar admin-av" style="--av-a:${a};--av-b:${b}">${esc(initials(admin.name || admin.email))}</span>
+      <span class="admin-role-ic">${ri.icon}</span>
+      <span class="admin-live-dot"></span>
+    </span>
+    <span class="foot-tooltip" id="adminTooltip">${esc(admin.name || 'Admin')} · ${esc(admin.email)}</span>`;
+  btn.onclick = showAdminProfile;
+}
+
+function showAdminProfile() {
+  if (!admin) return;
+  const a = admin;
+  const [ga, gb] = avGradient(a.name || a.email);
+  const ri = adminRoleInfo(a.role);
+  openUserDrawer(`
+    <div class="udrawer-scrim" data-ud-close></div>
+    <aside class="udrawer-panel" style="--av-a:${ga};--av-b:${gb}" role="dialog" aria-modal="true" aria-label="គណនី Admin">
+      <div class="udrawer-hero">
+        <div class="udrawer-hero-glow"></div>
+        <div class="udrawer-hero-grid"></div>
+        <button class="udrawer-close" data-ud-close title="បិទ">✕</button>
+        <div class="udrawer-hero-tag">គណនី Admin · #${a.id}</div>
+      </div>
+      <div class="udrawer-scroll">
+        <div class="udrawer-head">
+          <div class="udrawer-av"><span class="avatar-wrap"><span class="avatar xl" style="--av-a:${ga};--av-b:${gb}">${esc(initials(a.name || a.email))}</span><span class="dot on"></span></span></div>
+          <div class="udrawer-idbox">
+            <h3 class="udrawer-name">${esc(a.name || 'Admin')}</h3>
+            <div class="udrawer-badges"><span class="live on"><i></i>កំពុងប្រើ</span> ${roleBadge(a.role)} <span class="pill info">Admin</span></div>
+            <div class="udrawer-contact">✉ ${esc(a.email)}</div>
+          </div>
+        </div>
+        <div class="admin-role-card ${ri.cls}">
+          <div class="admin-role-ic-lg">${ri.icon}</div>
+          <div>
+            <div class="admin-role-title">${ri.label}</div>
+            <div class="admin-role-kh">${ri.kh}</div>
+          </div>
+        </div>
+        <div class="udrawer-section"><span>សិទ្ធិចូលប្រើរបស់អ្នក</span></div>
+        <ul class="admin-perms">
+          ${ri.perms.map((p) => `<li><span class="perm-check">✓</span>${esc(p)}</li>`).join('')}
+        </ul>
+        <div class="udrawer-section"><span>ព័ត៌មានគណនី</span></div>
+        <div class="detail-grid ud-detail">
+          <div class="detail-item"><div class="k">ID</div><div class="v">#${a.id}</div></div>
+          <div class="detail-item"><div class="k">អ៊ីមែល</div><div class="v">${esc(a.email)}</div></div>
+          <div class="detail-item"><div class="k">Role</div><div class="v">${ri.icon} ${esc(a.role || 'operations')}</div></div>
+          <div class="detail-item"><div class="k">ប្រភេទ</div><div class="v">អ្នកគ្រប់គ្រង</div></div>
+        </div>
+        <div class="udrawer-actions" style="margin-top:20px">
+          <button class="btn danger block" id="adminLogout">🚪 ចាកចេញពីគណនី</button>
+        </div>
+      </div>
+    </aside>`);
+  $('#adminLogout').onclick = () => { closeUserDrawer(); logout(); };
+}
 
 // Sidebar footer icon buttons
 $('#openUsageBtn').onclick = () => window.open('/admin/usage.html?token=' + encodeURIComponent(token), '_blank');
