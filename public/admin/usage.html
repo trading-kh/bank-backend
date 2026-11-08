@@ -300,6 +300,15 @@ function formatTableName(name) {
     'districts': '🏘️ ស្រុក/ខណ្ឌ',
     'communes': '🏘️ ឃុំ/សង្កាត់',
     'villages': '🏡 ភូមិ',
+    'referrals': '🎁 ការណែនាំ',
+    'fcm_tokens': '🔑 FCM Tokens',
+    'budgets': '💰 ថវិកា',
+    'achievements': '🏆 សមិទ្ធផល',
+    'reminders': '⏰ ការរំលឹក',
+    'recurring': '🔁 ប្រតិបត្តិការប្រចាំខែ',
+    'splits': '✂️ ចែករំលែក',
+    'virtual_cards': '💳 កាតនិម្មិត',
+    'cashback': '💵 Cashback',
   };
   return nameMap[name] || name;
 }
@@ -376,9 +385,14 @@ function renderDashboard(data) {
       <div class="card">
         <h2>📋 ទំហំ Tables</h2>
         <div class="table-list">
-          ${data.tables.slice(0, 8).map(t => `
+          ${data.tables.slice(0, 10).map(t => `
             <div class="table-item">
-              <span class="table-name">${formatTableName(t.name)}</span>
+              <div>
+                <div class="table-name">${formatTableName(t.name)}</div>
+                <div style="font-size: 12px; color: #999; margin-top: 2px;">
+                  ${t.row_count != null ? `${t.row_count.toLocaleString()} rows` : ''}
+                </div>
+              </div>
               <span class="table-size">${t.size_pretty}</span>
             </div>
           `).join('')}

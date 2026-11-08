@@ -815,7 +815,7 @@ module.exports = function createAdminRouter(ctx) {
     // Database size
     const dbSize = await db.prepare(`SELECT pg_database_size('neondb') as bytes`).get();
     
-    // Table sizes
+    // Table sizes with row counts
     const tableSizes = await db.prepare(`
       SELECT 
         schemaname,
@@ -826,6 +826,17 @@ module.exports = function createAdminRouter(ctx) {
       WHERE schemaname = 'public'
       ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
     `).all();
+    
+    // Get row counts for all tables
+    const tableCounts = {};
+    for (const table of tableSizes) {
+      try {
+        const result = await db.prepare(`SELECT COUNT(*) as count FROM ${table.tablename}`).get();
+        tableCounts[table.tablename] = result.count;
+      } catch (err) {
+        tableCounts[table.tablename] = 0;
+      }
+    }
     
     // Row counts for key tables
     const userCount = await db.prepare('SELECT COUNT(*) as count FROM users').get();
@@ -870,6 +881,7 @@ module.exports = function createAdminRouter(ctx) {
         name: t.tablename,
         size_pretty: t.size_pretty,
         size_bytes: t.size_bytes,
+        row_count: tableCounts[t.tablename] || 0,
       })),
       counts: {
         users: userCount.count,
