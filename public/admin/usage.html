@@ -234,6 +234,16 @@
               onmouseout="this.style.transform=''; this.style.boxShadow='0 3px 12px rgba(245, 87, 108, 0.35)'">
         🧹
       </button>
+      <button onclick="window.open('/admin/activity.html?token=' + encodeURIComponent(token), '_blank')" 
+              title="សកម្មភាព 7 ថ្ងៃ"
+              style="width: 44px; height: 44px; border-radius: 12px; border: none; cursor: pointer; font-size: 22px; 
+                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                     box-shadow: 0 3px 12px rgba(102, 126, 234, 0.35);
+                     transition: all 0.3s; display: flex; align-items: center; justify-content: center;"
+              onmouseover="this.style.transform='translateY(-2px) scale(1.05)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.45)'"
+              onmouseout="this.style.transform=''; this.style.boxShadow='0 3px 12px rgba(102, 126, 234, 0.35)'">
+        📈
+      </button>
     </div>
   </div>
 
@@ -407,10 +417,21 @@ function renderDashboard(data) {
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" style="cursor:pointer; transition: all 0.3s;" onclick="window.open('/admin/activity.html?token=' + encodeURIComponent(token), '_blank')"
+           onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 30px rgba(102,126,234,0.2)'"
+           onmouseout="this.style.transform=''; this.style.boxShadow=''">
         <h2>📈 សកម្មភាព 7 ថ្ងៃចុងក្រោយ</h2>
-        <div class="chart-container">
-          <canvas id="activityChart"></canvas>
+        <div style="text-align: center; padding: 40px 20px;">
+          <div style="font-size: 64px; margin-bottom: 16px;">📊</div>
+          <div style="font-size: 18px; font-weight: 600; color: #667eea; margin-bottom: 8px;">
+            មើលការវិភាគពេញលេញ
+          </div>
+          <div style="font-size: 13px; color: #999;">
+            10 មេត្រិក · ក្រាហ្វអន្តរកម្ម · តារាងលម្អិត · ទាញយក CSV
+          </div>
+          <div style="margin-top: 20px; padding: 10px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px; display: inline-block; font-weight: 600; font-size: 14px;">
+            🚀 បើកផ្ទាំងវិភាគ
+          </div>
         </div>
       </div>
     </div>
@@ -420,7 +441,6 @@ function renderDashboard(data) {
   
   // Render charts
   renderCmdChart(data.device_commands);
-  renderActivityChart(data.recent_activity);
 }
 
 function renderCmdChart(cmdStats) {
@@ -473,215 +493,6 @@ function renderCmdChart(cmdStats) {
                 `⏳ កំពុងរង់ចាំ: ${stat.pending}`,
               ];
             }
-          }
-        }
-      }
-    }
-  });
-}
-
-function renderActivityChart(activity) {
-  const ctx = document.getElementById('activityChart');
-  if (!ctx) return;
-  
-  if (charts.activity) charts.activity.destroy();
-  
-  const labels = activity.map(a => {
-    const d = new Date(a.date);
-    return `${d.getDate()}/${d.getMonth() + 1}`;
-  });
-  
-  charts.activity = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [
-        {
-          label: '📱 Commands',
-          data: activity.map(a => a.commands),
-          borderColor: '#667eea',
-          backgroundColor: 'rgba(102, 126, 234, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#667eea',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: '💸 ប្រតិបត្តិការ',
-          data: activity.map(a => a.transactions),
-          borderColor: '#f5576c',
-          backgroundColor: 'rgba(245, 87, 108, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#f5576c',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: '🏦 កម្ចី',
-          data: activity.map(a => a.loans),
-          borderColor: '#22c55e',
-          backgroundColor: 'rgba(34, 197, 94, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#22c55e',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: '🔐 Logins',
-          data: activity.map(a => a.logins),
-          borderColor: '#ffa726',
-          backgroundColor: 'rgba(255, 167, 38, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#ffa726',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: '🔔 សេចក្តីសារ',
-          data: activity.map(a => a.notifications),
-          borderColor: '#ab47bc',
-          backgroundColor: 'rgba(171, 71, 188, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#ab47bc',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: '👤 អ្នកប្រើថ្មី',
-          data: activity.map(a => a.new_users),
-          borderColor: '#26c6da',
-          backgroundColor: 'rgba(38, 198, 218, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#26c6da',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: '📱 Device Registrations',
-          data: activity.map(a => a.device_registrations),
-          borderColor: '#78909c',
-          backgroundColor: 'rgba(120, 144, 156, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#78909c',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: '🔥 Active Users',
-          data: activity.map(a => a.active_users),
-          borderColor: '#ef5350',
-          backgroundColor: 'rgba(239, 83, 80, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#ef5350',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: '💰 Mobile Money',
-          data: activity.map(a => a.mobile_money),
-          borderColor: '#66bb6a',
-          backgroundColor: 'rgba(102, 187, 106, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#66bb6a',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        },
-        {
-          label: '❌ Failed Transactions',
-          data: activity.map(a => a.failed_transactions),
-          borderColor: '#d32f2f',
-          backgroundColor: 'rgba(211, 47, 47, 0.1)',
-          borderWidth: 3,
-          fill: true,
-          tension: 0.4,
-          pointRadius: 5,
-          pointHoverRadius: 7,
-          pointBackgroundColor: '#d32f2f',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          display: true,
-          position: 'top',
-          labels: {
-            font: {
-              family: 'Noto Sans Khmer',
-              size: 12,
-            },
-            padding: 15,
-          }
-        },
-        tooltip: {
-          callbacks: {
-            label: function(context) {
-              return `${context.dataset.label}: ${context.parsed.y}`;
-            }
-          }
-        }
-      },
-      scales: {
-        y: {
-          beginAtZero: true,
-          ticks: {
-            stepSize: 1,
-            font: {
-              family: 'Noto Sans Khmer',
-            }
-          },
-          grid: {
-            color: 'rgba(0, 0, 0, 0.05)',
-          }
-        },
-        x: {
-          ticks: {
-            font: {
-              family: 'Noto Sans Khmer',
-            }
-          },
-          grid: {
-            display: false,
           }
         }
       }

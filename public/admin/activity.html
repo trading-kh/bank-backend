@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aura Bank · 📈 សកម្មភាព 7 ថ្ងៃ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Noto Sans Khmer', sans-serif;
+    background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+    min-height: 100vh;
+    color: #e0e0e0;
+    overflow-x: hidden;
+  }
+
+  .container {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+
+  /* Header */
+  .header {
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 24px 32px;
+    border-radius: 20px;
+    margin-bottom: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    animation: slideDown 0.5s ease;
+  }
+
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .header .meta {
+    color: rgba(255,255,255,0.6);
+    font-size: 13px;
+    padding: 8px 16px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+  }
+
+  .btn-glass {
+    background: rgba(255,255,255,0.08);
+    color: white;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+
+  .btn-glass:hover {
+    background: rgba(255,255,255,0.15);
+    transform: translateY(-2px);
+  }
+
+  /* Summary Cards */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+    animation: fadeInUp 0.6s ease;
+  }
+
+  .summary-card {
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.3s;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .summary-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: 16px 16px 0 0;
+  }
+
+  .summary-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(255,255,255,0.2);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+  }
+
+  .summary-card .icon {
+    font-size: 28px;
+    margin-bottom: 8px;
+  }
+
+  .summary-card .value {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .summary-card .label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
+    font-weight: 500;
+  }
+
+  .summary-card .trend {
+    font-size: 11px;
+    margin-top: 8px;
+    padding: 3px 8px;
+    border-radius: 20px;
+    display: inline-block;
+  }
+
+  .trend-up {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+  }
+
+  .trend-down {
+    background: rgba(239, 83, 80, 0.15);
+    color: #f87171;
+  }
+
+  .trend-neutral {
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.5);
+  }
+
+  /* Chart Section */
+  .chart-section {
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 32px;
+    margin-bottom: 24px;
+    animation: fadeInUp 0.7s ease;
+  }
+
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .chart-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .chart-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .toggle-btn {
+    padding: 6px 14px;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.05);
+    color: rgba(255,255,255,0.6);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .toggle-btn.active {
+    border-color: var(--metric-color, #667eea);
+    background: var(--metric-bg, rgba(102, 126, 234, 0.15));
+    color: var(--metric-color, #667eea);
+    box-shadow: 0 0 12px var(--metric-shadow, rgba(102, 126, 234, 0.3));
+  }
+
+  .toggle-btn:hover {
+    background: rgba(255,255,255,0.1);
+  }
+
+  .toggle-btn .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--metric-color, #667eea);
+  }
+
+  .chart-container {
+    position: relative;
+    height: 450px;
+    width: 100%;
+  }
+
+  /* Detail Table */
+  .detail-section {
+    background: rgba(255,255,255,0.06);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
+    padding: 32px;
+    animation: fadeInUp 0.8s ease;
+    overflow-x: auto;
+  }
+
+  .detail-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 900px;
+  }
+
+  .detail-table thead th {
+    padding: 14px 16px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    white-space: nowrap;
+  }
+
+  .detail-table tbody td {
+    padding: 14px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    white-space: nowrap;
+  }
+
+  .detail-table tbody tr {
+    transition: background 0.2s;
+  }
+
+  .detail-table tbody tr:hover {
+    background: rgba(255,255,255,0.04);
+  }
+
+  .detail-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .date-cell {
+    font-weight: 600;
+    color: white;
+  }
+
+  .metric-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .metric-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .metric-value {
+    font-weight: 600;
+    font-size: 16px;
+  }
+
+  .metric-zero {
+    color: rgba(255,255,255,0.2);
+  }
+
+  .metric-highlight {
+    color: #4ade80;
+  }
+
+  /* Loading */
+  .loading-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    transition: opacity 0.5s;
+  }
+
+  .loading-overlay.hidden {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .loading-spinner {
+    width: 60px;
+    height: 60px;
+    border: 3px solid rgba(255,255,255,0.1);
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-bottom: 20px;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .loading-text {
+    color: rgba(255,255,255,0.6);
+    font-size: 16px;
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .container { padding: 12px; }
+    .header { padding: 16px 20px; flex-direction: column; gap: 16px; }
+    .header h1 { font-size: 22px; }
+    .summary-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .summary-card .value { font-size: 24px; }
+    .chart-section { padding: 16px; }
+    .chart-container { height: 300px; }
+    .chart-controls { gap: 6px; }
+    .toggle-btn { padding: 5px 10px; font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">កំពុងផ្ទុកទិន្នន័យ...</div>
+</div>
+
+<div class="container">
+  <div class="header">
+    <h1>📈 សកម្មភាព 7 ថ្ងៃចុងក្រោយ</h1>
+    <div class="header-actions">
+      <div class="meta" id="lastUpdate">កំពុងផ្ទុក...</div>
+      <button class="btn btn-glass" onclick="loadActivity()" title="ផ្ទុកឡើងវិញ">🔄 ផ្ទុកឡើងវិញ</button>
+      <button class="btn btn-primary" onclick="exportData()" title="ទាញយកទិន្នន័យ">📥 ទាញយក</button>
+    </div>
+  </div>
+
+  <div class="summary-grid" id="summaryGrid"></div>
+
+  <div class="chart-section">
+    <div class="chart-header">
+      <div class="chart-title">📊 ក្រាហ្វសកម្មភាព</div>
+      <div class="chart-controls" id="chartControls"></div>
+    </div>
+    <div class="chart-container">
+      <canvas id="activityChart"></canvas>
+    </div>
+  </div>
+
+  <div class="detail-section">
+    <div class="chart-header">
+      <div class="chart-title">📋 តារាងទិន្នន័យលម្អិត</div>
+    </div>
+    <table class="detail-table" id="detailTable">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const API = '/admin/api';
+const params = new URLSearchParams(window.location.search);
+let token = params.get('token');
+
+if (!token) {
+  try { token = localStorage.getItem('aura_admin_token'); } catch (e) {}
+}
+
+if (!token) {
+  alert('❌ ខ្វះ token');
+  window.location.href = '/admin/login.html';
+}
+
+let chart = null;
+let activityData = [];
+
+const METRICS = [
+  { key: 'commands',           icon: '📱', label: 'Commands',              color: '#667eea', bg: 'rgba(102,126,234,0.15)',  shadow: 'rgba(102,126,234,0.3)' },
+  { key: 'transactions',       icon: '💸', label: 'ប្រតិបត្តិការ',           color: '#f5576c', bg: 'rgba(245,87,108,0.15)',   shadow: 'rgba(245,87,108,0.3)' },
+  { key: 'loans',              icon: '🏦', label: 'កម្ចី',                  color: '#22c55e', bg: 'rgba(34,197,94,0.15)',    shadow: 'rgba(34,197,94,0.3)' },
+  { key: 'logins',             icon: '🔐', label: 'Logins',                color: '#ffa726', bg: 'rgba(255,167,38,0.15)',   shadow: 'rgba(255,167,38,0.3)' },
+  { key: 'notifications',      icon: '🔔', label: 'សេចក្តីសារ',             color: '#ab47bc', bg: 'rgba(171,71,188,0.15)',   shadow: 'rgba(171,71,188,0.3)' },
+  { key: 'new_users',          icon: '👤', label: 'អ្នកប្រើថ្មី',            color: '#26c6da', bg: 'rgba(38,198,218,0.15)',   shadow: 'rgba(38,198,218,0.3)' },
+  { key: 'device_registrations', icon: '📲', label: 'Device Reg',          color: '#78909c', bg: 'rgba(120,144,156,0.15)',  shadow: 'rgba(120,144,156,0.3)' },
+  { key: 'active_users',       icon: '🔥', label: 'Active Users',          color: '#ef5350', bg: 'rgba(239,83,80,0.15)',    shadow: 'rgba(239,83,80,0.3)' },
+  { key: 'mobile_money',       icon: '💰', label: 'Mobile Money',          color: '#66bb6a', bg: 'rgba(102,187,106,0.15)',  shadow: 'rgba(102,187,106,0.3)' },
+  { key: 'failed_transactions', icon: '❌', label: 'Failed',               color: '#d32f2f', bg: 'rgba(211,47,47,0.15)',    shadow: 'rgba(211,47,47,0.3)' },
+];
+
+let visibleMetrics = new Set(METRICS.map(m => m.key));
+
+async function api(path) {
+  const res = await fetch(API + path, {
+    headers: { 'Authorization': 'Bearer ' + token },
+  });
+  let json = null;
+  try { json = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    if (res.status === 401) {
+      alert('Session expired');
+      window.location.href = '/admin/login.html';
+    }
+    throw new Error(json?.error || `HTTP ${res.status}`);
+  }
+  return json?.data;
+}
+
+function buildSummaryCards(activity) {
+  const grid = document.getElementById('summaryGrid');
+  const totals = {};
+  METRICS.forEach(m => {
+    totals[m.key] = activity.reduce((sum, a) => sum + (a[m.key] || 0), 0);
+  });
+
+  // Compute day-over-day trends for each metric
+  const lastDay = activity[activity.length - 1];
+  const prevDay = activity.length >= 2 ? activity[activity.length - 2] : null;
+
+  grid.innerHTML = METRICS.map(m => {
+    const total = totals[m.key];
+    const last = lastDay ? (lastDay[m.key] || 0) : 0;
+    const prev = prevDay ? (prevDay[m.key] || 0) : 0;
+    let trendHtml = '';
+    if (prev !== null && prev !== undefined) {
+      if (last > prev) {
+        trendHtml = `<div class="trend trend-up">↑ +${last - prev} ថ្ងៃនេះ</div>`;
+      } else if (last < prev) {
+        trendHtml = `<div class="trend trend-down">↓ ${last - prev} ថ្ងៃនេះ</div>`;
+      } else {
+        trendHtml = `<div class="trend trend-neutral">→ ស្មើ</div>`;
+      }
+    }
+    return `
+      <div class="summary-card" style="--card-color: ${m.color}" onclick="toggleMetric('${m.key}')">
+        <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${m.color};border-radius:16px 16px 0 0;"></div>
+        <div class="icon">${m.icon}</div>
+        <div class="value" style="color:${m.color}">${total.toLocaleString()}</div>
+        <div class="label">${m.label}</div>
+        ${trendHtml}
+      </div>
+    `;
+  }).join('');
+}
+
+function buildControls() {
+  const container = document.getElementById('chartControls');
+  container.innerHTML = METRICS.map(m => `
+    <button class="toggle-btn ${visibleMetrics.has(m.key) ? 'active' : ''}"
+            id="toggle-${m.key}"
+            style="--metric-color:${m.color};--metric-bg:${m.bg};--metric-shadow:${m.shadow}"
+            onclick="toggleMetric('${m.key}')">
+      <span class="dot"></span>
+      ${m.icon} ${m.label}
+    </button>
+  `).join('');
+}
+
+function toggleMetric(key) {
+  if (visibleMetrics.has(key)) {
+    if (visibleMetrics.size <= 1) return;
+    visibleMetrics.delete(key);
+  } else {
+    visibleMetrics.add(key);
+  }
+  document.getElementById(`toggle-${key}`).classList.toggle('active', visibleMetrics.has(key));
+  updateChartVisibility();
+}
+
+function updateChartVisibility() {
+  if (!chart) return;
+  chart.data.datasets.forEach((ds, i) => {
+    const meta = chart.getDatasetMeta(i);
+    meta.hidden = !visibleMetrics.has(ds._metricKey);
+  });
+  chart.update();
+}
+
+function buildChart(activity) {
+  const ctx = document.getElementById('activityChart');
+  if (chart) chart.destroy();
+
+  const labels = activity.map(a => {
+    const d = new Date(a.date);
+    const days = ['អាទិត្យ', 'ចន្ទ', 'អង្គារ', 'ពុធ', 'ព្រហស្បតិ៍', 'សុក្រ', 'សៅរ៍'];
+    return `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
+  });
+
+  const datasets = METRICS.map(m => ({
+    label: `${m.icon} ${m.label}`,
+    _metricKey: m.key,
+    data: activity.map(a => a[m.key] || 0),
+    borderColor: m.color,
+    backgroundColor: m.bg,
+    borderWidth: visibleMetrics.has(m.key) ? 3 : 1,
+    fill: true,
+    tension: 0.4,
+    pointRadius: 5,
+    pointHoverRadius: 8,
+    pointBackgroundColor: m.color,
+    pointBorderColor: 'rgba(255,255,255,0.8)',
+    pointBorderWidth: 2,
+    hidden: !visibleMetrics.has(m.key),
+  }));
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top',
+          labels: {
+            color: 'rgba(255,255,255,0.7)',
+            font: { family: 'Noto Sans Khmer', size: 12 },
+            padding: 15,
+            usePointStyle: true,
+            pointStyle: 'circle',
+          },
+          onClick: function(e, legendItem, legend) {
+            const key = legend.chart.data.datasets[legendItem.datasetIndex]._metricKey;
+            toggleMetric(key);
+          }
+        },
+        tooltip: {
+          backgroundColor: 'rgba(15, 12, 41, 0.95)',
+          titleColor: 'white',
+          bodyColor: 'rgba(255,255,255,0.8)',
+          borderColor: 'rgba(255,255,255,0.15)',
+          borderWidth: 1,
+          cornerRadius: 12,
+          padding: 14,
+          titleFont: { family: 'Noto Sans Khmer', size: 14, weight: '600' },
+          bodyFont: { family: 'Noto Sans Khmer', size: 13 },
+          callbacks: {
+            label: function(context) {
+              return ` ${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+            }
+          }
+        },
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            stepSize: 1,
+            color: 'rgba(255,255,255,0.4)',
+            font: { family: 'Noto Sans Khmer', size: 12 },
+          },
+          grid: {
+            color: 'rgba(255,255,255,0.06)',
+          },
+          border: { display: false },
+        },
+        x: {
+          ticks: {
+            color: 'rgba(255,255,255,0.5)',
+            font: { family: 'Noto Sans Khmer', size: 12 },
+          },
+          grid: { display: false },
+          border: { display: false },
+        }
+      },
+      animation: {
+        duration: 800,
+        easing: 'easeOutQuart',
+      },
+    }
+  });
+}
+
+function buildDetailTable(activity) {
+  const table = document.getElementById('detailTable');
+  const thead = table.querySelector('thead');
+  const tbody = table.querySelector('tbody');
+
+  thead.innerHTML = `<tr>
+    <th>📅 ថ្ងៃ</th>
+    ${METRICS.map(m => `<th>${m.icon} ${m.label}</th>`).join('')}
+  </tr>`;
+
+  tbody.innerHTML = activity.map(a => {
+    const d = new Date(a.date);
+    const days = ['អាទិត្យ', 'ចន្ទ', 'អង្គារ', 'ពុធ', 'ព្រហស្បតិ៍', 'សុក្រ', 'សៅរ៍'];
+    const dateStr = `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+    return `<tr>
+      <td class="date-cell">${dateStr}</td>
+      ${METRICS.map(m => {
+        const val = a[m.key] || 0;
+        const cls = val === 0 ? 'metric-zero' : (val > 0 ? 'metric-highlight' : '');
+        return `<td><div class="metric-cell"><span class="metric-dot" style="background:${m.color}"></span><span class="metric-value ${cls}">${val.toLocaleString()}</span></div></td>`;
+      }).join('')}
+    </tr>`;
+  }).reverse().join('');
+}
+
+function exportData() {
+  if (!activityData.length) return;
+  const headers = ['date', ...METRICS.map(m => m.key)];
+  const csv = [
+    headers.join(','),
+    ...activityData.map(a => headers.map(h => a[h] ?? 0).join(','))
+  ].join('\n');
+
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `activity_7days_${new Date().toISOString().slice(0,10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function loadActivity() {
+  try {
+    const data = await api('/usage');
+    activityData = data.recent_activity;
+
+    buildSummaryCards(activityData);
+    buildControls();
+    buildChart(activityData);
+    buildDetailTable(activityData);
+
+    document.getElementById('lastUpdate').textContent =
+      `ធ្វើបច្ចុប្បន្នភាព: ${new Date().toLocaleTimeString('km-KH')}`;
+
+    document.getElementById('loadingOverlay').classList.add('hidden');
+  } catch (err) {
+    console.error('Load error:', err);
+    document.getElementById('loadingOverlay').innerHTML = `
+      <div style="text-align:center;">
+        <div style="font-size:64px;margin-bottom:20px;">❌</div>
+        <div style="color:#f87171;font-size:18px;margin-bottom:12px;">មិនអាចផ្ទុកទិន្នន័យ</div>
+        <div style="color:rgba(255,255,255,0.5);margin-bottom:24px;">${err.message}</div>
+        <button class="btn btn-primary" onclick="loadActivity()">🔄 ព្យាយាមម្ដងទៀត</button>
+      </div>
+    `;
+  }
+}
+
+loadActivity();
+</script>
+
+</body>
+</html>
