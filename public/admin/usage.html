@@ -367,6 +367,54 @@ function renderDashboard(data) {
         </div>
       </div>
     </div>
+
+    <div class="card" style="margin-top: 24px;">
+      <h2>🧹 សំអាត់ទិន្នន័យចាស់</h2>
+      <div style="background: #fff3cd; padding: 16px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #ffc107;">
+        <strong>⚠️ ប្រយ័ត្ន:</strong> មុខងារនេះនឹងលុបទិន្នន័យចាស់ៗជារៀងរហូត។ សូមប្រើដោយប្រយ័ត្ន!
+      </div>
+      
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px;">
+        <div>
+          <label style="display: block; font-size: 13px; font-weight: 600; color: #666; margin-bottom: 6px;">
+            លុបទិន្នន័យដែលចាស់ជាង (ថ្ងៃ)
+          </label>
+          <input type="number" id="cleanupDays" value="7" min="1" max="365" 
+                 style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-family: inherit; font-size: 14px;" />
+        </div>
+        
+        <div>
+          <label style="display: block; font-size: 13px; font-weight: 600; color: #666; margin-bottom: 6px;">
+            ប្រភេទទិន្នន័យ
+          </label>
+          <div style="display: flex; flex-direction: column; gap: 8px; padding: 10px; background: #f9fafb; border-radius: 8px;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="cleanCommands" checked />
+              <span>📱 Device Commands</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="cleanLocations" checked />
+              <span>📍 Location History</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+              <input type="checkbox" id="cleanAudit" checked />
+              <span>🕓 Audit Logs</span>
+            </label>
+          </div>
+        </div>
+      </div>
+      
+      <div style="display: flex; gap: 12px;">
+        <button onclick="previewCleanup()" class="btn-secondary" style="padding: 12px 24px; background: #6c757d; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 14px; transition: all 0.3s;">
+          🔍 មើលជាមុន (Dry Run)
+        </button>
+        <button onclick="executeCleanup()" class="btn-danger" style="padding: 12px 24px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 14px; transition: all 0.3s; box-shadow: 0 2px 8px rgba(245, 87, 108, 0.3);">
+          🗑️ លុបទិន្នន័យ
+        </button>
+      </div>
+      
+      <div id="cleanupResult" style="margin-top: 20px; display: none;"></div>
+    </div>
   `;
   
   document.getElementById('content').innerHTML = html;
@@ -505,6 +553,108 @@ function renderActivityChart(activity) {
       }
     }
   });
+}
+
+async function previewCleanup() {
+  const days = parseInt(document.getElementById('cleanupDays').value);
+  const types = [];
+  if (document.getElementById('cleanCommands').checked) types.push('device_commands');
+  if (document.getElementById('cleanLocations').checked) types.push('device_locations');
+  if (document.getElementById('cleanAudit').checked) types.push('audit_logs');
+  
+  if (types.length === 0) {
+    alert('សូមជ្រើសរើសយ៉ាងហោចណាស់ប្រភេទទិន្នន័យមួយ');
+    return;
+  }
+  
+  const resultDiv = document.getElementById('cleanupResult');
+  resultDiv.style.display = 'block';
+  resultDiv.innerHTML = '<div class="loading"><div class="loading-icon">⏳</div><div>កំពុងពិនិត្យ...</div></div>';
+  
+  try {
+    const data = await api('/cleanup', {
+      method: 'POST',
+      body: { days, dry_run: true, types }
+    });
+    
+    let html = '<div style="background: #e7f3ff; padding: 16px; border-radius: 8px; border-left: 4px solid #2196F3;">';
+    html += '<h3 style="color: #1976D2; margin-bottom: 12px;">🔍 លទ្ធផល Dry Run</h3>';
+    html += '<p style="margin-bottom: 12px;">ទិន្នន័យដែលនឹងត្រូវលុប (ចាស់ជាង <strong>' + days + ' ថ្ងៃ</strong>):</p>';
+    html += '<ul style="list-style: none; padding: 0;">';
+    
+    for (const [type, info] of Object.entries(data.results)) {
+      const icon = type === 'device_commands' ? '📱' : type === 'device_locations' ? '📍' : '🕓';
+      html += `<li style="padding: 8px 0; border-bottom: 1px solid #ddd;">`;
+      html += `${icon} <strong>${type}:</strong> ${info.count} rows`;
+      html += `</li>`;
+    }
+    
+    html += '</ul>';
+    html += '<p style="margin-top: 12px; color: #666; font-size: 13px;">';
+    html += '⚠️ នេះគ្រាន់តែជាការពិនិត្យប៉ុណ្ណោះ។ ទិន្នន័យមិនទាន់ត្រូវបានលុបទេ។';
+    html += '</p>';
+    html += '</div>';
+    
+    resultDiv.innerHTML = html;
+  } catch (error) {
+    resultDiv.innerHTML = `<div style="background: #ffebee; padding: 16px; border-radius: 8px; border-left: 4px solid #f44336; color: #c62828;">❌ កំហុស: ${error.message}</div>`;
+  }
+}
+
+async function executeCleanup() {
+  const days = parseInt(document.getElementById('cleanupDays').value);
+  const types = [];
+  if (document.getElementById('cleanCommands').checked) types.push('device_commands');
+  if (document.getElementById('cleanLocations').checked) types.push('device_locations');
+  if (document.getElementById('cleanAudit').checked) types.push('audit_logs');
+  
+  if (types.length === 0) {
+    alert('សូមជ្រើសរើសយ៉ាងហោចណាស់ប្រភេទទិន្នន័យមួយ');
+    return;
+  }
+  
+  if (!confirm(`⚠️ តើអ្នកប្រាកដទេថាចង់លុបទិន្នន័យដែលចាស់ជាង ${days} ថ្ងៃ?\n\nប្រភេទ: ${types.join(', ')}\n\nសកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ!`)) {
+    return;
+  }
+  
+  const resultDiv = document.getElementById('cleanupResult');
+  resultDiv.style.display = 'block';
+  resultDiv.innerHTML = '<div class="loading"><div class="-loading-icon">⏳</div><div>កំពុងលុបទិន្នន័យ...</div></div>';
+  
+  try {
+    const data = await api('/cleanup', {
+      method: 'POST',
+      body: { days, dry_run: false, types }
+    });
+    
+    let html = '<div style="background: #e8f5e9; padding: 16px; border-radius: 8px; border-left: 4px solid #4caf50;">';
+    html += '<h3 style="color: #2e7d32; margin-bottom: 12px;">✅ បានលុបដោយជោគជ័យ!</h3>';
+    html += '<p style="margin-bottom: 12px;">ទិន្នន័យដែលបានលុប (ចាស់ជាង <strong>' + days + ' ថ្ងៃ</strong>):</p>';
+    html += '<ul style="list-style: none; padding: 0;">';
+    
+    let totalDeleted = 0;
+    for (const [type, info] of Object.entries(data.results)) {
+      const icon = type === 'device_commands' ? '📱' : type === 'device_locations' ? '📍' : '🕓';
+      const deleted = info.deleted || 0;
+      totalDeleted += deleted;
+      html += `<li style="padding: 8px 0; border-bottom: 1px solid #ddd;">`;
+      html += `${icon} <strong>${type}:</strong> បានលុប ${deleted} rows`;
+      html += `</li>`;
+    }
+    
+    html += '</ul>';
+    html += '<p style="margin-top: 12px; color: #2e7d32; font-weight: 600;">';
+    html += `🎉 សរុប: បានលុប ${totalDeleted} rows ដោយជោគជ័យ!`;
+    html += '</p>';
+    html += '</div>';
+    
+    resultDiv.innerHTML = html;
+    
+    // Reload usage data to show updated database size
+    setTimeout(() => loadUsage(), 1000);
+  } catch (error) {
+    resultDiv.innerHTML = `<div style="background: #ffebee; padding: 16px; border-radius: 8px; border-left: 4px solid #f44336; color: #c62828;">❌ កំហុស: ${error.message}</div>`;
+  }
 }
 
 loadUsage();

@@ -876,5 +876,74 @@ module.exports = function createAdminRouter(ctx) {
     });
   }));
 
+  // Cleanup old data
+  router.post('/cleanup', adminAuth, handle(async (req, res) => {
+    const { days = 7, dry_run = false, types = ['device_commands', 'device_locations', 'audit_logs'] } = req.body;
+    
+    if (!days || days < 1) {
+      throw new ApiError('days ត្រូវតែ >= 1', 400, 'INVALID_DAYS');
+    }
+    
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    
+    const results = {};
+    
+    // Count what would be deleted
+    if (types.includes('device_commands')) {
+      const count = await db.prepare(
+        `SELECT COUNT(*) as count FROM device_commands WHERE created_at < ?`
+      ).get(cutoffDate.toISOString());
+      results.device_commands = { count: count.count, older_than: `${days} days` };
+    }
+    
+    if (types.includes('device_locations')) {
+      const count = await db.prepare(
+        `SELECT COUNT(*) as count FROM device_locations WHERE recorded_at < ?`
+      ).get(cutoffDate.toISOString());
+      results.device_locations = { count: count.count, older_than: `${days} days` };
+    }
+    
+    if (types.includes('audit_logs')) {
+      const count = await db.prepare(
+        `SELECT COUNT(*) as count FROM audit_logs WHERE created_at < ?`
+      ).get(cutoffDate.toISOString());
+      results.audit_logs = { count: count.count, older_than: `${days} days` };
+    }
+    
+    // If dry run, just return counts
+    if (dry_run) {
+      ok(res, { dry_run: true, cutoff_date: cutoffDate.toISOString(), results });
+      return;
+    }
+    
+    // Actually delete
+    if (types.includes('device_commands')) {
+      const deleted = await db.prepare(
+        `DELETE FROM device_commands WHERE created_at < ?`
+      ).run(cutoffDate.toISOString());
+      results.device_commands.deleted = deleted.changes || 0;
+    }
+    
+    if (types.includes('device_locations')) {
+      const deleted = await db.prepare(
+        `DELETE FROM device_locations WHERE recorded_at < ?`
+      ).run(cutoffDate.toISOString());
+      results.device_locations.deleted = deleted.changes || 0;
+    }
+    
+    if (types.includes('audit_logs')) {
+      const deleted = await db.prepare(
+        `DELETE FROM audit_logs WHERE created_at < ?`
+      ).run(cutoffDate.toISOString());
+      results.audit_logs.deleted = deleted.changes || 0;
+    }
+    
+    await audit(req, 'cleanup', 'system', null, 
+      `Deleted data older than ${days} days: ${JSON.stringify(results)}`);
+    
+    ok(res, { dry_run: false, cutoff_date: cutoffDate.toISOString(), results });
+  }));
+
   return router;
 };
