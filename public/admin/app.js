@@ -2270,7 +2270,7 @@ function renderAdminIdentity() {
       <span class="admin-role-ic">${ri.icon}</span>
       <span class="admin-live-dot"></span>
     </span>
-    <span class="foot-tooltip" id="adminTooltip">${esc(admin.name || 'Admin')} · ${esc(admin.email)}</span>`;
+    <span class="foot-tooltip" id="adminTooltip">${esc(admin.name || 'Admin')} · ${ri.icon} ${esc(ri.label)}</span>`;
   btn.onclick = showAdminProfile;
 }
 

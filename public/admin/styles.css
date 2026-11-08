@@ -941,7 +941,7 @@ input:focus, select:focus, textarea:focus {
 }
 .udrawer.open .udrawer-panel { transform: translateX(0); }
 .udrawer-hero {
-  position: relative; height: 132px; flex: 0 0 auto; overflow: hidden;
+  position: relative; height: 116px; flex: 0 0 auto; overflow: hidden;
   background: linear-gradient(135deg, var(--av-a, var(--accent)), var(--av-b, #2b7fc0));
 }
 .udrawer-hero-glow {
@@ -968,7 +968,7 @@ input:focus, select:focus, textarea:focus {
   border-radius: 999px; backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,.22);
 }
 .udrawer-scroll { flex: 1; overflow-y: auto; padding: 0 22px 26px; }
-.udrawer-head { display: flex; gap: 16px; align-items: flex-end; margin-top: -46px; position: relative; z-index: 1; }
+.udrawer-head { display: flex; gap: 16px; align-items: center; margin-top: 20px; position: relative; z-index: 1; }
 .udrawer-av .avatar { box-shadow: 0 0 0 4px var(--bg-2), 0 10px 26px rgba(0,0,0,.5); }
 .udrawer-av .avatar-wrap .dot { width: 16px; height: 16px; border-width: 3px; right: 2px; bottom: 2px; }
 .udrawer-idbox { padding-bottom: 4px; min-width: 0; }
