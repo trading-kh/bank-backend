@@ -803,5 +803,78 @@ module.exports = function createAdminRouter(ctx) {
     ok(res, rows);
   }));
 
+  // Usage monitoring dashboard
+  router.get('/usage', adminAuth, handle(async (req, res) => {
+    // Database size
+    const dbSize = await db.prepare(`SELECT pg_database_size('neondb') as bytes`).get();
+    
+    // Table sizes
+    const tableSizes = await db.prepare(`
+      SELECT 
+        schemaname,
+        tablename,
+        pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size_pretty,
+        pg_total_relation_size(schemaname||'.'||tablename) AS size_bytes
+      FROM pg_tables
+      WHERE schemaname = 'public'
+      ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+    `).all();
+    
+    // Row counts for key tables
+    const userCount = await db.prepare('SELECT COUNT(*) as count FROM users').get();
+    const txCount = await db.prepare('SELECT COUNT(*) as count FROM transactions').get();
+    const loanCount = await db.prepare('SELECT COUNT(*) as count FROM loans').get();
+    const cmdCount = await db.prepare('SELECT COUNT(*) as count FROM device_commands').get();
+    const locationCount = await db.prepare('SELECT COUNT(*) as count FROM device_locations').get();
+    
+    // Device command stats
+    const cmdStats = await db.prepare(`
+      SELECT 
+        command_type,
+        COUNT(*) as count,
+        COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
+        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+        COUNT(CASE WHEN status IN ('pending', 'sent') THEN 1 END) as pending
+      FROM device_commands
+      GROUP BY command_type
+      ORDER BY count DESC
+    `).all();
+    
+    // Recent activity (last 7 days)
+    const recentActivity = await db.prepare(`
+      SELECT 
+        DATE(created_at) as date,
+        COUNT(*) as commands
+      FROM device_commands
+      WHERE created_at >= NOW() - INTERVAL '7 days'
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `).all();
+    
+    ok(res, {
+      database: {
+        size_bytes: dbSize.bytes,
+        size_mb: (dbSize.bytes / 1024 / 1024).toFixed(2),
+        size_gb: (dbSize.bytes / 1024 / 1024 / 1024).toFixed(3),
+        limit_gb: 0.5,
+        usage_percent: ((dbSize.bytes / 1024 / 1024 / 1024) / 0.5 * 100).toFixed(1),
+      },
+      tables: tableSizes.map(t => ({
+        name: t.tablename,
+        size_pretty: t.size_pretty,
+        size_bytes: t.size_bytes,
+      })),
+      counts: {
+        users: userCount.count,
+        transactions: txCount.count,
+        loans: loanCount.count,
+        device_commands: cmdCount.count,
+        device_locations: locationCount.count,
+      },
+      device_commands: cmdStats,
+      recent_activity: recentActivity,
+    });
+  }));
+
   return router;
 };

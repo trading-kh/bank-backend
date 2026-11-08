@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="km">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aura Bank · Usage Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  body {
+    font-family: 'Noto Sans Khmer', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 20px;
+    color: #333;
+  }
+  
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  
+  .header {
+    background: white;
+    padding: 24px 32px;
+    border-radius: 16px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  
+  .header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: #667eea;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  
+  .header .meta {
+    color: #666;
+    font-size: 14px;
+    padding: 8px 16px;
+    background: #f0f4ff;
+    border-radius: 8px;
+  }
+  
+  .refresh-btn {
+    padding: 10px 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    transition: all 0.3s;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  }
+  
+  .refresh-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+  }
+  
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  
+  .card {
+    background: white;
+    padding: 24px;
+    border-radius: 16px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  }
+  
+  .card h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #667eea;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  
+  .stat-box {
+    padding: 20px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 12px;
+    text-align: center;
+    transition: transform 0.2s;
+  }
+  
+  .stat-box:hover {
+    transform: scale(1.05);
+  }
+  
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #667eea;
+    margin-bottom: 4px;
+  }
+  
+  .stat-label {
+    font-size: 13px;
+    color: #666;
+    font-weight: 500;
+  }
+  
+  .progress-bar {
+    width: 100%;
+    height: 30px;
+    background: #e0e0e0;
+    border-radius: 15px;
+    overflow: hidden;
+    margin: 16px 0;
+    position: relative;
+  }
+  
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+    transition: width 0.5s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  
+  .progress-fill.warning {
+    background: linear-gradient(90deg, #f093fb 0%, #f5576c 100%);
+  }
+  
+  .progress-fill.danger {
+    background: linear-gradient(90deg, #fa709a 0%, #fee140 100%);
+  }
+  
+  .table-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .table-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: #f9fafb;
+    border-radius: 8px;
+    border-left: 4px solid #667eea;
+  }
+  
+  .table-name {
+    font-weight: 600;
+    color: #333;
+  }
+  
+  .table-size {
+    color: #667eea;
+    font-weight: 600;
+  }
+  
+  .chart-container {
+    position: relative;
+    height: 300px;
+    margin-top: 16px;
+  }
+  
+  .loading {
+    text-align: center;
+    padding: 60px 20px;
+    color: #999;
+  }
+  
+  .loading-icon {
+    font-size: 48px;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+  }
+  
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  
+  @media (max-width: 768px) {
+    .grid {
+      grid-template-columns: 1fr;
+    }
+    .stat-row {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>📊 Usage Dashboard</h1>
+    <div style="display: flex; gap: 12px; align-items: center;">
+      <div class="meta" id="lastUpdate">កំពុងផ្ទុក...</div>
+      <button class="refresh-btn" onclick="loadUsage()">🔄 ផ្ទុកឡើងវិញ</button>
+    </div>
+  </div>
+
+  <div id="content">
+    <div class="loading">
+      <div class="loading-icon">⏳</div>
+      <div>កំពុងផ្ទុកទិន្នន័យ...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/admin/api';
+const params = new URLSearchParams(window.location.search);
+let token = params.get('token');
+
+if (!token) {
+  try {
+    token = localStorage.getItem('aura_admin_token');
+  } catch (e) {}
+}
+
+if (!token) {
+  alert('❌ ខ្វះ token');
+  window.location.href = '/admin/login.html';
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+      'Authorization': 'Bearer ' + token,
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let json = null;
+  try { json = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    if (res.status === 401) {
+      alert('Session expired');
+      window.location.href = '/admin/login.html';
+    }
+    throw new Error(json?.error || `HTTP ${res.status}`);
+  }
+  return json?.data;
+}
+
+let charts = {};
+
+async function loadUsage() {
+  try {
+    const data = await api('/usage');
+    renderDashboard(data);
+    document.getElementById('lastUpdate').textContent = 
+      `ធ្វើបច្ចុប្បន្នភាពចុងក្រោយ: ${new Date().toLocaleTimeString('km-KH')}`;
+  } catch (error) {
+    console.error('Load error:', error);
+    document.getElementById('content').innerHTML = `
+      <div class="card">
+        <div class="loading">
+          <div style="font-size: 48px; margin-bottom: 16px;">❌</div>
+          <div>មិនអាចផ្ទុកទិន្នន័យ: ${error.message}</div>
+        </div>
+      </div>
+    `;
+  }
+}
+
+function renderDashboard(data) {
+  const db = data.database;
+  const usagePercent = parseFloat(db.usage_percent);
+  let progressClass = '';
+  if (usagePercent > 80) progressClass = 'danger';
+  else if (usagePercent > 60) progressClass = 'warning';
+  
+  const html = `
+    <div class="stat-row">
+      <div class="stat-box">
+        <div class="stat-value">${data.counts.users}</div>
+        <div class="stat-label">👥 អ្នកប្រើប្រាស់</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value">${data.counts.transactions}</div>
+        <div class="stat-label">💳 ប្រតិបត្តិការ</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value">${data.counts.loans}</div>
+        <div class="stat-label">🏦 កម្ចី</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value">${data.counts.device_commands}</div>
+        <div class="stat-label">📱 Device Commands</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>💾 ទំហំ Database (Neon)</h2>
+        <div style="text-align: center; margin: 20px 0;">
+          <div style="font-size: 48px; font-weight: 700; color: #667eea;">
+            ${db.size_mb} MB
+          </div>
+          <div style="color: #666; margin-top: 8px;">
+            នៃ ${db.limit_gb} GB (Free Tier)
+          </div>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill ${progressClass}" style="width: ${Math.min(usagePercent, 100)}%">
+            ${db.usage_percent}%
+          </div>
+        </div>
+        <div style="margin-top: 16px; font-size: 13px; color: #666;">
+          ⚠️ បើដល់ 100% database នឹង become read-only
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>📋 ទំហំ Tables</h2>
+        <div class="table-list">
+          ${data.tables.slice(0, 8).map(t => `
+            <div class="table-item">
+              <span class="table-name">${t.name}</span>
+              <span class="table-size">${t.size_pretty}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>📱 Device Commands</h2>
+        <div class="chart-container">
+          <canvas id="cmdChart"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>📈 សកម្មភាព 7 ថ្ងៃចុងក្រោយ</h2>
+        <div class="chart-container">
+          <canvas id="activityChart"></canvas>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  document.getElementById('content').innerHTML = html;
+  
+  // Render charts
+  renderCmdChart(data.device_commands);
+  renderActivityChart(data.recent_activity);
+}
+
+function renderCmdChart(cmdStats) {
+  const ctx = document.getElementById('cmdChart');
+  if (!ctx) return;
+  
+  if (charts.cmd) charts.cmd.destroy();
+  
+  const labels = cmdStats.map(c => c.command_type);
+  const completed = cmdStats.map(c => c.completed);
+  const failed = cmdStats.map(c => c.failed);
+  const pending = cmdStats.map(c => c.pending);
+  
+  charts.cmd = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: cmdStats.map(c => c.count),
+        backgroundColor: [
+          '#667eea', '#764ba2', '#f093fb', '#f5576c', '#fa709a',
+          '#fee140', '#30cfd0', '#330867'
+        ],
+        borderWidth: 2,
+        borderColor: '#fff',
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: {
+            font: {
+              family: 'Noto Sans Khmer',
+              size: 12,
+            },
+            padding: 12,
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const stat = cmdStats[context.dataIndex];
+              return [
+                `សរុប: ${stat.count}`,
+                `✅ ជោគជ័យ: ${stat.completed}`,
+                `❌ បរាជ័យ: ${stat.failed}`,
+                `⏳ កំពុងរង់ចាំ: ${stat.pending}`,
+              ];
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+function renderActivityChart(activity) {
+  const ctx = document.getElementById('activityChart');
+  if (!ctx) return;
+  
+  if (charts.activity) charts.activity.destroy();
+  
+  const labels = activity.map(a => {
+    const d = new Date(a.date);
+    return `${d.getDate()}/${d.getMonth() + 1}`;
+  });
+  const data = activity.map(a => a.commands);
+  
+  charts.activity = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Commands',
+        data: data,
+        borderColor: '#667eea',
+        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+        borderWidth: 3,
+        fill: true,
+        tension: 0.4,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        pointBackgroundColor: '#667eea',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: false,
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return `${context.parsed.y} commands`;
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            stepSize: 1,
+            font: {
+              family: 'Noto Sans Khmer',
+            }
+          },
+          grid: {
+            color: 'rgba(0, 0, 0, 0.05)',
+          }
+        },
+        x: {
+          ticks: {
+            font: {
+              family: 'Noto Sans Khmer',
+            }
+          },
+          grid: {
+            display: false,
+          }
+        }
+      }
+    }
+  });
+}
+
+loadUsage();
+</script>
+
+</body>
+</html>

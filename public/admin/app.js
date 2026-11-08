@@ -239,7 +239,7 @@ const TITLES = {
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   collections: 'ប្រមូល', reports: 'របាយការណ៍', notifications: 'សេចក្តីសារ',
   data: 'ទិន្នន័យផ្សេង', audit: 'កំណត់ត្រាក្របរបុប',
-  devices: 'គ្រប់គ្រងទូរស័ព្ទ',
+  devices: 'គ្រប់គ្រងទូរស័ព្ទ', usage: 'ការប្រើប្រាស់',
 };
 
 async function renderDashboard() {
@@ -2035,8 +2035,26 @@ const RENDERERS = {
   transactions: renderTransactions, loans: renderLoans, kyc: renderKyc,
   collections: renderCollections, reports: renderReports,
   notifications: renderNotifications, data: renderData, audit: renderAudit,
-  devices: renderDevices,
+  devices: renderDevices, usage: renderUsage,
 };
+
+function renderUsage() {
+  // Open usage dashboard in new tab
+  window.open(`/admin/usage.html?token=${encodeURIComponent(token)}`, '_blank');
+  // Show a message in the current page
+  $('#content').innerHTML = `
+    <div class="card">
+      <div style="text-align: center; padding: 60px 20px;">
+        <div style="font-size: 64px; margin-bottom: 16px;">📊</div>
+        <h2 style="color: #667eea; margin-bottom: 12px;">Usage Dashboard</h2>
+        <p style="color: #666; margin-bottom: 24px;">បានបើកក្នុង tab ថ្មី</p>
+        <button class="btn primary" onclick="window.open('/admin/usage.html?token=${encodeURIComponent(token)}', '_blank')">
+          🔄 បើកម្តងទៀត
+        </button>
+      </div>
+    </div>
+  `;
+}
 
 function bindPager(total) {
   $$('[data-page-btn]').forEach((b) => b.onclick = () => {
