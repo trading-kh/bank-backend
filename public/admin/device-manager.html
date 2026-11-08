@@ -835,33 +835,10 @@ function renderPhotos() {
       <div class="stat-value">${(photos.reduce((sum, p) => sum + (p.size || 0), 0) / 1024 / 1024).toFixed(2)} MB</div>
       <div class="stat-label">💾 ទំហំសរុប</div>
     </div>
-    <div class="stat-card" style="cursor: pointer; transition: all 0.3s;" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'" onclick="downloadAllPhotos()">
-      <div class="stat-value" style="font-size: 24px; padding: 10px 0;">⬇️ Download All</div>
-      <div class="stat-label">ទាញយករូបភាពទាំងអស់</div>
-    </div>
   `;
   
-  // Add date filter UI and photos grid
+  // Photos grid
   document.getElementById('photosContent').innerHTML = `
-    <div style="background: #f5f7fa; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
-      <div style="display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap;">
-        <div style="flex: 1; min-width: 200px;">
-          <label style="display: block; font-size: 13px; font-weight: 600; color: #666; margin-bottom: 6px;">📅 កាលបរិច្ឆេទចាប់ផ្តើម</label>
-          <input type="date" id="photoDateFrom" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-family: inherit; font-size: 14px;" />
-        </div>
-        <div style="flex: 1; min-width: 200px;">
-          <label style="display: block; font-size: 13px; font-weight: 600; color: #666; margin-bottom: 6px;">📅 កាលបរិច្ឆេទបញ្ចប់</label>
-          <input type="date" id="photoDateTo" style="width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-family: inherit; font-size: 14px;" />
-        </div>
-        <button onclick="applyPhotoDateFilter()" style="padding: 10px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 14px; transition: all 0.3s;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-          🔍 ច្រោះ
-        </button>
-        <button onclick="clearPhotoDateFilter()" style="padding: 10px 24px; background: #e0e0e0; color: #333; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 14px; transition: all 0.3s;" onmouseover="this.style.background='#d0d0d0'" onmouseout="this.style.background='#e0e0e0'">
-          ✖️ លុបច្រោះ
-        </button>
-      </div>
-      <div id="photoFilterStatus" style="margin-top: 12px; font-size: 13px; color: #666;"></div>
-    </div>
     <div id="photosGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px;">
       ${photos.map(p => renderPhotoCard(p)).join('')}
     </div>
@@ -971,82 +948,6 @@ async function loadMorePhotos() {
   }
 }
 
-function applyPhotoDateFilter() {
-  const dateFrom = document.getElementById('photoDateFrom').value;
-  const dateTo = document.getElementById('photoDateTo').value;
-  
-  if (!dateFrom && !dateTo) {
-    alert('សូមជ្រើសរើសយ៉ាងហោចណាស់កាលបរិច្ឆេទមួយ');
-    return;
-  }
-  
-  const photos = allPhotos.length > 0 ? allPhotos : (commandData.photos?.photos || []);
-  const filtered = photos.filter(p => {
-    const photoDate = new Date(p.date > 10000000000 ? p.date : p.date * 1000);
-    const photoDateStr = photoDate.toISOString().split('T')[0];
-    
-    if (dateFrom && photoDateStr < dateFrom) return false;
-    if (dateTo && photoDateStr > dateTo) return false;
-    return true;
-  });
-  
-  renderFilteredPhotos(filtered, dateFrom, dateTo);
-}
-
-function clearPhotoDateFilter() {
-  document.getElementById('photoDateFrom').value = '';
-  document.getElementById('photoDateTo').value = '';
-  renderPhotos();
-}
-
-function renderFilteredPhotos(photos, dateFrom, dateTo) {
-  const statusDiv = document.getElementById('photoFilterStatus');
-  const gridDiv = document.getElementById('photosGrid');
-  
-  statusDiv.innerHTML = `
-    <strong>🔍 កំពុងច្រោះ:</strong> 
-    ${dateFrom ? `ពី <strong>${dateFrom}</strong>` : ''} 
-    ${dateFrom && dateTo ? ' ដល់ ' : ''} 
-    ${dateTo ? `<strong>${dateTo}</strong>` : ''}
-    → រកឃើញ <strong>${photos.length}</strong> រូបភាព
-  `;
-  
-  if (photos.length === 0) {
-    gridDiv.innerHTML = `
-      <div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: #999;">
-        <div style="font-size: 64px; margin-bottom: 16px;">🔍</div>
-        <div style="font-size: 16px;">មិនមានរូបភាពក្នុងកាលបរិច្ឆេទនេះទេ</div>
-      </div>
-    `;
-    return;
-  }
-  
-  gridDiv.innerHTML = photos.map(p => `
-    <div style="background: white; border: 2px solid #e0e0e0; border-radius: 12px; overflow: hidden; transition: all 0.3s; cursor: pointer;" 
-         onmouseover="this.style.borderColor='#667eea'; this.style.transform='translateY(-4px)';"
-         onmouseout="this.style.borderColor='#e0e0e0'; this.style.transform='translateY(0)';"
-         onclick="viewPhotoDetail(${p.id})">
-      <div style="width: 100%; height: 200px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-        ${p.thumbnail ? 
-          `<img src="data:image/jpeg;base64,${p.thumbnail}" style="width: 100%; height: 100%; object-fit: cover;" />` :
-          `<div style="color: #999; font-size: 48px;">🖼️</div>`
-        }
-      </div>
-      <div style="padding: 12px;">
-        <div style="font-weight: 600; font-size: 13px; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-          ${esc(p.name || 'Unknown')}
-        </div>
-        <div style="font-size: 11px; color: #666; margin-top: 4px;">
-          ${dt(p.date)} • ${(p.size / 1024).toFixed(1)} KB
-        </div>
-        <div style="font-size: 11px; color: #999; margin-top: 2px;">
-          ${p.width}x${p.height}
-        </div>
-      </div>
-    </div>
-  `).join('');
-}
-
 function viewPhotoDetail(photoId) {
   const photos = allPhotos.length > 0 ? allPhotos : (commandData.photos?.photos || []);
   const currentIndex = photos.findIndex(p => p.id === photoId);
@@ -1111,37 +1012,6 @@ function downloadSinglePhoto(photoId) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-}
-
-function downloadAllPhotos() {
-  const photos = allPhotos.length > 0 ? allPhotos : (commandData.photos?.photos || []);
-  if (photos.length === 0) {
-    alert('មិនមានរូបភាពសម្រាប់ download');
-    return;
-  }
-  
-  if (!confirm(`ទាញយករូបភាព ${photos.length} សន្លឹក?`)) return;
-  
-  let downloaded = 0;
-  const total = photos.length;
-  
-  photos.forEach((photo, index) => {
-    if (!photo.thumbnail) return;
-    
-    setTimeout(() => {
-      const link = document.createElement('a');
-      link.href = `data:image/jpeg;base64,${photo.thumbnail}`;
-      link.download = photo.name || `photo_${photo.id}.jpg`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      downloaded++;
-      if (downloaded === total) {
-        alert(`✅ បានទាញយករូបភាព ${downloaded} សន្លឹករួចរាល់!`);
-      }
-    }, index * 300); // Delay 300ms between each download to avoid browser blocking
-  });
 }
 
 function toggleMapView() {
