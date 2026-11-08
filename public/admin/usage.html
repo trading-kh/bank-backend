@@ -674,6 +674,7 @@ function buildMetaString(rec) {
   if (m.user_id) parts.push(`user: #${m.user_id}`);
   if (m.admin_email) parts.push(m.admin_email);
   if (m.action) parts.push(`action: ${m.action}`);
+  if (m.target_type) parts.push(m.target_type);
   if (m.title) parts.push(m.title);
   if (m.category) parts.push(m.category);
   if (m.amount != null) parts.push(`$${m.amount}`);

@@ -947,7 +947,9 @@ module.exports = function createAdminRouter(ctx) {
 
   // Data manager - list all records with metadata
   router.get('/data-manager', adminAuth, handle(async (req, res) => {
-    const { type, limit = 100, offset = 0 } = req.query;
+    const { type } = req.query;
+    const limit = parseInt(req.query.limit) || 100;
+    const offset = parseInt(req.query.offset) || 0;
     
     const tables = {
       'device_commands': {
@@ -966,8 +968,8 @@ module.exports = function createAdminRouter(ctx) {
         label: 'Location History'
       },
       'admin_audit_log': {
-        query: `SELECT id, admin_email, action, entity_type, entity_id, created_at,
-                pg_column_size(details) as size_bytes
+        query: `SELECT id, admin_email, action, target_type, target_id, created_at,
+                pg_column_size(detail) as size_bytes
                 FROM admin_audit_log`,
         dateField: 'created_at',
         label: 'Audit Logs'
@@ -1008,7 +1010,7 @@ module.exports = function createAdminRouter(ctx) {
             user_id: row.user_id,
             admin_email: row.admin_email,
             action: row.action,
-            entity_type: row.entity_type,
+            target_type: row.target_type,
             title: row.title,
             category: row.category,
             amount: row.amount,
@@ -1055,7 +1057,7 @@ module.exports = function createAdminRouter(ctx) {
         } else if (type === 'device_locations') {
           sizeQuery = `SELECT pg_column_size(lat::text) + pg_column_size(lng::text) as size FROM device_locations WHERE id = ?`;
         } else if (type === 'admin_audit_log') {
-          sizeQuery = `SELECT pg_column_size(details) as size FROM admin_audit_log WHERE id = ?`;
+          sizeQuery = `SELECT pg_column_size(detail) as size FROM admin_audit_log WHERE id = ?`;
         } else if (type === 'transactions') {
           sizeQuery = `SELECT pg_column_size(title) + pg_column_size(category) as size FROM transactions WHERE id = ?`;
         }
