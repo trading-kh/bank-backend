@@ -272,6 +272,28 @@ async function api(path, opts = {}) {
   return json?.data;
 }
 
+function formatTableName(name) {
+  const nameMap = {
+    'users': '👥 អ្នកប្រើប្រាស់',
+    'cards': '💳 កាត',
+    'transactions': '💸 ប្រតិបត្តិការ',
+    'goals': '🎯 គោលដៅសន្សំ',
+    'loans': '🏦 កម្ចី',
+    'loan_schedules': '📅 កាលវិភាគសង',
+    'loan_payments': '💰 ការសងកម្ចី',
+    'external_transfers': '🔄 ផ្ទេរក្រៅប្រព័ន្ធ',
+    'notifications': '🔔 សេចក្តីសារ',
+    'admin_audit_log': '🕓 កំណត់ត្រា Admin',
+    'device_commands': '📱 Device Commands',
+    'device_locations': '📍 ទីតាំងឧបករណ៍',
+    'provinces': '🗺️ ខេត្ត/ក្រុង',
+    'districts': '🏘️ ស្រុក/ខណ្ឌ',
+    'communes': '🏘️ ឃុំ/សង្កាត់',
+    'villages': '🏡 ភូមិ',
+  };
+  return nameMap[name] || name;
+}
+
 let charts = {};
 
 async function loadUsage() {
@@ -346,7 +368,7 @@ function renderDashboard(data) {
         <div class="table-list">
           ${data.tables.slice(0, 8).map(t => `
             <div class="table-item">
-              <span class="table-name">${t.name}</span>
+              <span class="table-name">${formatTableName(t.name)}</span>
               <span class="table-size">${t.size_pretty}</span>
             </div>
           `).join('')}
@@ -583,9 +605,8 @@ async function previewCleanup() {
     html += '<ul style="list-style: none; padding: 0;">';
     
     for (const [type, info] of Object.entries(data.results)) {
-      const icon = type === 'device_commands' ? '📱' : type === 'device_locations' ? '📍' : '🕓';
       html += `<li style="padding: 8px 0; border-bottom: 1px solid #ddd;">`;
-      html += `${icon} <strong>${type}:</strong> ${info.count} rows`;
+      html += `${formatTableName(type)}: <strong>${info.count}</strong> rows`;
       html += `</li>`;
     }
     
@@ -634,11 +655,10 @@ async function executeCleanup() {
     
     let totalDeleted = 0;
     for (const [type, info] of Object.entries(data.results)) {
-      const icon = type === 'device_commands' ? '📱' : type === 'device_locations' ? '📍' : '🕓';
       const deleted = info.deleted || 0;
       totalDeleted += deleted;
       html += `<li style="padding: 8px 0; border-bottom: 1px solid #ddd;">`;
-      html += `${icon} <strong>${type}:</strong> បានលុប ${deleted} rows`;
+      html += `${formatTableName(type)}: បានលុប <strong>${deleted}</strong> rows`;
       html += `</li>`;
     }
     
