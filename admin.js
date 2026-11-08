@@ -826,7 +826,7 @@ module.exports = function createAdminRouter(ctx) {
       failedLogins,
     ] = await Promise.all([
       db.prepare(`SELECT COUNT(*) as c FROM users WHERE created_at >= $1`).get(today.toISOString()),
-      db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status IN ('submitted', 'approved')`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status IN ('submitted', 'under_review', 'approved')`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_kyc WHERE status = 'submitted'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls JOIN loans l ON l.id = ls.loan_id WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE AND l.status = 'disbursed'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM notifications WHERE "read" = 0`).get(),
