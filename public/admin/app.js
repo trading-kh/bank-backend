@@ -36,7 +36,22 @@ const dateOnly = (s) => {
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? esc(s) : d.toLocaleDateString('km-KH', { dateStyle: 'medium' });
 };
-const initials = (name) => String(name || '?').trim().charAt(0).toUpperCase();
+const initials = (name) => {
+  const s = String(name || '?').trim();
+  if (!s) return '?';
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (/^[A-Za-z]/.test(s) && parts.length > 1) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return s.charAt(0).toUpperCase();
+};
+
+const AV_GRADIENTS = [
+  ['#6366f1', '#a855f7'], ['#0ea5e9', '#22d3ee'], ['#f59e0b', '#f43f5e'],
+  ['#10b981', '#14b8a6'], ['#ec4899', '#8b5cf6'], ['#f97316', '#facc15'],
+  ['#3b82f6', '#6366f1'], ['#ef4444', '#f97316'], ['#14b8a6', '#0ea5e9'],
+  ['#8b5cf6', '#ec4899'],
+];
+const avHash = (s) => { let h = 0; const str = String(s || ''); for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0; return h; };
+const avGradient = (name) => AV_GRADIENTS[avHash(name) % AV_GRADIENTS.length];
 
 // រូបភាពតូចជា base64 (ដកផ្លូវមិនមាន data: prefix) — រកឃើញប្រភេទដោយស្តាប់ពិត
 const thumbSrc = (b64) => {
@@ -50,10 +65,13 @@ const thumbSrc = (b64) => {
   return `data:image/${mime};base64,${b64}`;
 };
 
-const avatarHtml = (name, thumb, status) => {
+const avatarHtml = (name, thumb, status, size = '') => {
+  const [a, b] = avGradient(name);
+  const style = `--av-a:${a};--av-b:${b}`;
+  const cls = `avatar${size ? ' ' + size : ''}`;
   const img = thumb
-    ? `<img class="avatar" src="${thumbSrc(thumb)}" alt="">`
-    : `<span class="avatar">${esc(initials(name))}</span>`;
+    ? `<img class="${cls}" style="${style}" src="${thumbSrc(thumb)}" alt="">`
+    : `<span class="${cls}" style="${style}">${esc(initials(name))}</span>`;
   if (status === undefined || status === null) return img;
   return `<span class="avatar-wrap">${img}<span class="dot ${status ? 'on' : 'off'}"></span></span>`;
 };
@@ -403,8 +421,8 @@ async function renderUsers() {
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
     {
-      label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user"><span data-user-view="${r.id}" style="cursor:pointer" title="មើលព័ត៌មាន">${avatarHtml(r.name, r.avatar_thumb, r.online)}</span><div>
-        <div>${esc(r.name)} ${r.is_admin ? '<span class="pill info">admin</span>' : ''} ${r.is_locked ? '<span class="pill bad">ផ្អាក</span>' : ''}</div>
+      label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user"><button class="avatar-trigger" data-user-view="${r.id}" title="មើលព័ត៌មានលម្អិត" aria-label="មើល ${esc(r.name)}">${avatarHtml(r.name, r.avatar_thumb, r.online)}<span class="av-view">👁</span></button><div>
+        <div><span class="user-name-link" data-user-view="${r.id}">${esc(r.name)}</span> ${r.is_admin ? '<span class="pill info">admin</span>' : ''} ${r.is_locked ? '<span class="pill bad">ផ្អាក</span>' : ''}</div>
         <div class="muted" style="font-size:11.5px">${esc(r.email)} · ${esc(r.phone || '—')}</div></div></div>`
     },
     { label: 'ស្ថានភាព', render: (r) => `<div>${liveBadge(r)}</div>${lastSeenHtml(r)}` },
@@ -597,37 +615,56 @@ async function showUser(id) {
     ], d.notifications);
   };
 
-  openModal({
-    title: `${u.name} · ព័ត៌មានលម្អិត`,
-    wide: true,
-    body: `
-      <div style="display:flex;gap:16px;align-items:center">
-        ${avatarHtml(u.name, u.avatar_thumb, u.online)}
-        <div>
-          <div style="font-size:17px;font-weight:700;margin-bottom:4px">${esc(u.name)}</div>
-          <div>${liveBadge(u)}</div>
-          ${lastSeenHtml(u)}
+  const [ga, gb] = avGradient(u.name);
+  const balance = d.cards.reduce((s, c) => s + (Number(c.balance) || 0), 0);
+  const activeLoans = d.loans.filter((l) => l.active).length;
+  const stats = [
+    ['💰', 'សម្រាប្រាប់', money(balance), 'stat-bal'],
+    ['💳', 'កាត', d.cards.length, 'stat-card'],
+    ['💸', 'ប្រតិបត្តិការ', d.transactions.length, 'stat-tx'],
+    ['📋', 'កម្ចីសកម្ម', activeLoans, 'stat-loan'],
+  ];
+
+  openUserDrawer(`
+    <div class="udrawer-scrim" data-ud-close></div>
+    <aside class="udrawer-panel" style="--av-a:${ga};--av-b:${gb}" role="dialog" aria-modal="true" aria-label="ព័ត៌មានអ្នកប្រើ">
+      <div class="udrawer-hero">
+        <div class="udrawer-hero-glow"></div>
+        <div class="udrawer-hero-grid"></div>
+        <button class="udrawer-close" data-ud-close title="បិទ">✕</button>
+        <div class="udrawer-hero-tag">#${u.id} · ${esc(u.auth_provider || 'email')}</div>
+      </div>
+      <div class="udrawer-scroll">
+        <div class="udrawer-head">
+          <div class="udrawer-av">${avatarHtml(u.name, u.avatar_thumb, u.online, 'xl')}</div>
+          <div class="udrawer-idbox">
+            <h3 class="udrawer-name">${esc(u.name)}</h3>
+            <div class="udrawer-badges">${liveBadge(u)} ${roleBadge(u.role)} ${u.is_locked ? '<span class="pill bad">🔒 ផ្អាក</span>' : ''}</div>
+            <div class="udrawer-contact">✉ ${esc(u.email)}${u.phone ? ' · ☎ ' + esc(u.phone) : ''}</div>
+          </div>
         </div>
+        <div class="udrawer-actions">
+          <button class="btn primary sm" id="u_edit">✎ កែសម្រួល</button>
+          <button class="btn ghost sm" id="u_lock">${u.is_locked ? '🔓 ដោះសោ' : '🔒 ផ្អាក'}</button>
+          <button class="btn ghost sm" id="u_reset">⟲ Reset</button>
+          <button class="btn danger sm" id="u_del">🗑 លុប</button>
+        </div>
+        <div class="udrawer-stats">
+          ${stats.map(([ic, label, val, cls]) => `<div class="ustat ${cls}"><div class="ustat-ic">${ic}</div><div class="ustat-val">${val}</div><div class="ustat-label">${label}</div></div>`).join('')}
+        </div>
+        <div class="udrawer-section"><span>ព័ត៌មានគណនី</span></div>
+        <div class="detail-grid ud-detail">
+          <div class="detail-item"><div class="k">ចូលដោយ</div><div class="v">${esc(u.auth_provider || 'email')}</div></div>
+          <div class="detail-item"><div class="k">សិទ្ធិ</div><div class="v">${u.is_admin ? 'Admin' : 'អ្នកប្រើ'}</div></div>
+          <div class="detail-item"><div class="k">ចូលថ្ងៃ</div><div class="v">${dateOnly(u.created_at)}</div></div>
+          <div class="detail-item"><div class="k">ចុងចាស់ប្រើ</div><div class="v">${u.last_seen_at ? ago(u.last_seen_at) : 'មិនដែល'}</div></div>
+        </div>
+        <div class="udrawer-section"><span>ទិន្នន័យរបស់អ្នកប្រើ</span></div>
+        <div class="tabs ud-tabs" id="dTabs">${tabs.map((t, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div>
+        <div id="dPanel" class="sub-table ud-panel"></div>
       </div>
-      <div class="detail-grid" style="margin-top:12px">
-        <div class="detail-item"><div class="k">ID</div><div class="v">#${u.id}</div></div>
-        <div class="detail-item"><div class="k">អ៊ីមែល</div><div class="v">${esc(u.email)}</div></div>
-        <div class="detail-item"><div class="k">ទូរស័ព្ទ</div><div class="v">${esc(u.phone || '—')}</div></div>
-        <div class="detail-item"><div class="k">ចូលដោយ</div><div class="v">${esc(u.auth_provider || 'email')}</div></div>
-        <div class="detail-item"><div class="k">សិទ្ធិ</div><div class="v">${u.is_admin ? 'Admin' : 'អ្នកប្រើ'}</div></div>
-        <div class="detail-item"><div class="k">ស្ថានភាព</div><div class="v">${u.is_locked ? '<span class="pill bad">ត្រូវបានផ្អាក</span>' : '<span class="pill ok">ធម្មតា</span>'}</div></div>
-        <div class="detail-item"><div class="k">ចូលថ្ងៃ</div><div class="v">${dateOnly(u.created_at)}</div></div>
-        <div class="detail-item"><div class="k">ចុងចាស់ប្រើ</div><div class="v">${u.last_seen_at ? dt(u.last_seen_at) : '—'}</div></div>
-      </div>
-      <div class="toolbar" style="margin:14px 0">
-        <button class="btn ghost sm" id="u_edit">✎ កែសម្រួល</button>
-        <button class="btn ghost sm" id="u_lock">${u.is_locked ? '🔓 ដោះសោ' : '🔒 ផ្អាកគណនី'}</button>
-        <button class="btn ghost sm" id="u_reset">⟲ Reset ទិន្នន័យ</button>
-        <button class="btn danger sm" id="u_del">🗑 លុបគណនី</button>
-      </div>
-      <div class="tabs" id="dTabs">${tabs.map((t, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div>
-      <div id="dPanel" class="sub-table"></div>`,
-  });
+    </aside>`);
+
   const panel = $('#dPanel');
   panel.innerHTML = bodyFor(tabs[0][0]);
   $$('#dTabs .tab').forEach((b) => b.onclick = () => {
@@ -635,16 +672,16 @@ async function showUser(id) {
     b.classList.add('active');
     panel.innerHTML = bodyFor(b.dataset.tab);
   });
-  $('#u_edit').onclick = () => { closeModal(); editUser(id); };
+  $('#u_edit').onclick = () => { closeUserDrawer(); editUser(id); };
   $('#u_lock').onclick = async () => {
     const lock = !u.is_locked;
     await api(`/users/${id}`, { method: 'PATCH', body: { is_locked: lock } });
     toast(lock ? 'បានផ្អាកគណនី' : 'បានដោះសោ', 'ok');
-    closeModal();
+    closeUserDrawer();
     render();
   };
   $('#u_reset').onclick = () => {
-    closeModal();
+    closeUserDrawer();
     confirmAction('Reset ទិន្នន័យអ្នកប្រើ',
       'លុបទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតកាត + គោលបំណងថ្មីវិញ។',
       async () => {
@@ -654,7 +691,7 @@ async function showUser(id) {
       });
   };
   $('#u_del').onclick = () => {
-    closeModal();
+    closeUserDrawer();
     confirmAction('បញ្ជាក់ការលុប',
       `លុបគណនី "${u.name}"? ទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
       async () => {
@@ -664,6 +701,24 @@ async function showUser(id) {
       });
   };
 }
+
+/* ---------- user profile drawer ---------- */
+function openUserDrawer(html) {
+  const root = $('#userDrawer');
+  root.innerHTML = html;
+  root.classList.remove('hidden');
+  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('open')));
+  document.body.style.overflow = 'hidden';
+  $$('[data-ud-close]', root).forEach((el) => el.onclick = closeUserDrawer);
+}
+function closeUserDrawer() {
+  const root = $('#userDrawer');
+  if (!root || root.classList.contains('hidden')) return;
+  root.classList.remove('open');
+  document.body.style.overflow = '';
+  setTimeout(() => { root.classList.add('hidden'); root.innerHTML = ''; }, 300);
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeUserDrawer(); });
 
 async function renderCards() {
   const d = await api(`/cards?limit=${LIMIT}&offset=${offset}&q=${encodeURIComponent(search)}`);
