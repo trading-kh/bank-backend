@@ -821,7 +821,7 @@ module.exports = function createAdminRouter(ctx) {
       pendingKyc,
       overdueLoans,
       unreadNotifications,
-      pendingCommands,
+      newDevices,
       onlineDevices,
       failedLogins,
     ] = await Promise.all([
@@ -830,7 +830,7 @@ module.exports = function createAdminRouter(ctx) {
       db.prepare(`SELECT COUNT(*) as c FROM loan_kyc WHERE status = 'submitted'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls JOIN loans l ON l.id = ls.loan_id WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE AND l.status = 'disbursed'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM notifications WHERE "read" = 0`).get(),
-      db.prepare(`SELECT COUNT(*) as c FROM device_commands WHERE status = 'pending'`).get(),
+      db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= NOW() - INTERVAL '10 minutes'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM login_logs WHERE success = false AND created_at >= $1`).get(today.toISOString()),
     ]);
@@ -841,7 +841,7 @@ module.exports = function createAdminRouter(ctx) {
       kyc: pendingKyc?.c || 0,
       collections: overdueLoans?.c || 0,
       notifications: unreadNotifications?.c || 0,
-      devices: pendingCommands?.c || 0,
+      devices: newDevices?.c || 0,
       devicesOnline: onlineDevices?.c || 0,
       audit: failedLogins?.c || 0,
     });
