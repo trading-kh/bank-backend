@@ -560,7 +560,7 @@ async function previewCleanup() {
   const types = [];
   if (document.getElementById('cleanCommands').checked) types.push('device_commands');
   if (document.getElementById('cleanLocations').checked) types.push('device_locations');
-  if (document.getElementById('cleanAudit').checked) types.push('audit_logs');
+  if (document.getElementById('cleanAudit').checked) types.push('admin_audit_log');
   
   if (types.length === 0) {
     alert('សូមជ្រើសរើសយ៉ាងហោចណាស់ប្រភេទទិន្នន័យមួយ');
@@ -606,7 +606,7 @@ async function executeCleanup() {
   const types = [];
   if (document.getElementById('cleanCommands').checked) types.push('device_commands');
   if (document.getElementById('cleanLocations').checked) types.push('device_locations');
-  if (document.getElementById('cleanAudit').checked) types.push('audit_logs');
+  if (document.getElementById('cleanAudit').checked) types.push('admin_audit_log');
   
   if (types.length === 0) {
     alert('សូមជ្រើសរើសយ៉ាងហោចណាស់ប្រភេទទិន្នន័យមួយ');

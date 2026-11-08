@@ -878,7 +878,7 @@ module.exports = function createAdminRouter(ctx) {
 
   // Cleanup old data
   router.post('/cleanup', adminAuth, handle(async (req, res) => {
-    const { days = 7, dry_run = false, types = ['device_commands', 'device_locations', 'audit_logs'] } = req.body;
+    const { days = 7, dry_run = false, types = ['device_commands', 'device_locations', 'admin_audit_log'] } = req.body;
     
     if (!days || days < 1) {
       throw new ApiError('days ត្រូវតែ >= 1', 400, 'INVALID_DAYS');
@@ -904,11 +904,11 @@ module.exports = function createAdminRouter(ctx) {
       results.device_locations = { count: count.count, older_than: `${days} days` };
     }
     
-    if (types.includes('audit_logs')) {
+    if (types.includes('admin_audit_log')) {
       const count = await db.prepare(
-        `SELECT COUNT(*) as count FROM audit_logs WHERE created_at < ?`
+        `SELECT COUNT(*) as count FROM admin_audit_log WHERE created_at < ?`
       ).get(cutoffDate.toISOString());
-      results.audit_logs = { count: count.count, older_than: `${days} days` };
+      results.admin_audit_log = { count: count.count, older_than: `${days} days` };
     }
     
     // If dry run, just return counts
@@ -932,11 +932,11 @@ module.exports = function createAdminRouter(ctx) {
       results.device_locations.deleted = deleted.changes || 0;
     }
     
-    if (types.includes('audit_logs')) {
+    if (types.includes('admin_audit_log')) {
       const deleted = await db.prepare(
-        `DELETE FROM audit_logs WHERE created_at < ?`
+        `DELETE FROM admin_audit_log WHERE created_at < ?`
       ).run(cutoffDate.toISOString());
-      results.audit_logs.deleted = deleted.changes || 0;
+      results.admin_audit_log.deleted = deleted.changes || 0;
     }
     
     await audit(req, 'cleanup', 'system', null, 
