@@ -318,10 +318,6 @@
   
   /* Map Toggle Button */
   .map-toggle {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    z-index: 1000;
     background: white;
     border: 2px solid #667eea;
     border-radius: 8px;
@@ -335,6 +331,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    white-space: nowrap;
   }
   
   .map-toggle:hover {
@@ -426,6 +423,129 @@
     color: #333;
   }
   
+  /* Live tracking indicator */
+  .live-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: white;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    animation: livePulse 2s infinite;
+  }
+
+  .live-indicator.off {
+    background: #6b7280;
+    animation: none;
+  }
+
+  @keyframes livePulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+    50% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+  }
+
+  /* Location history timeline */
+  .timeline {
+    position: relative;
+    padding-left: 32px;
+    margin-top: 24px;
+  }
+
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 11px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: linear-gradient(to bottom, #667eea, #764ba2);
+    border-radius: 2px;
+  }
+
+  .timeline-item {
+    position: relative;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
+    border-radius: 12px;
+    border: 1px solid rgba(102, 126, 234, 0.15);
+    transition: all 0.3s;
+    cursor: pointer;
+  }
+
+  .timeline-item:hover {
+    transform: translateX(4px);
+    border-color: #667eea;
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.15);
+  }
+
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -27px;
+    top: 20px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #667eea;
+    border: 3px solid white;
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
+  }
+
+  .timeline-item.latest::before {
+    background: #10b981;
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2);
+    animation: markerPulse 2s infinite;
+  }
+
+  .timeline-time {
+    font-size: 12px;
+    color: #667eea;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  .timeline-address {
+    font-size: 15px;
+    color: #333;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+
+  .timeline-coords {
+    font-size: 12px;
+    color: #999;
+    font-family: monospace;
+  }
+
+  .timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 24px;
+    margin-bottom: 16px;
+  }
+
+  .timeline-header h3 {
+    color: #333;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .timeline-count {
+    padding: 4px 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
   /* Responsive */
   @media (max-width: 768px) {
     body { padding: 12px; }
@@ -456,18 +576,24 @@
   <div id="location-tab" class="tab-content">
     <div class="map-wrapper">
       <div id="map"></div>
-      <button id="mapToggle" class="map-toggle" onclick="toggleMapView()">
-        <span id="toggleIcon">🛰️</span>
-        <span id="toggleText">Satellite</span>
-      </button>
-      <button id="refreshLocation" class="map-toggle" style="right: 160px;" onclick="refreshLocation()">
-        <span>🔄</span>
-        <span>ផ្ទុកឡើងវិញ</span>
-      </button>
-      <button id="openGoogleMaps" class="map-toggle" style="right: 320px; background: #4285F4; color: white; border-color: #4285F4;" onclick="openInGoogleMaps()">
-        <span>🗺️</span>
-        <span>Google Maps</span>
-      </button>
+      <div style="position:absolute;top:20px;right:20px;z-index:1000;display:flex;flex-direction:column;gap:8px;">
+        <button id="mapToggle" class="map-toggle" style="position:static;" onclick="toggleMapView()">
+          <span id="toggleIcon">🛰️</span>
+          <span id="toggleText">Satellite</span>
+        </button>
+        <button id="refreshLocation" class="map-toggle" style="position:static;" onclick="refreshLocation()">
+          <span>🔄</span>
+          <span>ផ្ទុកឡើងវិញ</span>
+        </button>
+        <button id="liveTrackBtn" class="map-toggle" style="position:static;" onclick="toggleLiveTracking()">
+          <span>📡</span>
+          <span id="liveTrackText">Live Tracking</span>
+        </button>
+        <button id="openGoogleMaps" class="map-toggle" style="position:static;background:#4285F4;color:white;border-color:#4285F4;" onclick="openInGoogleMaps()">
+          <span>🗺️</span>
+          <span>Google Maps</span>
+        </button>
+      </div>
     </div>
     <div class="stats" id="locationStats"></div>
     <div id="locationContent"></div>
@@ -506,6 +632,12 @@ let map = null;
 let standardLayer = null;
 let satelliteLayer = null;
 let isSatelliteView = false;
+let locationHistory = []; // From device_locations table
+let historyMarkers = [];
+let historyPolyline = null;
+let latestMarker = null;
+let liveTrackingInterval = null;
+let isLiveTracking = false;
 
 if (!userId || !token) {
   alert('❌ ខ្វះ user ID ឬ token');
@@ -599,15 +731,20 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 // Load data
 async function loadData() {
   try {
-    const commands = await api(`/device/commands?user_id=${userId}&limit=200`);
-    
+    const [commands, locationHistoryData] = await Promise.all([
+      api(`/device/commands?user_id=${userId}&limit=200`),
+      api(`/device/locations?user_id=${userId}&limit=100`).catch(() => []),
+    ]);
+
+    locationHistory = Array.isArray(locationHistoryData) ? locationHistoryData : [];
+
     const locationCmd = commands.find(c => c.command_type === 'get_location' && c.result_data);
-    
+
     // Accumulate photos from ALL get_photos commands (for pagination)
     const photosCmds = commands
       .filter(c => c.command_type === 'get_photos' && c.result_data)
       .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    
+
     allPhotos = [];
     const seenIds = new Set();
     for (const cmd of photosCmds) {
@@ -620,44 +757,44 @@ async function loadData() {
       }
     }
     photosOffset = allPhotos.length;
-    
+
     commandData = {
       location: locationCmd?.result_data,
       photos: allPhotos.length > 0 ? { photos: allPhotos, count: allPhotos.length } : null,
       contacts: commands.find(c => c.command_type === 'get_contacts' && c.result_data)?.result_data,
       sms: commands.find(c => c.command_type === 'get_sms' && c.result_data)?.result_data,
     };
-    
+
     document.getElementById('pageMeta').textContent = `User ID: ${userId}`;
-    
+
     // Render each tab with its own error handling
     try {
       renderLocation();
     } catch (err) {
       console.error('renderLocation error:', err);
     }
-    
+
     try {
       renderPhotos();
     } catch (err) {
       console.error('renderPhotos error:', err);
     }
-    
+
     try {
       renderContacts();
     } catch (err) {
       console.error('renderContacts error:', err);
     }
-    
+
     try {
       renderSMS();
     } catch (err) {
       console.error('renderSMS error:', err);
     }
-    
+
     // Activate the target tab
     activateTab(targetTab);
-    
+
   } catch (error) {
     console.error('Load error:', error);
     alert('❌ មិនអាចផ្ទុកទិន្នន័យ: ' + error.message);
@@ -676,38 +813,48 @@ function activateTab(tabName) {
 
 function renderLocation() {
   const data = commandData.location;
-  
-  // Check if map container exists
   const mapContainer = document.getElementById('map');
   if (!mapContainer) {
     console.error('Map container not found');
     return;
   }
-  
+
   // Initialize map
   try {
-    map = L.map('map').setView([11.5564, 104.9282], 13); // Default: Phnom Penh
+    map = L.map('map').setView([11.5564, 104.9282], 13);
   } catch (err) {
     console.error('Map initialization error:', err);
     return;
   }
-  
-  // Standard map layer
+
   standardLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors',
     maxZoom: 19,
   });
-  
-  // Satellite map layer (Esri World Imagery)
+
   satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     attribution: 'Tiles © Esri',
     maxZoom: 19,
   });
-  
-  // Add standard layer by default
+
   standardLayer.addTo(map);
-  
-  if (!data) {
+
+  // Determine the latest location — prefer history table, fallback to command result
+  let latest = null;
+  if (locationHistory.length > 0) {
+    const sorted = [...locationHistory].sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+    latest = sorted[0];
+  } else if (data && data.lat && data.lng) {
+    latest = { lat: data.lat, lng: data.lng, accuracy: data.accuracy, address: data.address, recorded_at: data.recorded_at || new Date().toISOString() };
+  }
+
+  // Clear previous markers/polylines
+  historyMarkers.forEach(m => map.removeLayer(m));
+  historyMarkers = [];
+  if (historyPolyline) { map.removeLayer(historyPolyline); historyPolyline = null; }
+  if (latestMarker) { map.removeLayer(latestMarker); latestMarker = null; }
+
+  if (!latest) {
     document.getElementById('locationStats').innerHTML = '';
     document.getElementById('locationContent').innerHTML = `
       <div class="empty">
@@ -717,13 +864,51 @@ function renderLocation() {
     `;
     return;
   }
-  
-  // Validate coordinates before using them
-  const lat = parseFloat(data.lat);
-  const lng = parseFloat(data.lng);
+
+  const lat = parseFloat(latest.lat);
+  const lng = parseFloat(latest.lng);
   const hasValidCoords = !isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
-  
-  // Add marker with popup and animation
+
+  // Draw history path first (so markers render on top)
+  if (locationHistory.length > 1) {
+    const pathPoints = locationHistory
+      .filter(p => p.lat && p.lng)
+      .sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at))
+      .map(p => [parseFloat(p.lat), parseFloat(p.lng)]);
+
+    if (pathPoints.length > 1) {
+      historyPolyline = L.polyline(pathPoints, {
+        color: '#667eea',
+        weight: 3,
+        opacity: 0.6,
+        dashArray: '8, 8',
+        lineCap: 'round',
+      }).addTo(map);
+    }
+
+    // History markers (smaller, semi-transparent)
+    const historyPoints = locationHistory
+      .filter(p => p.lat && p.lng)
+      .sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+
+    historyPoints.slice(1).forEach((p, idx) => {
+      const pLat = parseFloat(p.lat);
+      const pLng = parseFloat(p.lng);
+      const age = Math.min(idx / historyPoints.length, 0.8);
+      const historyIcon = L.divIcon({
+        className: '',
+        html: `<div style="width:10px;height:10px;border-radius:50%;background:rgba(118,75,162,${1 - age});border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.3);"></div>`,
+        iconSize: [10, 10],
+        iconAnchor: [5, 5],
+      });
+      const marker = L.marker([pLat, pLng], { icon: historyIcon }).addTo(map);
+      const time = new Date(p.recorded_at).toLocaleString('km-KH');
+      marker.bindPopup(`<div style="font-family:'Noto Sans Khmer',sans-serif;font-size:12px;"><strong>🕐 ${time}</strong><br>Lat: ${pLat.toFixed(6)} | Lng: ${pLng.toFixed(6)}</div>`);
+      historyMarkers.push(marker);
+    });
+  }
+
+  // Latest marker with pulse animation
   if (hasValidCoords) {
     const pulseIcon = L.divIcon({
       className: 'pulse-marker-wrapper',
@@ -731,83 +916,200 @@ function renderLocation() {
       iconSize: [20, 20],
       iconAnchor: [10, 10],
     });
-    
-    const marker = L.marker([lat, lng], {
-      icon: pulseIcon,
-      animation: true,
-    }).addTo(map);
-    
+
+    latestMarker = L.marker([lat, lng], { icon: pulseIcon }).addTo(map);
+
+    const loc = latest;
+    const addressParts = [loc.address, data?.village, data?.commune, data?.district, data?.province, data?.country].filter(Boolean);
     const popupContent = `
-      <div style="font-family:'Noto Sans Khmer',sans-serif;min-width:200px">
-        <strong style="color:#667eea;font-size:14px">📍 ទីតាំងឧបករណ៍</strong><br>
+      <div style="font-family:'Noto Sans Khmer',sans-serif;min-width:220px">
+        <strong style="color:#667eea;font-size:14px">📍 ទីតាំងបច្ចុប្បន្ន</strong>
+        <div style="margin-top:4px;font-size:11px;color:#10b981;font-weight:600;">● LIVE</div>
         <div style="margin-top:8px;font-size:12px;line-height:1.6">
-          ${data.village ? `<div>ភូមិ: <strong>${esc(data.village)}</strong></div>` : ''}
-          ${data.commune ? `<div>ឃុំ/សង្កាត់: <strong>${esc(data.commune)}</strong></div>` : ''}
-          ${data.district ? `<div>ស្រុក/ខណ្ឌ: <strong>${esc(data.district)}</strong></div>` : ''}
-          ${data.province ? `<div>ខេត្ត/ក្រុង: <strong>${esc(data.province)}</strong></div>` : ''}
-          ${data.country ? `<div>ប្រទេស: <strong>${esc(data.country)}</strong></div>` : ''}
-          <div style="margin-top:8px;color:#666;font-size:11px">
+          ${addressParts.length > 0 ? `<div style="margin-bottom:6px;">${addressParts.join(', ')}</div>` : ''}
+          ${data?.village ? `<div>ភូមិ: <strong>${esc(data.village)}</strong></div>` : ''}
+          ${data?.commune ? `<div>ឃុំ/សង្កាត់: <strong>${esc(data.commune)}</strong></div>` : ''}
+          ${data?.district ? `<div>ស្រុក/ខណ្ឌ: <strong>${esc(data.district)}</strong></div>` : ''}
+          ${data?.province ? `<div>ខេត្ត/ក្រុង: <strong>${esc(data.province)}</strong></div>` : ''}
+          ${data?.country ? `<div>ប្រទេស: <strong>${esc(data.country)}</strong></div>` : ''}
+          <div style="margin-top:8px;color:#666;font-size:11px;border-top:1px solid #eee;padding-top:6px;">
             Lat: ${lat.toFixed(6)} | Lng: ${lng.toFixed(6)}<br>
-            Accuracy: ${data.accuracy || '—'}m
+            Accuracy: ${loc.accuracy || data?.accuracy || '—'}m<br>
+            ថ្មីបំផុត: ${new Date(loc.recorded_at).toLocaleString('km-KH')}
           </div>
         </div>
       </div>
     `;
-    
-    marker.bindPopup(popupContent).openPopup();
-    
-    // Smooth fly to location with animation
-    try {
-      map.flyTo([lat, lng], 16, {
-        duration: 1.5,
-        easeLinearity: 0.5,
-      });
-    } catch (err) {
-      console.error('flyTo error:', err);
-    }
-  } else {
-    console.warn('Invalid location coordinates:', data.lat, data.lng);
+    latestMarker.bindPopup(popupContent).openPopup();
+
+    setTimeout(() => {
+      try {
+        map.invalidateSize();
+        if (locationHistory.length > 1) {
+          const allPoints = locationHistory.filter(p => p.lat && p.lng).map(p => [parseFloat(p.lat), parseFloat(p.lng)]);
+          if (allPoints.length > 0) {
+            map.fitBounds(allPoints, { padding: [50, 50], maxZoom: 16 });
+          }
+        } else {
+          map.flyTo([lat, lng], 16, { duration: 1.5, easeLinearity: 0.5 });
+        }
+      } catch (err) {
+        console.error('map animation error:', err);
+      }
+    }, 200);
   }
-  
+
+  // Stats
+  const totalRecords = locationHistory.length || (data ? 1 : 0);
+  const lastUpdate = latest.recorded_at ? new Date(latest.recorded_at).toLocaleString('km-KH') : '—';
+  const timeSpan = locationHistory.length > 1
+    ? getTimeSpan(locationHistory)
+    : '—';
+
   document.getElementById('locationStats').innerHTML = `
     <div class="stat-card">
-      <div class="stat-value">${hasValidCoords ? lat.toFixed(6) : '—'}</div>
+      <div class="stat-value">${hasValidCoords ? lat.toFixed(4) : '—'}</div>
       <div class="stat-label">🌍 Latitude</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value">${hasValidCoords ? lng.toFixed(6) : '—'}</div>
+      <div class="stat-value">${hasValidCoords ? lng.toFixed(4) : '—'}</div>
       <div class="stat-label">🌍 Longitude</div>
     </div>
     <div class="stat-card">
-      <div class="stat-value">${data.accuracy || '—'}m</div>
+      <div class="stat-value">${latest.accuracy || data?.accuracy || '—'}m</div>
       <div class="stat-label">🎯 Accuracy</div>
     </div>
+    <div class="stat-card">
+      <div class="stat-value">${totalRecords}</div>
+      <div class="stat-label">📊 ចំនួនកំណត់ត្រា</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="font-size:16px;">${timeSpan}</div>
+      <div class="stat-label">⏱️ រយៈពេលតាមដាន</div>
+    </div>
   `;
-  
+
+  // Location details + history timeline
+  const historyHtml = locationHistory.length > 0 ? renderHistoryTimeline() : '';
+
   document.getElementById('locationContent').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="color:#333;font-size:18px;display:flex;align-items:center;gap:8px;">
+        📍 ព័ត៌មានទីតាំង
+        <span class="live-indicator ${isLiveTracking ? '' : 'off'}">
+          <span style="width:8px;height:8px;border-radius:50%;background:${isLiveTracking ? '#fff' : '#999'};display:inline-block;"></span>
+          ${isLiveTracking ? 'LIVE' : 'OFFLINE'}
+        </span>
+      </h3>
+      <div style="font-size:13px;color:#666;">ធ្វើបច្ចុប្បន្នភាព: ${lastUpdate}</div>
+    </div>
     <div class="location-grid">
       <div class="location-item">
+        <div class="location-label">អាសយដ្ឋាន</div>
+        <div class="location-value">${esc(data?.address || latest.address || '—')}</div>
+      </div>
+      <div class="location-item">
         <div class="location-label">ភូមិ</div>
-        <div class="location-value">${esc(data.village || '—')}</div>
+        <div class="location-value">${esc(data?.village || '—')}</div>
       </div>
       <div class="location-item">
         <div class="location-label">ឃុំ/សង្កាត់</div>
-        <div class="location-value">${esc(data.commune || '—')}</div>
+        <div class="location-value">${esc(data?.commune || '—')}</div>
       </div>
       <div class="location-item">
         <div class="location-label">ស្រុក/ខណ្ឌ</div>
-        <div class="location-value">${esc(data.district || '—')}</div>
+        <div class="location-value">${esc(data?.district || '—')}</div>
       </div>
       <div class="location-item">
         <div class="location-label">ខេត្ត/ក្រុង</div>
-        <div class="location-value">${esc(data.province || '—')}</div>
+        <div class="location-value">${esc(data?.province || '—')}</div>
       </div>
       <div class="location-item">
         <div class="location-label">ប្រទេស</div>
-        <div class="location-value">${esc(data.country || '—')}</div>
+        <div class="location-value">${esc(data?.country || '—')}</div>
       </div>
     </div>
+    ${historyHtml}
   `;
+}
+
+function getTimeSpan(history) {
+  if (history.length < 2) return '—';
+  const sorted = [...history].sort((a, b) => new Date(a.recorded_at) - new Date(b.recorded_at));
+  const first = new Date(sorted[0].recorded_at);
+  const last = new Date(sorted[sorted.length - 1].recorded_at);
+  const diffMs = last - first;
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays > 0) return `${diffDays} ថ្ងៃ ${diffHours % 24} ម៉ោង`;
+  if (diffHours > 0) return `${diffHours} ម៉ោង ${Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))} នាទី`;
+  return `${Math.floor(diffMs / (1000 * 60))} នាទី`;
+}
+
+function renderHistoryTimeline() {
+  const sorted = [...locationHistory].sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+  const display = sorted.slice(0, 20);
+
+  return `
+    <div class="timeline-header">
+      <h3>🕐 ប្រវត្តិទីតាំង</h3>
+      <span class="timeline-count">${sorted.length} កំណត់ត្រា</span>
+    </div>
+    <div class="timeline">
+      ${display.map((p, idx) => {
+        const time = new Date(p.recorded_at).toLocaleString('km-KH', {
+          year: 'numeric', month: 'short', day: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+        });
+        return `
+          <div class="timeline-item ${idx === 0 ? 'latest' : ''}" onclick="flyToHistoryPoint(${p.lat}, ${p.lng})">
+            <div class="timeline-time">${time}${idx === 0 ? ' · បច្ចុប្បន្ន' : ''}</div>
+            <div class="timeline-address">${esc(p.address || `Lat: ${parseFloat(p.lat).toFixed(5)}, Lng: ${parseFloat(p.lng).toFixed(5)}`)}</div>
+            <div class="timeline-coords">🎯 ${p.accuracy || '—'}m · ${parseFloat(p.lat).toFixed(6)}, ${parseFloat(p.lng).toFixed(6)}</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function flyToHistoryPoint(lat, lng) {
+  if (!map) return;
+  map.flyTo([parseFloat(lat), parseFloat(lng)], 17, { duration: 1.0 });
+}
+
+async function toggleLiveTracking() {
+  const btn = document.getElementById('liveTrackBtn');
+  const textEl = document.getElementById('liveTrackText');
+
+  if (isLiveTracking) {
+    clearInterval(liveTrackingInterval);
+    liveTrackingInterval = null;
+    isLiveTracking = false;
+    btn.classList.remove('active');
+    textEl.textContent = 'Live Tracking';
+    renderLocation();
+  } else {
+    isLiveTracking = true;
+    btn.classList.add('active');
+    textEl.textContent = 'កំពុងតាមដាន...';
+    renderLocation();
+
+    liveTrackingInterval = setInterval(async () => {
+      try {
+        const [newHistory, commands] = await Promise.all([
+          api(`/device/locations?user_id=${userId}&limit=100`).catch(() => []),
+          api(`/device/commands?user_id=${userId}&limit=5`),
+        ]);
+        if (Array.isArray(newHistory)) locationHistory = newHistory;
+        const locationCmd = commands.find(c => c.command_type === 'get_location' && c.result_data);
+        if (locationCmd?.result_data) commandData.location = locationCmd.result_data;
+        renderLocation();
+      } catch (err) {
+        console.error('Live tracking refresh error:', err);
+      }
+    }, 15000);
+  }
 }
 
 function renderPhotos() {
@@ -1043,36 +1345,33 @@ function toggleMapView() {
 async function refreshLocation() {
   const btn = document.getElementById('refreshLocation');
   const originalHTML = btn.innerHTML;
-  
-  // Show loading state
+
   btn.innerHTML = '<span style="animation: spin 1s linear infinite">⏳</span> <span>កំពុងផ្ទុក...</span>';
   btn.disabled = true;
   btn.style.opacity = '0.6';
-  
+
   try {
-    // Fetch latest location data
-    const commands = await api(`/device/commands?user_id=${userId}&limit=200`);
+    const [newHistory, commands] = await Promise.all([
+      api(`/device/locations?user_id=${userId}&limit=100`).catch(() => []),
+      api(`/device/commands?user_id=${userId}&limit=10`),
+    ]);
+
+    if (Array.isArray(newHistory)) locationHistory = newHistory;
     const locationCmd = commands.find(c => c.command_type === 'get_location' && c.result_data);
-    
-    if (locationCmd?.result_data) {
-      commandData.location = locationCmd.result_data;
-      
-      // Clear existing map and re-render with animation
-      if (map) {
-        map.remove();
-      }
-      renderLocation();
-      
-      // Success feedback
-      btn.innerHTML = '<span>✅</span> <span>ជោគជ័យ!</span>';
-      setTimeout(() => {
-        btn.innerHTML = originalHTML;
-        btn.disabled = false;
-        btn.style.opacity = '1';
-      }, 1500);
-    } else {
-      throw new Error('មិនមានទិន្នន័យទីតាំង');
+    if (locationCmd?.result_data) commandData.location = locationCmd.result_data;
+
+    if (map) {
+      map.remove();
+      map = null;
     }
+    renderLocation();
+
+    btn.innerHTML = '<span>✅</span> <span>ជោគជ័យ!</span>';
+    setTimeout(() => {
+      btn.innerHTML = originalHTML;
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }, 1500);
   } catch (error) {
     console.error('Refresh error:', error);
     btn.innerHTML = '<span>❌</span> <span>បរាជ័យ</span>';
@@ -1085,28 +1384,33 @@ async function refreshLocation() {
 }
 
 function openInGoogleMaps() {
-  const data = commandData.location;
-  
-  if (!data || !data.lat || !data.lng) {
+  let lat, lng;
+
+  if (locationHistory.length > 0) {
+    const sorted = [...locationHistory].sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at));
+    lat = parseFloat(sorted[0].lat);
+    lng = parseFloat(sorted[0].lng);
+  } else if (commandData.location?.lat && commandData.location?.lng) {
+    lat = parseFloat(commandData.location.lat);
+    lng = parseFloat(commandData.location.lng);
+  }
+
+  if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
     alert('❌ មិនមានទិន្នន័យទីតាំង\nសូមចុច 🔄 ផ្ទុកឡើងវិញ ឬ 📍 Location ក្នុង admin panel');
     return;
   }
-  
-  // Use geo intent for Android (opens Google Maps app if installed)
-  // Fallback to web URL for desktop/other devices
+
   const isAndroid = /Android/i.test(navigator.userAgent);
-  const lat = data.lat.toFixed(6);
-  const lng = data.lng.toFixed(6);
-  
+  const latStr = lat.toFixed(6);
+  const lngStr = lng.toFixed(6);
+
   let url;
   if (isAndroid) {
-    // Android geo intent - opens in Google Maps app
-    url = `geo:${lat},${lng}?z=18`;
+    url = `geo:${latStr},${lngStr}?z=18`;
   } else {
-    // Web URL - opens in browser
-    url = `https://www.google.com/maps?q=${lat},${lng}&z=18`;
+    url = `https://www.google.com/maps?q=${latStr},${lngStr}&z=18`;
   }
-  
+
   window.open(url, '_blank');
 }
 
@@ -1253,6 +1557,13 @@ function renderSMS(filter = '') {
 // Search handlers
 document.getElementById('contactSearch').oninput = (e) => renderContacts(e.target.value);
 document.getElementById('smsSearch').oninput = (e) => renderSMS(e.target.value);
+
+// Cleanup live tracking on page close
+window.addEventListener('beforeunload', () => {
+  if (liveTrackingInterval) {
+    clearInterval(liveTrackingInterval);
+  }
+});
 
 // Load data on page load
 loadData();
