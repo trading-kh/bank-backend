@@ -858,7 +858,7 @@ module.exports = function createAdminRouter(ctx) {
       ORDER BY count DESC
     `).all();
     
-    // Recent activity (last 7 days) - commands, transactions, loans
+    // Recent activity (last 7 days) - commands, transactions, loans, logins
     const recentActivity = await db.prepare(`
       WITH dates AS (
         SELECT generate_series(
@@ -884,16 +884,24 @@ module.exports = function createAdminRouter(ctx) {
         FROM loans
         WHERE created_at >= NOW() - INTERVAL '7 days'
         GROUP BY DATE(created_at)
+      ),
+      logins AS (
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM login_logs
+        WHERE created_at >= NOW() - INTERVAL '7 days' AND success = true
+        GROUP BY DATE(created_at)
       )
       SELECT 
         d.date,
         COALESCE(c.count, 0) as commands,
         COALESCE(t.count, 0) as transactions,
-        COALESCE(l.count, 0) as loans
+        COALESCE(l.count, 0) as loans,
+        COALESCE(li.count, 0) as logins
       FROM dates d
       LEFT JOIN commands c ON c.date = d.date
       LEFT JOIN transactions t ON t.date = d.date
       LEFT JOIN loans l ON l.date = d.date
+      LEFT JOIN logins li ON li.date = d.date
       ORDER BY d.date ASC
     `).all();
     
@@ -1027,6 +1035,13 @@ module.exports = function createAdminRouter(ctx) {
                 FROM transactions`,
         dateField: 'created_at',
         label: 'Transactions'
+      },
+      'login_logs': {
+        query: `SELECT id, user_id, email, success, ip_address, failed_reason, created_at,
+                pg_column_size(email) + pg_column_size(COALESCE(ip_address, '')) + pg_column_size(COALESCE(user_agent, '')) + pg_column_size(COALESCE(failed_reason, '')) as size_bytes
+                FROM login_logs`,
+        dateField: 'created_at',
+        label: 'Login Logs'
       }
     };
     
@@ -1061,6 +1076,10 @@ module.exports = function createAdminRouter(ctx) {
             title: row.title,
             category: row.category,
             amount: row.amount,
+            email: row.email,
+            success: row.success,
+            ip_address: row.ip_address,
+            failed_reason: row.failed_reason,
           }
         });
       }
@@ -1107,6 +1126,8 @@ module.exports = function createAdminRouter(ctx) {
           sizeQuery = `SELECT pg_column_size(detail) as size FROM admin_audit_log WHERE id = ?`;
         } else if (type === 'transactions') {
           sizeQuery = `SELECT pg_column_size(title) + pg_column_size(category) as size FROM transactions WHERE id = ?`;
+        } else if (type === 'login_logs') {
+          sizeQuery = `SELECT pg_column_size(email) + pg_column_size(COALESCE(ip_address, '')) + pg_column_size(COALESCE(user_agent, '')) + pg_column_size(COALESCE(failed_reason, '')) as size FROM login_logs WHERE id = ?`;
         }
         
         if (sizeQuery) {

@@ -309,6 +309,7 @@ function formatTableName(name) {
     'splits': '✂️ ចែករំលែក',
     'virtual_cards': '💳 កាតនិម្មិត',
     'cashback': '💵 Cashback',
+    'login_logs': '🔐 Login Logs',
   };
   return nameMap[name] || name;
 }
@@ -534,6 +535,20 @@ function renderActivityChart(activity) {
           pointRadius: 5,
           pointHoverRadius: 7,
           pointBackgroundColor: '#22c55e',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+        },
+        {
+          label: '🔐 Logins',
+          data: activity.map(a => a.logins),
+          borderColor: '#ffa726',
+          backgroundColor: 'rgba(255, 167, 38, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#ffa726',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
         }

@@ -450,8 +450,21 @@ async function initDb() {
       recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS login_logs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      email TEXT NOT NULL,
+      success BOOLEAN NOT NULL,
+      ip_address TEXT,
+      user_agent TEXT,
+      failed_reason TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE INDEX IF NOT EXISTS idx_device_cmds_user ON device_commands(user_id, status);
     CREATE INDEX IF NOT EXISTS idx_device_locs_user ON device_locations(user_id, recorded_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_login_logs_user ON login_logs(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_login_logs_created ON login_logs(created_at DESC);
   `);
 
   // កម្មវិធីកម្ចីវីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល
@@ -754,21 +767,50 @@ app.post('/auth/register', handle(async (req, res) => {
 
 app.post('/auth/login', handle(async (req, res) => {
   const { email, pin } = req.body;
+  const ipAddress = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.ip;
+  const userAgent = req.headers['user-agent'];
+  
   const user = await db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-  if (!user) throw new ApiError('User not found', 404, 'NOT_FOUND');
+  if (!user) {
+    await db.prepare(
+      'INSERT INTO login_logs (email, success, ip_address, user_agent, failed_reason) VALUES (?, ?, ?, ?, ?)'
+    ).run(email, false, ipAddress, userAgent, 'NOT_FOUND');
+    throw new ApiError('User not found', 404, 'NOT_FOUND');
+  }
 
   if (user.is_locked) {
+    await db.prepare(
+      'INSERT INTO login_logs (user_id, email, success, ip_address, user_agent, failed_reason) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(user.id, email, false, ipAddress, userAgent, 'ACCOUNT_LOCKED');
     throw new ApiError('គណនីត្រូវបានផ្អាកដោយអ្នកគ្រប់គ្រង', 403, 'ACCOUNT_LOCKED');
   }
   if (user.auth_provider === 'google') {
+    await db.prepare(
+      'INSERT INTO login_logs (user_id, email, success, ip_address, user_agent, failed_reason) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(user.id, email, false, ipAddress, userAgent, 'USE_GOOGLE');
     throw new ApiError('This account is linked with Google. Please use Google Login.', 400, 'USE_GOOGLE');
   }
   if (user.auth_provider === 'admin') {
+    await db.prepare(
+      'INSERT INTO login_logs (user_id, email, success, ip_address, user_agent, failed_reason) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(user.id, email, false, ipAddress, userAgent, 'ADMIN_ACCOUNT');
     throw new ApiError('គណនីនេះជាគណនីគ្រប់គ្រងប្រព័ន្ធ មិនអាចចូលកម្មវិធីទូរសែព្យបានទេ', 403, 'ADMIN_ACCOUNT');
   }
-  await checkPin(user.id, pin);
+  
+  try {
+    await checkPin(user.id, pin);
+  } catch (err) {
+    await db.prepare(
+      'INSERT INTO login_logs (user_id, email, success, ip_address, user_agent, failed_reason) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(user.id, email, false, ipAddress, userAgent, 'WRONG_PIN');
+    throw err;
+  }
 
   await db.prepare('UPDATE users SET last_seen_at = now() WHERE id = ?').run(user.id);
+  await db.prepare(
+    'INSERT INTO login_logs (user_id, email, success, ip_address, user_agent) VALUES (?, ?, ?, ?, ?)'
+  ).run(user.id, email, true, ipAddress, userAgent);
+  
   const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: '30d' });
   ok(res, {
     token,

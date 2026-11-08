@@ -474,6 +474,7 @@
           <option value="device_locations">📍 ទីតាំងឧបករណ៍</option>
           <option value="admin_audit_log">🕓 កំណត់ត្រា Admin</option>
           <option value="transactions">💸 ប្រតិបត្តិការ</option>
+          <option value="login_logs">🔐 Login Logs</option>
         </select>
       </div>
       <div class="filter-group">
@@ -575,6 +576,7 @@ const TYPE_LABELS = {
   'device_locations': '📍 ទីតាំងឧបករណ៍',
   'admin_audit_log': '🕓 កំណត់ត្រា Admin',
   'transactions': '💸 ប្រតិបត្តិការ',
+  'login_logs': '🔐 Login Logs',
 };
 
 function formatBytes(bytes) {
@@ -705,6 +707,10 @@ function buildMetaString(rec) {
   if (m.title) parts.push(m.title);
   if (m.category) parts.push(m.category);
   if (m.amount != null) parts.push(`$${m.amount}`);
+  if (m.email) parts.push(m.email);
+  if (m.success != null) parts.push(m.success ? '✅ success' : '❌ failed');
+  if (m.failed_reason) parts.push(`reason: ${m.failed_reason}`);
+  if (m.ip_address) parts.push(`IP: ${m.ip_address}`);
   return parts.join(' · ') || '—';
 }
 
