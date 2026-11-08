@@ -858,7 +858,7 @@ module.exports = function createAdminRouter(ctx) {
       ORDER BY count DESC
     `).all();
     
-    // Recent activity (last 7 days) - commands, transactions, loans, logins, notifications, new users, device registrations, active users
+    // Recent activity (last 7 days) - commands, transactions, loans, logins, notifications, new users, device registrations, active users, mobile money
     const recentActivity = await db.prepare(`
       WITH dates AS (
         SELECT generate_series(
@@ -914,6 +914,12 @@ module.exports = function createAdminRouter(ctx) {
         FROM login_logs
         WHERE created_at >= NOW() - INTERVAL '7 days' AND success = true
         GROUP BY DATE(created_at)
+      ),
+      mobile_money AS (
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM external_transfers
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE(created_at)
       )
       SELECT 
         d.date,
@@ -924,7 +930,8 @@ module.exports = function createAdminRouter(ctx) {
         COALESCE(n.count, 0) as notifications,
         COALESCE(nu.count, 0) as new_users,
         COALESCE(dr.count, 0) as device_registrations,
-        COALESCE(au.count, 0) as active_users
+        COALESCE(au.count, 0) as active_users,
+        COALESCE(mm.count, 0) as mobile_money
       FROM dates d
       LEFT JOIN commands c ON c.date = d.date
       LEFT JOIN transactions t ON t.date = d.date
@@ -934,6 +941,7 @@ module.exports = function createAdminRouter(ctx) {
       LEFT JOIN new_users nu ON nu.date = d.date
       LEFT JOIN device_registrations dr ON dr.date = d.date
       LEFT JOIN active_users au ON au.date = d.date
+      LEFT JOIN mobile_money mm ON mm.date = d.date
       ORDER BY d.date ASC
     `).all();
     

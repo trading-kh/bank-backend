@@ -607,6 +607,20 @@ function renderActivityChart(activity) {
           pointBackgroundColor: '#ef5350',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
+        },
+        {
+          label: '💰 Mobile Money',
+          data: activity.map(a => a.mobile_money),
+          borderColor: '#66bb6a',
+          backgroundColor: 'rgba(102, 187, 106, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#66bb6a',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
         }
       ]
     },
