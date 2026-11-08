@@ -593,6 +593,20 @@ function renderActivityChart(activity) {
           pointBackgroundColor: '#78909c',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
+        },
+        {
+          label: '🔥 Active Users',
+          data: activity.map(a => a.active_users),
+          borderColor: '#ef5350',
+          backgroundColor: 'rgba(239, 83, 80, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#ef5350',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
         }
       ]
     },
