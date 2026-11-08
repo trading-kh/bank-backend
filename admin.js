@@ -904,10 +904,10 @@ module.exports = function createAdminRouter(ctx) {
         GROUP BY DATE(created_at)
       ),
       device_registrations AS (
-        SELECT DATE(created_at) as date, COUNT(DISTINCT user_id) as count
+        SELECT DATE(recorded_at) as date, COUNT(DISTINCT user_id) as count
         FROM device_locations
-        WHERE created_at >= NOW() - INTERVAL '7 days'
-        GROUP BY DATE(created_at)
+        WHERE recorded_at >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE(recorded_at)
       ),
       active_users AS (
         SELECT DATE(created_at) as date, COUNT(DISTINCT user_id) as count
