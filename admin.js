@@ -318,6 +318,17 @@ module.exports = function createAdminRouter(ctx) {
       }
       push('is_locked', locked ? 1 : 0);
     }
+    if (req.body.role !== undefined) {
+      const validRoles = ['management', 'administration', 'operations'];
+      const role = String(req.body.role).toLowerCase();
+      if (!validRoles.includes(role)) {
+        throw new ApiError('Role មិនត្រឹមត្រូវ', 400, 'INVALID_ROLE');
+      }
+      if (id === req.admin.id && role !== 'management') {
+        throw new ApiError('មិនអាចបន្ថយ role ខ្លួនឯងពី management', 400, 'SELF_DEMOTE_ROLE');
+      }
+      push('role', role);
+    }
     if (req.body.unlock === true) {
       push('pin_attempts', 0);
       push('locked_until', null);

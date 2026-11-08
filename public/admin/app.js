@@ -473,6 +473,19 @@ async function editUser(id) {
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input type="checkbox" id="f_admin" ${u.is_admin ? 'checked' : ''} style="width:18px;height:18px">
         <span>សិទ្ធិ Admin (គ្រប់គ្រងទិន្នន័យទាំងអស់)</span></label>
+      <label class="field"><span>🎭 Role (កម្រិតសិទ្ធិ)</span>
+        <select id="f_role" style="padding:10px;border-radius:8px;border:1px solid #ddd;font-size:14px">
+          <option value="management" ${u.role === 'management' ? 'selected' : ''}>👑 Management / Executive (ថ្នាក់ដឹកនាំ)</option>
+          <option value="administration" ${u.role === 'administration' ? 'selected' : ''}>🏢 Administration (ថ្នាក់រដ្ឋបាល)</option>
+          <option value="operations" ${u.role === 'operations' || !u.role ? 'selected' : ''}>⚙️ Operations / Staff (ថ្នាក់ប្រតិបត្តិការ)</option>
+        </select>
+      </label>
+      <div style="padding:12px;background:#f0f4ff;border-radius:8px;font-size:13px;color:#666;margin:8px 0">
+        <strong>📋 សិទ្ធិតាម Role:</strong><br>
+        • <strong>Management:</strong> គ្រប់គ្រងទាំងអស់ + 📱 Device Management<br>
+        • <strong>Administration:</strong> គ្រប់គ្រងទាំងអស់ <em>លើកលែង</em> 📱 Device Management<br>
+        • <strong>Operations:</strong> ដូច Administration
+      </div>
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input type="checkbox" id="f_locked" ${u.is_locked ? 'checked' : ''} style="width:18px;height:18px">
         <span>🔒 ផ្អាកគណនី (មិនអាចចូលប្រើប្រើវិញ)</span></label>
@@ -488,6 +501,7 @@ async function editUser(id) {
         phone: $('#f_phone').value.trim(),
         is_admin: $('#f_admin').checked,
         is_locked: $('#f_locked').checked,
+        role: $('#f_role').value,
       };
       await api(`/users/${id}`, { method: 'PATCH', body });
       const pin = $('#f_pin').value.trim();
