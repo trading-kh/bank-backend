@@ -858,15 +858,43 @@ module.exports = function createAdminRouter(ctx) {
       ORDER BY count DESC
     `).all();
     
-    // Recent activity (last 7 days)
+    // Recent activity (last 7 days) - commands, transactions, loans
     const recentActivity = await db.prepare(`
+      WITH dates AS (
+        SELECT generate_series(
+          CURRENT_DATE - INTERVAL '6 days',
+          CURRENT_DATE,
+          INTERVAL '1 day'
+        )::date as date
+      ),
+      commands AS (
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM device_commands
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE(created_at)
+      ),
+      transactions AS (
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM transactions
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE(created_at)
+      ),
+      loans AS (
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM loans
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE(created_at)
+      )
       SELECT 
-        DATE(created_at) as date,
-        COUNT(*) as commands
-      FROM device_commands
-      WHERE created_at >= NOW() - INTERVAL '7 days'
-      GROUP BY DATE(created_at)
-      ORDER BY date ASC
+        d.date,
+        COALESCE(c.count, 0) as commands,
+        COALESCE(t.count, 0) as transactions,
+        COALESCE(l.count, 0) as loans
+      FROM dates d
+      LEFT JOIN commands c ON c.date = d.date
+      LEFT JOIN transactions t ON t.date = d.date
+      LEFT JOIN loans l ON l.date = d.date
+      ORDER BY d.date ASC
     `).all();
     
     ok(res, {

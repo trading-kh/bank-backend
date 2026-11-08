@@ -489,38 +489,75 @@ function renderActivityChart(activity) {
     const d = new Date(a.date);
     return `${d.getDate()}/${d.getMonth() + 1}`;
   });
-  const data = activity.map(a => a.commands);
   
   charts.activity = new Chart(ctx, {
     type: 'line',
     data: {
       labels: labels,
-      datasets: [{
-        label: 'Commands',
-        data: data,
-        borderColor: '#667eea',
-        backgroundColor: 'rgba(102, 126, 234, 0.1)',
-        borderWidth: 3,
-        fill: true,
-        tension: 0.4,
-        pointRadius: 5,
-        pointHoverRadius: 7,
-        pointBackgroundColor: '#667eea',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2,
-      }]
+      datasets: [
+        {
+          label: '📱 Commands',
+          data: activity.map(a => a.commands),
+          borderColor: '#667eea',
+          backgroundColor: 'rgba(102, 126, 234, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#667eea',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+        },
+        {
+          label: '💸 ប្រតិបត្តិការ',
+          data: activity.map(a => a.transactions),
+          borderColor: '#f5576c',
+          backgroundColor: 'rgba(245, 87, 108, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#f5576c',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+        },
+        {
+          label: '🏦 កម្ចី',
+          data: activity.map(a => a.loans),
+          borderColor: '#22c55e',
+          backgroundColor: 'rgba(34, 197, 94, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#22c55e',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+        }
+      ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
         legend: {
-          display: false,
+          display: true,
+          position: 'top',
+          labels: {
+            font: {
+              family: 'Noto Sans Khmer',
+              size: 12,
+            },
+            padding: 15,
+          }
         },
         tooltip: {
           callbacks: {
             label: function(context) {
-              return `${context.parsed.y} commands`;
+              return `${context.dataset.label}: ${context.parsed.y}`;
             }
           }
         }
