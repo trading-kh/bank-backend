@@ -818,38 +818,54 @@ module.exports = function createAdminRouter(ctx) {
     const [
       newUsers,
       newCards,
+      pendingTransactions,
       pendingLoans,
       pendingKyc,
       overdueLoans,
       newReports,
       unreadNotifications,
+      pendingDataCleanup,
       newDevices,
       onlineDevices,
       failedLogins,
+      dbUsageWarning,
     ] = await Promise.all([
       db.prepare(`SELECT COUNT(*) as c FROM users WHERE created_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(*) as c FROM cards WHERE created_at >= $1`).get(today.toISOString()),
+      db.prepare(`SELECT COUNT(*) as c FROM external_transfers WHERE status != 'settled'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status IN ('submitted', 'under_review', 'approved')`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_kyc WHERE status = 'submitted'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls JOIN loans l ON l.id = ls.loan_id WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE AND l.status = 'disbursed'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status = 'disbursed' AND created_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(*) as c FROM notifications WHERE "read" = 0`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM (
+        SELECT id FROM admin_audit_log WHERE created_at < NOW() - INTERVAL '30 days'
+        UNION ALL
+        SELECT id FROM login_logs WHERE created_at < NOW() - INTERVAL '30 days'
+      ) old_records`).get(),
       db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= NOW() - INTERVAL '10 minutes'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM login_logs WHERE success = false AND created_at >= $1`).get(today.toISOString()),
+      db.prepare(`SELECT pg_database_size('neondb') as bytes`).get(),
     ]);
+
+    const DB_LIMIT_BYTES = 0.5 * 1024 * 1024 * 1024;
+    const usagePercent = (dbUsageWarning?.bytes || 0) / DB_LIMIT_BYTES * 100;
 
     ok(res, {
       users: newUsers?.c || 0,
       cards: newCards?.c || 0,
+      transactions: pendingTransactions?.c || 0,
       loans: pendingLoans?.c || 0,
       kyc: pendingKyc?.c || 0,
       collections: overdueLoans?.c || 0,
       reports: newReports?.c || 0,
       notifications: unreadNotifications?.c || 0,
+      data: pendingDataCleanup?.c || 0,
       devices: newDevices?.c || 0,
       devicesOnline: onlineDevices?.c || 0,
       audit: failedLogins?.c || 0,
+      usage: usagePercent > 80 ? Math.round(usagePercent) : 0,
     });
   }));
 

@@ -2163,13 +2163,16 @@ async function loadBadges() {
     const badges = await api('/badges');
     setBadge('badge-users', badges.users);
     setBadge('badge-cards', badges.cards);
+    setBadge('badge-transactions', badges.transactions);
     setBadge('badge-loans', badges.loans);
     setBadge('badge-kyc', badges.kyc);
     setBadge('badge-collections', badges.collections);
     setBadge('badge-reports', badges.reports);
     setBadge('badge-notifications', badges.notifications);
+    setBadge('badge-data', badges.data);
     setBadge('badge-devices', badges.devices, badges.devicesOnline > 0 ? 'online' : '');
     setBadge('badge-audit', badges.audit);
+    setBadge('badge-usage', badges.usage, badges.usage > 0 ? 'warning' : '');
   } catch (_) {}
 }
 
