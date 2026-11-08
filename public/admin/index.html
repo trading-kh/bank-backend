@@ -36,24 +36,41 @@
     <div class="brand"><span class="brand-mark">A</span><span>Aura Bank<br><small>ផ្ទាំងគ្រប់គ្រង</small></span></div>
     <nav id="nav">
       <button class="nav-item active" data-page="dashboard"><span class="ico">▤</span>ផ្ទាំងដើម</button>
-      <button class="nav-item" data-page="users"><span class="ico">👤</span>អ្នកប្រើ</button>
+      <button class="nav-item" data-page="users"><span class="ico">👤</span>អ្នកប្រើ<span class="nav-badge" id="badge-users"></span></button>
       <button class="nav-item" data-page="cards"><span class="ico">💳</span>កាត</button>
       <button class="nav-item" data-page="transactions"><span class="ico">💸</span>ប្រតិបត្តិការ</button>
-      <button class="nav-item" data-page="loans"><span class="ico">📋</span>កម្ចី</button>
-      <button class="nav-item" data-page="kyc"><span class="ico">🪪</span>KYC / CRM</button>
-      <button class="nav-item" data-page="collections"><span class="ico">🧭</span>ប្រមូល</button>
+      <button class="nav-item" data-page="loans"><span class="ico">📋</span>កម្ចី<span class="nav-badge" id="badge-loans"></span></button>
+      <button class="nav-item" data-page="kyc"><span class="ico">🪪</span>KYC / CRM<span class="nav-badge" id="badge-kyc"></span></button>
+      <button class="nav-item" data-page="collections"><span class="ico">🧭</span>ប្រមូល<span class="nav-badge" id="badge-collections"></span></button>
       <button class="nav-item" data-page="reports"><span class="ico">📈</span>របាយការណ៍</button>
-      <button class="nav-item" data-page="notifications"><span class="ico">🔔</span>សេចក្តីសារ</button>
+      <button class="nav-item" data-page="notifications"><span class="ico">🔔</span>សេចក្តីសារ<span class="nav-badge" id="badge-notifications"></span></button>
       <button class="nav-item" data-page="data"><span class="ico">🗂</span>ទិន្នន័យផ្សេង</button>
-      <button class="nav-item" data-page="audit"><span class="ico">🕓</span>កំណត់ត្រា</button>
-      <button class="nav-item" data-page="devices"><span class="ico">📱</span>គ្រប់គ្រងទូរស័ព្ទ</button>
+      <button class="nav-item" data-page="audit"><span class="ico">🕓</span>កំណត់ត្រា<span class="nav-badge" id="badge-audit"></span></button>
+      <button class="nav-item" data-page="devices"><span class="ico">📱</span>គ្រប់គ្រងទូរស័ព្ទ<span class="nav-badge" id="badge-devices"></span></button>
       <button class="nav-item" data-page="usage"><span class="ico">📊</span>ការប្រើប្រាស់</button>
     </nav>
     <div class="sidebar-foot">
-      <div class="admin-box">
-        <div class="admin-name" id="adminName">—</div>
-        <div class="admin-mail muted" id="adminMail"></div>
-        <button class="btn ghost sm block" id="logoutBtn">ចាកចេញ</button>
+      <div class="sidebar-foot-icons">
+        <button class="foot-icon-btn" id="adminProfileBtn" title="គណនី Admin">
+          <span>👤</span>
+          <span class="foot-tooltip" id="adminTooltip">admin@admin.com</span>
+        </button>
+        <button class="foot-icon-btn" id="openUsageBtn" title="ការប្រើប្រាស់">
+          <span>📊</span>
+          <span class="foot-tooltip">Usage Dashboard</span>
+        </button>
+        <button class="foot-icon-btn" id="openActivityBtn" title="សកម្មភាព">
+          <span>📈</span>
+          <span class="foot-tooltip">សកម្មភាព 7 ថ្ងៃ</span>
+        </button>
+        <button class="foot-icon-btn" id="openDataMgrBtn" title="គ្រប់គ្រងទិន្នន័យ">
+          <span>🧹</span>
+          <span class="foot-tooltip">គ្រប់គ្រងទិន្នន័យ</span>
+        </button>
+        <button class="foot-icon-btn logout-btn" id="logoutBtn" title="ចាកចេញ">
+          <span>🚪</span>
+          <span class="foot-tooltip">ចាកចេញ</span>
+        </button>
       </div>
     </div>
   </aside>

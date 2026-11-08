@@ -810,6 +810,43 @@ module.exports = function createAdminRouter(ctx) {
     ok(res, rows);
   }));
 
+  // Sidebar notification badges — counts of pending actions per section
+  router.get('/badges', adminAuth, handle(async (req, res) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const [
+      newUsers,
+      pendingLoans,
+      pendingKyc,
+      overdueLoans,
+      unreadNotifications,
+      pendingCommands,
+      onlineDevices,
+      failedLogins,
+    ] = await Promise.all([
+      db.prepare(`SELECT COUNT(*) as c FROM users WHERE created_at >= $1`).get(today.toISOString()),
+      db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status IN ('submitted', 'approved')`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM loan_kyc WHERE status = 'submitted'`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls JOIN loans l ON l.id = ls.loan_id WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE AND l.status = 'disbursed'`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM notifications WHERE "read" = 0`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM device_commands WHERE status = 'pending'`).get(),
+      db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= NOW() - INTERVAL '10 minutes'`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM login_logs WHERE success = false AND created_at >= $1`).get(today.toISOString()),
+    ]);
+
+    ok(res, {
+      users: newUsers?.c || 0,
+      loans: pendingLoans?.c || 0,
+      kyc: pendingKyc?.c || 0,
+      collections: overdueLoans?.c || 0,
+      notifications: unreadNotifications?.c || 0,
+      devices: pendingCommands?.c || 0,
+      devicesOnline: onlineDevices?.c || 0,
+      audit: failedLogins?.c || 0,
+    });
+  }));
+
   // Usage monitoring dashboard
   router.get('/usage', adminAuth, handle(async (req, res) => {
     // Database size

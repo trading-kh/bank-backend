@@ -2106,9 +2106,9 @@ async function boot() {
     admin = await api('/me');
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
-    $('#adminName').textContent = admin.name || admin.email;
-    $('#adminMail').textContent = admin.email;
+    $('#adminTooltip').textContent = admin.email;
     render();
+    loadBadges();
   } catch (_) {
     token = null;
     localStorage.removeItem('aura_admin_token');
@@ -2138,9 +2138,9 @@ $('#loginForm').onsubmit = async (e) => {
     localStorage.setItem('aura_admin_token', token);
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
-    $('#adminName').textContent = admin.name;
-    $('#adminMail').textContent = admin.email;
+    $('#adminTooltip').textContent = admin.email;
     render();
+    loadBadges();
   } catch (err) {
     $('#loginError').textContent = err.message;
   } finally {
@@ -2149,7 +2149,42 @@ $('#loginForm').onsubmit = async (e) => {
 };
 
 $('#logoutBtn').onclick = logout;
-$('#refreshBtn').onclick = () => render();
+$('#refreshBtn').onclick = () => { render(); loadBadges(); };
+
+// Sidebar footer icon buttons
+$('#openUsageBtn').onclick = () => window.open('/admin/usage.html?token=' + encodeURIComponent(token), '_blank');
+$('#openActivityBtn').onclick = () => window.open('/admin/activity.html?token=' + encodeURIComponent(token), '_blank');
+$('#openDataMgrBtn').onclick = () => window.open('/admin/data-manager.html?token=' + encodeURIComponent(token), '_blank');
+
+// Badge system — fetch pending counts and update sidebar
+async function loadBadges() {
+  if (!token) return;
+  try {
+    const badges = await api('/badges');
+    setBadge('badge-users', badges.users);
+    setBadge('badge-loans', badges.loans);
+    setBadge('badge-kyc', badges.kyc);
+    setBadge('badge-collections', badges.collections);
+    setBadge('badge-notifications', badges.notifications);
+    setBadge('badge-devices', badges.devices, badges.devicesOnline > 0 ? 'online' : '');
+    setBadge('badge-audit', badges.audit);
+  } catch (_) {}
+}
+
+function setBadge(id, count, extraClass) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (count > 0) {
+    el.textContent = count > 99 ? '99+' : count;
+    el.className = 'nav-badge visible' + (extraClass ? ' ' + extraClass : '');
+  } else {
+    el.className = 'nav-badge';
+    el.textContent = '';
+  }
+}
+
+// Auto-refresh badges every 30 seconds
+setInterval(loadBadges, 30000);
 
 // មិនមាន auto-refresh ទេ — អ្នកប្រើត្រូវចុច ⟳ ដើម្បីផ្អាសទិន្នន័យដោយខ្លួនឯង
 
