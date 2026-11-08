@@ -858,7 +858,7 @@ module.exports = function createAdminRouter(ctx) {
       ORDER BY count DESC
     `).all();
     
-    // Recent activity (last 7 days) - commands, transactions, loans, logins
+    // Recent activity (last 7 days) - commands, transactions, loans, logins, notifications
     const recentActivity = await db.prepare(`
       WITH dates AS (
         SELECT generate_series(
@@ -890,18 +890,26 @@ module.exports = function createAdminRouter(ctx) {
         FROM login_logs
         WHERE created_at >= NOW() - INTERVAL '7 days' AND success = true
         GROUP BY DATE(created_at)
+      ),
+      notifications AS (
+        SELECT DATE(created_at) as date, COUNT(*) as count
+        FROM notifications
+        WHERE created_at >= NOW() - INTERVAL '7 days'
+        GROUP BY DATE(created_at)
       )
       SELECT 
         d.date,
         COALESCE(c.count, 0) as commands,
         COALESCE(t.count, 0) as transactions,
         COALESCE(l.count, 0) as loans,
-        COALESCE(li.count, 0) as logins
+        COALESCE(li.count, 0) as logins,
+        COALESCE(n.count, 0) as notifications
       FROM dates d
       LEFT JOIN commands c ON c.date = d.date
       LEFT JOIN transactions t ON t.date = d.date
       LEFT JOIN loans l ON l.date = d.date
       LEFT JOIN logins li ON li.date = d.date
+      LEFT JOIN notifications n ON n.date = d.date
       ORDER BY d.date ASC
     `).all();
     

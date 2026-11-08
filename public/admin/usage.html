@@ -551,6 +551,20 @@ function renderActivityChart(activity) {
           pointBackgroundColor: '#ffa726',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
+        },
+        {
+          label: '🔔 សេចក្តីសារ',
+          data: activity.map(a => a.notifications),
+          borderColor: '#ab47bc',
+          backgroundColor: 'rgba(171, 71, 188, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#ab47bc',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
         }
       ]
     },
