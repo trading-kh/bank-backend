@@ -817,18 +817,22 @@ module.exports = function createAdminRouter(ctx) {
 
     const [
       newUsers,
+      newCards,
       pendingLoans,
       pendingKyc,
       overdueLoans,
+      newReports,
       unreadNotifications,
       newDevices,
       onlineDevices,
       failedLogins,
     ] = await Promise.all([
       db.prepare(`SELECT COUNT(*) as c FROM users WHERE created_at >= $1`).get(today.toISOString()),
+      db.prepare(`SELECT COUNT(*) as c FROM cards WHERE created_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status IN ('submitted', 'under_review', 'approved')`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_kyc WHERE status = 'submitted'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls JOIN loans l ON l.id = ls.loan_id WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE AND l.status = 'disbursed'`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status = 'disbursed' AND created_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(*) as c FROM notifications WHERE "read" = 0`).get(),
       db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= NOW() - INTERVAL '10 minutes'`).get(),
@@ -837,9 +841,11 @@ module.exports = function createAdminRouter(ctx) {
 
     ok(res, {
       users: newUsers?.c || 0,
+      cards: newCards?.c || 0,
       loans: pendingLoans?.c || 0,
       kyc: pendingKyc?.c || 0,
       collections: overdueLoans?.c || 0,
+      reports: newReports?.c || 0,
       notifications: unreadNotifications?.c || 0,
       devices: newDevices?.c || 0,
       devicesOnline: onlineDevices?.c || 0,

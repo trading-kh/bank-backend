@@ -2162,9 +2162,11 @@ async function loadBadges() {
   try {
     const badges = await api('/badges');
     setBadge('badge-users', badges.users);
+    setBadge('badge-cards', badges.cards);
     setBadge('badge-loans', badges.loans);
     setBadge('badge-kyc', badges.kyc);
     setBadge('badge-collections', badges.collections);
+    setBadge('badge-reports', badges.reports);
     setBadge('badge-notifications', badges.notifications);
     setBadge('badge-devices', badges.devices, badges.devicesOnline > 0 ? 'online' : '');
     setBadge('badge-audit', badges.audit);

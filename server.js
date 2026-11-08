@@ -124,8 +124,11 @@ async function initDb() {
       online INTEGER NOT NULL DEFAULT 1,
       daily_limit DOUBLE PRECISION NOT NULL DEFAULT 2000,
       color1 BIGINT NOT NULL,
-      color2 BIGINT NOT NULL
+      color2 BIGINT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
     CREATE TABLE IF NOT EXISTS transactions (
       id SERIAL PRIMARY KEY,
