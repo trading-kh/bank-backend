@@ -565,6 +565,20 @@ function renderActivityChart(activity) {
           pointBackgroundColor: '#ab47bc',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
+        },
+        {
+          label: '👤 អ្នកប្រើថ្មី',
+          data: activity.map(a => a.new_users),
+          borderColor: '#26c6da',
+          backgroundColor: 'rgba(38, 198, 218, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#26c6da',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
         }
       ]
     },
