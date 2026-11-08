@@ -621,6 +621,20 @@ function renderActivityChart(activity) {
           pointBackgroundColor: '#66bb6a',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
+        },
+        {
+          label: '❌ Failed Transactions',
+          data: activity.map(a => a.failed_transactions),
+          borderColor: '#d32f2f',
+          backgroundColor: 'rgba(211, 47, 47, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#d32f2f',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
         }
       ]
     },
