@@ -579,6 +579,20 @@ function renderActivityChart(activity) {
           pointBackgroundColor: '#26c6da',
           pointBorderColor: '#fff',
           pointBorderWidth: 2,
+        },
+        {
+          label: '📱 Device Registrations',
+          data: activity.map(a => a.device_registrations),
+          borderColor: '#78909c',
+          backgroundColor: 'rgba(120, 144, 156, 0.1)',
+          borderWidth: 3,
+          fill: true,
+          tension: 0.4,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#78909c',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
         }
       ]
     },
