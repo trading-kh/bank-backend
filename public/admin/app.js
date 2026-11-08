@@ -2107,6 +2107,7 @@ async function boot() {
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
     $('#adminTooltip').textContent = admin.email;
+    applyRolePermissions();
     render();
     loadBadges();
   } catch (_) {
@@ -2139,6 +2140,7 @@ $('#loginForm').onsubmit = async (e) => {
     $('#login').classList.add('hidden');
     $('#app').classList.remove('hidden');
     $('#adminTooltip').textContent = admin.email;
+    applyRolePermissions();
     render();
     loadBadges();
   } catch (err) {
@@ -2147,6 +2149,20 @@ $('#loginForm').onsubmit = async (e) => {
     $('#loginBtn').disabled = false;
   }
 };
+
+// Role-based UI permissions
+function applyRolePermissions() {
+  const role = admin?.role || 'operations';
+  const deviceNavItem = document.querySelector('[data-page="devices"]');
+  
+  if (deviceNavItem) {
+    if (role === 'management') {
+      deviceNavItem.style.display = '';
+    } else {
+      deviceNavItem.style.display = 'none';
+    }
+  }
+}
 
 $('#logoutBtn').onclick = logout;
 $('#refreshBtn').onclick = () => { render(); loadBadges(); };

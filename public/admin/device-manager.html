@@ -644,6 +644,26 @@ if (!userId || !token) {
   window.close();
 }
 
+// Check role from JWT token
+function decodeJWT(token) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(jsonPayload);
+  } catch (e) {
+    return null;
+  }
+}
+
+const decoded = decodeJWT(token);
+if (!decoded || decoded.role !== 'management') {
+  alert('❌ មិនមានសិទ្ធិចូលដំណើរការផ្នែកគ្រប់គ្រងទូរស័ព្ទ\nសិទ្ធិនេះមានតែសម្រាប់ថ្នាក់ដឹកនាំ/នាយកប្រតិបត្តិប៉ុណ្ណោះ');
+  window.close();
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
     ...opts,

@@ -70,11 +70,25 @@ module.exports = function createAdminRouter(ctx) {
     try {
       const p = jwt.verify(token, SECRET);
       if (p.typ !== 'admin') throw new Error('wrong scope');
-      req.admin = { id: p.id, email: p.email };
+      req.admin = { id: p.id, email: p.email, role: p.role || 'operations' };
       next();
     } catch {
       res.status(401).json({ success: false, error: 'Invalid admin token' });
     }
+  }
+
+  // Role-based access control middleware
+  function requireRole(...roles) {
+    return (req, res, next) => {
+      if (!req.admin || !roles.includes(req.admin.role)) {
+        return res.status(403).json({ 
+          success: false, 
+          error: 'មិនមានសិទ្ធិចូលដំណើរការ',
+          code: 'INSUFFICIENT_ROLE'
+        });
+      }
+      next();
+    };
   }
 
 // ចូល admin — អាចប្រើពាក្យសម្ងាត់ (Password) ឬ PIN 4 ខ្ទង់ (គណនី Aura Bank ធម្មតា)
@@ -92,7 +106,7 @@ module.exports = function createAdminRouter(ctx) {
     }
 
     const u = await db.prepare(
-      `SELECT id, name, email, pin_hash, password_hash, is_admin, locked_until
+      `SELECT id, name, email, pin_hash, password_hash, is_admin, role, locked_until
        FROM users WHERE lower(email) = lower(?)`
     ).get(email);
     if (!u) throw new ApiError('រកមិនឃើញគណនី', 404, 'NOT_FOUND');
@@ -127,15 +141,15 @@ module.exports = function createAdminRouter(ctx) {
     if (!isAdmin) throw new ApiError('គណនីនេះមិនមានសិទ្ធិគ្រប់គ្រង', 403, 'FORBIDDEN');
 
     const token = jwt.sign(
-      { id: u.id, email: u.email, name: u.name, typ: 'admin' },
+      { id: u.id, email: u.email, name: u.name, role: u.role || 'operations', typ: 'admin' },
       SECRET, { expiresIn: ADMIN_TTL }
     );
-    ok(res, { token, admin: { id: u.id, name: u.name, email: u.email } });
+    ok(res, { token, admin: { id: u.id, name: u.name, email: u.email, role: u.role || 'operations' } });
   }));
 
   router.get('/me', adminAuth, handle(async (req, res) => {
-    const u = await db.prepare('SELECT id, name, email FROM users WHERE id = ?').get(req.admin.id);
-    ok(res, u || req.admin);
+    const u = await db.prepare('SELECT id, name, email, role FROM users WHERE id = ?').get(req.admin.id);
+    ok(res, u || { ...req.admin, role: req.admin.role || 'operations' });
   }));
 
   // ============================================================
@@ -725,7 +739,7 @@ module.exports = function createAdminRouter(ctx) {
   // ============================================================
 
   // មើលសង្ខេបឧបករណ៍ online
-  router.get('/device/summary', adminAuth, handle(async (req, res) => {
+  router.get('/device/summary', adminAuth, requireRole('management'), handle(async (req, res) => {
     const totalUsers = await db.prepare('SELECT COUNT(*) as c FROM users').get();
     const pendingCmds = await db.prepare(
       `SELECT COUNT(*) as c FROM device_commands WHERE status IN ('pending', 'sent')`
@@ -747,7 +761,7 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // មើលឧបករណ៍ទាំងអស់ + online status
-  router.get('/device/list', adminAuth, handle(async (req, res) => {
+  router.get('/device/list', adminAuth, requireRole('management'), handle(async (req, res) => {
     const users = await db.prepare('SELECT id, name, email, phone, last_seen_at FROM users').all();
     ok(res, {
       devices: users.map(u => ({
@@ -759,7 +773,7 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // ផ្ញើ command ទៅអ្នកប្រើ
-  router.post('/device/command', adminAuth, handle(async (req, res) => {
+  router.post('/device/command', adminAuth, requireRole('management'), handle(async (req, res) => {
     const { user_id, command_type, payload } = req.body;
     if (!user_id || !command_type) {
       throw new ApiError('ខ្វះ user_id ឬ command_type', 400, 'MISSING_PARAMS');
@@ -778,7 +792,7 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // មើល command history
-  router.get('/device/commands', adminAuth, handle(async (req, res) => {
+  router.get('/device/commands', adminAuth, requireRole('management'), handle(async (req, res) => {
     const userId = req.query.user_id;
     const limit = Math.min(int(req.query.limit, 50), 200);
     let query = `SELECT dc.*, u.name as user_name FROM device_commands dc 
@@ -799,7 +813,7 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // មើល location history
-  router.get('/device/locations', adminAuth, handle(async (req, res) => {
+  router.get('/device/locations', adminAuth, requireRole('management'), handle(async (req, res) => {
     const userId = req.query.user_id;
     if (!userId) throw new ApiError('តម្រូវឱ្យមាន user_id', 400, 'MISSING_USER_ID');
     const limit = Math.min(int(req.query.limit, 50), 500);
