@@ -63,6 +63,16 @@ const liveBadge = (r) => r.online
   ? '<span class="live on"><i></i>Live</span>'
   : '<span class="live off"><i></i>Offline</span>';
 
+const roleBadge = (role) => {
+  const map = {
+    management: ['👑', 'Management', 'ok'],
+    administration: ['🏢', 'Administration', 'info'],
+    operations: ['⚙️', 'Operations', 'warn'],
+  };
+  const [icon, label, cls] = map[role] || map.operations;
+  return `<span class="pill ${cls}" title="${label}">${icon} ${label}</span>`;
+};
+
 const ago = (s) => {
   if (!s) return '—';
   const ms = Date.now() - new Date(s).getTime();
@@ -398,6 +408,7 @@ async function renderUsers() {
         <div class="muted" style="font-size:11.5px">${esc(r.email)} · ${esc(r.phone || '—')}</div></div></div>`
     },
     { label: 'ស្ថានភាព', render: (r) => `<div>${liveBadge(r)}</div>${lastSeenHtml(r)}` },
+    { label: '🎭 Role', render: (r) => roleBadge(r.role) },
     { label: 'កាត', num: true, render: (r) => r.card_count },
     { label: 'សម្រាប្រាប់', num: true, render: (r) => money(r.balance) },
     { label: 'ប្រតិបត្តិការ', num: true, render: (r) => r.tx_count },

@@ -240,7 +240,7 @@ module.exports = function createAdminRouter(ctx) {
     const dir = String(req.query.order || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
     const rows = await db.prepare(`
-      SELECT u.id, u.name, u.email, u.phone, u.auth_provider, u.is_admin, u.is_locked,
+      SELECT u.id, u.name, u.email, u.phone, u.auth_provider, u.is_admin, u.is_locked, u.role,
              u.pin_attempts, u.locked_until, u.created_at, u.last_seen_at, u.avatar_thumb,
              (SELECT COUNT(*) FROM cards c WHERE c.user_id = u.id) AS card_count,
              (SELECT COALESCE(SUM(c.balance), 0) FROM cards c WHERE c.user_id = u.id) AS balance,
@@ -263,7 +263,7 @@ module.exports = function createAdminRouter(ctx) {
   router.get('/users/:id', adminAuth, handle(async (req, res) => {
     const id = int(req.params.id);
     const user = await db.prepare(`
-      SELECT id, name, email, phone, auth_provider, is_admin, is_locked, pin_attempts,
+      SELECT id, name, email, phone, auth_provider, is_admin, is_locked, role, pin_attempts,
              locked_until, created_at, avatar_thumb, last_seen_at
       FROM users WHERE id = ?`).get(id);
     if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
@@ -872,7 +872,7 @@ module.exports = function createAdminRouter(ctx) {
       db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= NOW() - INTERVAL '10 minutes'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM login_logs WHERE success = false AND created_at >= $1`).get(today.toISOString()),
-      db.prepare(`SELECT pg_database_size('neondb') as bytes`).get(),
+      db.prepare(`SELECT pg_database_size(current_database()) as bytes`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM (
         SELECT id FROM transactions WHERE created_at >= $1
         UNION ALL SELECT id FROM loans WHERE created_at >= $1
@@ -906,7 +906,7 @@ module.exports = function createAdminRouter(ctx) {
   // Usage monitoring dashboard
   router.get('/usage', adminAuth, handle(async (req, res) => {
     // Database size
-    const dbSize = await db.prepare(`SELECT pg_database_size('neondb') as bytes`).get();
+    const dbSize = await db.prepare(`SELECT pg_database_size(current_database()) as bytes`).get();
     
     // Table sizes with row counts
     const tableSizes = await db.prepare(`
