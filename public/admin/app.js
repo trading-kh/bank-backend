@@ -2173,6 +2173,11 @@ async function loadBadges() {
     setBadge('badge-devices', badges.devices, badges.devicesOnline > 0 ? 'online' : '');
     setBadge('badge-audit', badges.audit);
     setBadge('badge-usage', badges.usage, badges.usage > 0 ? 'warning' : '');
+
+    // Footer icon badges
+    setFootBadge('foot-badge-usage', badges.usage, badges.usage > 0 ? 'warning' : '');
+    setFootBadge('foot-badge-activity', badges.activity);
+    setFootBadge('foot-badge-clean', badges.data);
   } catch (_) {}
 }
 
@@ -2184,6 +2189,18 @@ function setBadge(id, count, extraClass) {
     el.className = 'nav-badge visible' + (extraClass ? ' ' + extraClass : '');
   } else {
     el.className = 'nav-badge';
+    el.textContent = '';
+  }
+}
+
+function setFootBadge(id, count, extraClass) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (count > 0) {
+    el.textContent = count > 99 ? '99+' : count;
+    el.className = 'foot-badge visible' + (extraClass ? ' ' + extraClass : '');
+  } else {
+    el.className = 'foot-badge';
     el.textContent = '';
   }
 }

@@ -829,6 +829,7 @@ module.exports = function createAdminRouter(ctx) {
       onlineDevices,
       failedLogins,
       dbUsageWarning,
+      activityToday,
     ] = await Promise.all([
       db.prepare(`SELECT COUNT(*) as c FROM users WHERE created_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(*) as c FROM cards WHERE created_at >= $1`).get(today.toISOString()),
@@ -847,6 +848,13 @@ module.exports = function createAdminRouter(ctx) {
       db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= NOW() - INTERVAL '10 minutes'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM login_logs WHERE success = false AND created_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT pg_database_size('neondb') as bytes`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM (
+        SELECT id FROM transactions WHERE created_at >= $1
+        UNION ALL SELECT id FROM loans WHERE created_at >= $1
+        UNION ALL SELECT id FROM notifications WHERE created_at >= $1
+        UNION ALL SELECT id FROM device_commands WHERE created_at >= $1
+        UNION ALL SELECT id FROM login_logs WHERE created_at >= $1
+      ) events`).get(today.toISOString()),
     ]);
 
     const DB_LIMIT_BYTES = 0.5 * 1024 * 1024 * 1024;
@@ -866,6 +874,7 @@ module.exports = function createAdminRouter(ctx) {
       devicesOnline: onlineDevices?.c || 0,
       audit: failedLogins?.c || 0,
       usage: usagePercent > 80 ? Math.round(usagePercent) : 0,
+      activity: activityToday?.c || 0,
     });
   }));
 
