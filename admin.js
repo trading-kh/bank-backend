@@ -945,5 +945,150 @@ module.exports = function createAdminRouter(ctx) {
     ok(res, { dry_run: false, cutoff_date: cutoffDate.toISOString(), results });
   }));
 
+  // Data manager - list all records with metadata
+  router.get('/data-manager', adminAuth, handle(async (req, res) => {
+    const { type, limit = 100, offset = 0 } = req.query;
+    
+    const tables = {
+      'device_commands': {
+        query: `SELECT id, command_type, status, created_at, 
+                pg_column_size(result_data) as size_bytes,
+                LENGTH(result_data) as result_length
+                FROM device_commands`,
+        dateField: 'created_at',
+        label: 'Device Commands'
+      },
+      'device_locations': {
+        query: `SELECT id, user_id, recorded_at,
+                pg_column_size(lat::text) + pg_column_size(lng::text) as size_bytes
+                FROM device_locations`,
+        dateField: 'recorded_at',
+        label: 'Location History'
+      },
+      'admin_audit_log': {
+        query: `SELECT id, admin_email, action, entity_type, entity_id, created_at,
+                pg_column_size(details) as size_bytes
+                FROM admin_audit_log`,
+        dateField: 'created_at',
+        label: 'Audit Logs'
+      },
+      'transactions': {
+        query: `SELECT id, user_id, title, category, amount, created_at,
+                pg_column_size(title) + pg_column_size(category) as size_bytes
+                FROM transactions`,
+        dateField: 'created_at',
+        label: 'Transactions'
+      }
+    };
+    
+    if (type && !tables[type]) {
+      throw new ApiError('Invalid type', 400, 'INVALID_TYPE');
+    }
+    
+    const typesToList = type ? [type] : Object.keys(tables);
+    const allRecords = [];
+    
+    for (const t of typesToList) {
+      const table = tables[t];
+      const rows = await db.prepare(
+        `${table.query} ORDER BY ${table.dateField} DESC LIMIT ? OFFSET ?`
+      ).all(limit, offset);
+      
+      for (const row of rows) {
+        allRecords.push({
+          id: row.id,
+          type: t,
+          typeLabel: table.label,
+          date: row[table.dateField],
+          size_bytes: row.size_bytes || 0,
+          size_pretty: formatBytes(row.size_bytes || 0),
+          metadata: {
+            command_type: row.command_type,
+            status: row.status,
+            user_id: row.user_id,
+            admin_email: row.admin_email,
+            action: row.action,
+            entity_type: row.entity_type,
+            title: row.title,
+            category: row.category,
+            amount: row.amount,
+          }
+        });
+      }
+    }
+    
+    // Sort by date descending
+    allRecords.sort((a, b) => new Date(b.date) - new Date(a.date));
+    
+    ok(res, {
+      records: allRecords.slice(0, limit),
+      total: allRecords.length,
+      offset: offset,
+      limit: limit,
+    });
+  }));
+
+  // Data manager - delete selected records
+  router.post('/data-manager/delete', adminAuth, handle(async (req, res) => {
+    const { records } = req.body; // Array of {type, id}
+    
+    if (!records || !Array.isArray(records) || records.length === 0) {
+      throw new ApiError('No records specified', 400, 'NO_RECORDS');
+    }
+    
+    const results = {};
+    let totalDeleted = 0;
+    let totalFreedBytes = 0;
+    
+    for (const record of records) {
+      const { type, id } = record;
+      
+      if (!results[type]) {
+        results[type] = { count: 0, freed_bytes: 0 };
+      }
+      
+      try {
+        // Get size before deleting
+        let sizeQuery;
+        if (type === 'device_commands') {
+          sizeQuery = `SELECT pg_column_size(result_data) as size FROM device_commands WHERE id = ?`;
+        } else if (type === 'device_locations') {
+          sizeQuery = `SELECT pg_column_size(lat::text) + pg_column_size(lng::text) as size FROM device_locations WHERE id = ?`;
+        } else if (type === 'admin_audit_log') {
+          sizeQuery = `SELECT pg_column_size(details) as size FROM admin_audit_log WHERE id = ?`;
+        } else if (type === 'transactions') {
+          sizeQuery = `SELECT pg_column_size(title) + pg_column_size(category) as size FROM transactions WHERE id = ?`;
+        }
+        
+        if (sizeQuery) {
+          const sizeResult = await db.prepare(sizeQuery).get(id);
+          if (sizeResult && sizeResult.size) {
+            results[type].freed_bytes += sizeResult.size;
+            totalFreedBytes += sizeResult.size;
+          }
+        }
+        
+        // Delete the record
+        const deleted = await db.prepare(`DELETE FROM ${type} WHERE id = ?`).run(id);
+        if (deleted.changes > 0) {
+          results[type].count++;
+          totalDeleted++;
+        }
+      } catch (err) {
+        console.error(`Error deleting ${type} id ${id}:`, err);
+      }
+    }
+    
+    await audit(req, 'data_manager_delete', 'system', null, 
+      `Deleted ${totalDeleted} records, freed ${formatBytes(totalFreedBytes)}`);
+    
+    ok(res, {
+      deleted: totalDeleted,
+      freed_bytes: totalFreedBytes,
+      freed_pretty: formatBytes(totalFreedBytes),
+      results: results,
+    });
+  }));
+
   return router;
 };
