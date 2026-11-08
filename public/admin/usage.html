@@ -223,7 +223,17 @@
     <h1>📊 Usage Dashboard</h1>
     <div style="display: flex; gap: 12px; align-items: center;">
       <div class="meta" id="lastUpdate">កំពុងផ្ទុក...</div>
-      <button class="refresh-btn" onclick="loadUsage()">🔄 ផ្ទុកឡើងវិញ</button>
+      <button class="refresh-btn" onclick="loadUsage()" title="ផ្ទុកឡើងវិញ">🔄 ផ្ទុកឡើងវិញ</button>
+      <button onclick="window.open('/admin/data-manager.html?token=' + encodeURIComponent(token), '_blank')" 
+              title="គ្រប់គ្រងទិន្នន័យ"
+              style="width: 44px; height: 44px; border-radius: 12px; border: none; cursor: pointer; font-size: 22px; 
+                     background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                     box-shadow: 0 3px 12px rgba(245, 87, 108, 0.35);
+                     transition: all 0.3s; display: flex; align-items: center; justify-content: center;"
+              onmouseover="this.style.transform='translateY(-2px) scale(1.05)'; this.style.boxShadow='0 6px 20px rgba(245, 87, 108, 0.45)'"
+              onmouseout="this.style.transform=''; this.style.boxShadow='0 3px 12px rgba(245, 87, 108, 0.35)'">
+        🧹
+      </button>
     </div>
   </div>
 
@@ -389,79 +399,6 @@ function renderDashboard(data) {
         </div>
       </div>
     </div>
-
-    <div class="card" style="margin-top: 24px;">
-      <h2>🗂️ គ្រប់គ្រងទិន្នន័យលម្អិត</h2>
-      <div style="background: #e3f2fd; padding: 16px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #2196F3;">
-        <strong>ℹ️ របៀបប្រើ:</strong> ចុច "🔍 ស្វែងរក" ដើម្បីមើលទិន្នន័យទាំងអស់ រួចជ្រើសរើស record ដែលចង់លុប ហើយចុច "🗑️ លុបដែលបានជ្រើស"។
-      </div>
-      
-      <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 20px;">
-        <div>
-          <label style="display: block; font-size: 13px; font-weight: 600; color: #666; margin-bottom: 6px;">
-            ប្រភេទទិន្នន័យ
-          </label>
-          <select id="dmType" style="padding: 10px 14px; border: 2px solid #e0e0e0; border-radius: 8px; font-family: inherit; font-size: 14px; min-width: 180px; cursor: pointer;">
-            <option value="">📋 ទាំងអស់</option>
-            <option value="device_commands">📱 Device Commands</option>
-            <option value="device_locations">📍 ទីតាំងឧបករណ៍</option>
-            <option value="admin_audit_log">🕓 កំណត់ត្រា Admin</option>
-            <option value="transactions">💸 ប្រតិបត្តិការ</option>
-          </select>
-        </div>
-        <div>
-          <label style="display: block; font-size: 13px; font-weight: 600; color: #666; margin-bottom: 6px;">
-            ចំនួនបង្ហាញ
-          </label>
-          <select id="dmLimit" style="padding: 10px 14px; border: 2px solid #e0e0e0; border-radius: 8px; font-family: inherit; font-size: 14px; cursor: pointer;">
-            <option value="50">50</option>
-            <option value="100" selected>100</option>
-            <option value="200">200</option>
-            <option value="500">500</option>
-          </select>
-        </div>
-        <button onclick="searchRecords()" id="dmSearchBtn" style="padding: 10px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 14px; transition: all 0.3s; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);">
-          🔍 ស្វែងរក
-        </button>
-      </div>
-      
-      <div id="dmResults" style="display: none;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">
-              <input type="checkbox" id="dmSelectAll" onchange="toggleSelectAll(this.checked)" style="width: 18px; height: 18px; cursor: pointer;" />
-              ជ្រើសទាំងអស់
-            </label>
-            <span id="dmSelectedCount" style="color: #667eea; font-weight: 600; font-size: 14px;"></span>
-          </div>
-          <div style="display: flex; gap: 8px;">
-            <span id="dmTotalSize" style="padding: 6px 14px; background: #f0f4ff; border-radius: 6px; font-size: 13px; font-weight: 600; color: #667eea;"></span>
-            <button onclick="deleteSelected()" id="dmDeleteBtn" style="padding: 8px 20px; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; font-family: inherit; font-size: 13px; transition: all 0.3s; box-shadow: 0 2px 8px rgba(245, 87, 108, 0.3);" disabled>
-              🗑️ លុបដែលបានជ្រើស (<span id="dmDeleteCount">0</span>)
-            </button>
-          </div>
-        </div>
-        
-        <div style="overflow-x: auto; border-radius: 12px; border: 1px solid #e0e0e0;">
-          <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
-            <thead>
-              <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                <th style="padding: 12px 8px; text-align: center; width: 40px;"></th>
-                <th style="padding: 12px 8px; text-align: left;">ប្រភេទ</th>
-                <th style="padding: 12px 8px; text-align: left;">ថ្ងៃទី</th>
-                <th style="padding: 12px 8px; text-align: right;">ទំហំ</th>
-                <th style="padding: 12px 8px; text-align: left;">ព័ត៌មានលម្អិត</th>
-              </tr>
-            </thead>
-            <tbody id="dmTableBody"></tbody>
-          </table>
-        </div>
-        
-        <div id="dmPagination" style="display: flex; justify-content: center; gap: 8px; margin-top: 16px;"></div>
-      </div>
-      
-      <div id="dmDeleteResult" style="margin-top: 16px; display: none;"></div>
-    </div>
   `;
   
   document.getElementById('content').innerHTML = html;
@@ -600,174 +537,6 @@ function renderActivityChart(activity) {
       }
     }
   });
-}
-
-let dmRecords = [];
-let dmSelectedIds = new Set();
-
-async function searchRecords() {
-  const type = document.getElementById('dmType').value;
-  const limit = document.getElementById('dmLimit').value;
-  const btn = document.getElementById('dmSearchBtn');
-  
-  btn.disabled = true;
-  btn.textContent = '⏳ កំពុងស្វែងរក...';
-  
-  try {
-    const params = new URLSearchParams({ limit });
-    if (type) params.set('type', type);
-    
-    const data = await api('/data-manager?' + params.toString());
-    dmRecords = data.records || [];
-    dmSelectedIds.clear();
-    
-    document.getElementById('dmResults').style.display = 'block';
-    document.getElementById('dmDeleteResult').style.display = 'none';
-    renderDmTable();
-    updateDmSelection();
-  } catch (error) {
-    alert('❌ កំហុស: ' + error.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🔍 ស្វែងរក';
-  }
-}
-
-function renderDmTable() {
-  const tbody = document.getElementById('dmTableBody');
-  
-  if (dmRecords.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" style="padding: 40px; text-align: center; color: #999;">
-      <div style="font-size: 36px; margin-bottom: 8px;">📭</div>
-      គ្មានទិន្នន័យ
-    </td></tr>`;
-    return;
-  }
-  
-  tbody.innerHTML = dmRecords.map((rec, i) => {
-    const checked = dmSelectedIds.has(`${rec.type}:${rec.id}`) ? 'checked' : '';
-    const meta = buildMetaString(rec);
-    const dateStr = rec.date ? new Date(rec.date).toLocaleString('km-KH', {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit'
-    }) : '—';
-    
-    return `<tr style="background: ${i % 2 === 0 ? '#fff' : '#f9fafb'}; border-bottom: 1px solid #eee; transition: background 0.2s;" 
-                onmouseover="this.style.background='#e8eaf6'" onmouseout="this.style.background='${i % 2 === 0 ? '#fff' : '#f9fafb'}'">
-      <td style="padding: 10px 8px; text-align: center;">
-        <input type="checkbox" class="dm-row-check" data-type="${rec.type}" data-id="${rec.id}" 
-               ${checked} onchange="toggleRow(this)" style="width: 16px; height: 16px; cursor: pointer;" />
-      </td>
-      <td style="padding: 10px 8px;">${formatTableName(rec.type)}</td>
-      <td style="padding: 10px 8px; white-space: nowrap;">${dateStr}</td>
-      <td style="padding: 10px 8px; text-align: right; font-weight: 600; color: #667eea;">${rec.size_pretty}</td>
-      <td style="padding: 10px 8px; color: #666; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${meta}</td>
-    </tr>`;
-  }).join('');
-}
-
-function buildMetaString(rec) {
-  const m = rec.metadata || {};
-  const parts = [];
-  if (m.command_type) parts.push(`cmd: ${m.command_type}`);
-  if (m.status) parts.push(`status: ${m.status}`);
-  if (m.user_id) parts.push(`user: #${m.user_id}`);
-  if (m.admin_email) parts.push(m.admin_email);
-  if (m.action) parts.push(`action: ${m.action}`);
-  if (m.target_type) parts.push(m.target_type);
-  if (m.title) parts.push(m.title);
-  if (m.category) parts.push(m.category);
-  if (m.amount != null) parts.push(`$${m.amount}`);
-  return parts.join(' · ') || '—';
-}
-
-function toggleRow(checkbox) {
-  const key = `${checkbox.dataset.type}:${checkbox.dataset.id}`;
-  if (checkbox.checked) {
-    dmSelectedIds.add(key);
-  } else {
-    dmSelectedIds.delete(key);
-  }
-  updateDmSelection();
-}
-
-function toggleSelectAll(checked) {
-  document.querySelectorAll('.dm-row-check').forEach(cb => {
-    cb.checked = checked;
-    const key = `${cb.dataset.type}:${cb.dataset.id}`;
-    if (checked) dmSelectedIds.add(key);
-    else dmSelectedIds.delete(key);
-  });
-  updateDmSelection();
-}
-
-function updateDmSelection() {
-  const count = dmSelectedIds.size;
-  document.getElementById('dmSelectedCount').textContent = count > 0 ? `បានជ្រើស ${count}` : '';
-  document.getElementById('dmDeleteCount').textContent = count;
-  document.getElementById('dmDeleteBtn').disabled = count === 0;
-  
-  let totalBytes = 0;
-  dmRecords.forEach(rec => {
-    if (dmSelectedIds.has(`${rec.type}:${rec.id}`)) {
-      totalBytes += rec.size_bytes || 0;
-    }
-  });
-  document.getElementById('dmTotalSize').textContent = count > 0 
-    ? `ទំហំដែលបានជ្រើស: ${formatBytes(totalBytes)}` 
-    : `សរុប: ${dmRecords.length} records · ${formatBytes(dmRecords.reduce((s, r) => s + (r.size_bytes || 0), 0))}`;
-}
-
-function formatBytes(bytes) {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-async function deleteSelected() {
-  if (dmSelectedIds.size === 0) return;
-  
-  const records = Array.from(dmSelectedIds).map(key => {
-    const [type, id] = key.split(':');
-    return { type, id: parseInt(id) };
-  });
-  
-  if (!confirm(`⚠️ តើអ្នកប្រាកដទេថាចង់លុប ${records.length} records?\n\nសកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ!`)) {
-    return;
-  }
-  
-  const resultDiv = document.getElementById('dmDeleteResult');
-  resultDiv.style.display = 'block';
-  resultDiv.innerHTML = '<div style="padding: 16px; text-align: center; color: #667eea;">⏳ កំពុងលុប...</div>';
-  
-  try {
-    const data = await api('/data-manager/delete', {
-      method: 'POST',
-      body: { records }
-    });
-    
-    let html = '<div style="background: #e8f5e9; padding: 16px; border-radius: 8px; border-left: 4px solid #4caf50;">';
-    html += '<h3 style="color: #2e7d32; margin-bottom: 12px;">✅ បានលុបដោយជោគជ័យ!</h3>';
-    html += '<ul style="list-style: none; padding: 0;">';
-    for (const [type, info] of Object.entries(data.results)) {
-      html += `<li style="padding: 6px 0;">${formatTableName(type)}: បានលុប <strong>${info.count}</strong> records</li>`;
-    }
-    html += '</ul>';
-    html += `<p style="margin-top: 12px; color: #2e7d32; font-weight: 600;">`;
-    html += `🎉 សរុប: បានលុប ${data.deleted} records · បានរំដោះ ${data.freed_pretty}</p>`;
-    html += '</div>';
-    
-    resultDiv.innerHTML = html;
-    
-    dmSelectedIds.clear();
-    document.getElementById('dmSelectAll').checked = false;
-    await searchRecords();
-    setTimeout(() => loadUsage(), 500);
-  } catch (error) {
-    resultDiv.innerHTML = `<div style="background: #ffebee; padding: 16px; border-radius: 8px; border-left: 4px solid #f44336; color: #c62828;">❌ កំហុស: ${error.message}</div>`;
-  }
 }
 
 loadUsage();
