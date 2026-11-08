@@ -111,6 +111,8 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS data_version INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'operations';
+    UPDATE users SET role = 'management' WHERE is_admin = 1 AND (role IS NULL OR role = 'operations');
 
     CREATE TABLE IF NOT EXISTS cards (
       id SERIAL PRIMARY KEY,
