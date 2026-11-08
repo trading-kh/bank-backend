@@ -181,6 +181,36 @@
     display: inline-block;
   }
 
+  .card-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 11px;
+    background: linear-gradient(135deg, #f5576c, #ff6b6b);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    box-shadow: 0 2px 8px rgba(245, 87, 108, 0.5);
+    animation: badgePop 0.3s ease;
+    z-index: 2;
+  }
+  .card-badge.visible { display: flex; }
+  .card-badge.online {
+    background: linear-gradient(135deg, #22c55e, #4ade80);
+    box-shadow: 0 2px 8px rgba(34, 197, 94, 0.5);
+  }
+  .card-badge.warning {
+    background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.5);
+  }
+
   .trend-up {
     background: rgba(34, 197, 94, 0.15);
     color: #4ade80;
@@ -460,19 +490,20 @@ let chart = null;
 let activityData = [];
 
 const METRICS = [
-  { key: 'commands',           icon: '📱', label: 'Commands',              color: '#667eea', bg: 'rgba(102,126,234,0.15)',  shadow: 'rgba(102,126,234,0.3)' },
-  { key: 'transactions',       icon: '💸', label: 'ប្រតិបត្តិការ',           color: '#f5576c', bg: 'rgba(245,87,108,0.15)',   shadow: 'rgba(245,87,108,0.3)' },
-  { key: 'loans',              icon: '🏦', label: 'កម្ចី',                  color: '#22c55e', bg: 'rgba(34,197,94,0.15)',    shadow: 'rgba(34,197,94,0.3)' },
-  { key: 'logins',             icon: '🔐', label: 'Logins',                color: '#ffa726', bg: 'rgba(255,167,38,0.15)',   shadow: 'rgba(255,167,38,0.3)' },
-  { key: 'notifications',      icon: '🔔', label: 'សេចក្តីសារ',             color: '#ab47bc', bg: 'rgba(171,71,188,0.15)',   shadow: 'rgba(171,71,188,0.3)' },
-  { key: 'new_users',          icon: '👤', label: 'អ្នកប្រើថ្មី',            color: '#26c6da', bg: 'rgba(38,198,218,0.15)',   shadow: 'rgba(38,198,218,0.3)' },
-  { key: 'device_registrations', icon: '📲', label: 'Device Reg',          color: '#78909c', bg: 'rgba(120,144,156,0.15)',  shadow: 'rgba(120,144,156,0.3)' },
-  { key: 'active_users',       icon: '🔥', label: 'Active Users',          color: '#ef5350', bg: 'rgba(239,83,80,0.15)',    shadow: 'rgba(239,83,80,0.3)' },
-  { key: 'mobile_money',       icon: '💰', label: 'Mobile Money',          color: '#66bb6a', bg: 'rgba(102,187,106,0.15)',  shadow: 'rgba(102,187,106,0.3)' },
-  { key: 'failed_transactions', icon: '❌', label: 'Failed',               color: '#d32f2f', bg: 'rgba(211,47,47,0.15)',    shadow: 'rgba(211,47,47,0.3)' },
+  { key: 'commands',           icon: '📱', label: 'Commands',              color: '#667eea', bg: 'rgba(102,126,234,0.15)',  shadow: 'rgba(102,126,234,0.3)',  badgeKey: 'devices' },
+  { key: 'transactions',       icon: '💸', label: 'ប្រតិបត្តិការ',           color: '#f5576c', bg: 'rgba(245,87,108,0.15)',   shadow: 'rgba(245,87,108,0.3)',   badgeKey: 'transactions' },
+  { key: 'loans',              icon: '🏦', label: 'កម្ចី',                  color: '#22c55e', bg: 'rgba(34,197,94,0.15)',    shadow: 'rgba(34,197,94,0.3)',    badgeKey: 'loans' },
+  { key: 'logins',             icon: '🔐', label: 'Logins',                color: '#ffa726', bg: 'rgba(255,167,38,0.15)',   shadow: 'rgba(255,167,38,0.3)',   badgeKey: 'audit' },
+  { key: 'notifications',      icon: '🔔', label: 'សេចក្តីសារ',             color: '#ab47bc', bg: 'rgba(171,71,188,0.15)',   shadow: 'rgba(171,71,188,0.3)',   badgeKey: 'notifications' },
+  { key: 'new_users',          icon: '👤', label: 'អ្នកប្រើថ្មី',            color: '#26c6da', bg: 'rgba(38,198,218,0.15)',   shadow: 'rgba(38,198,218,0.3)',   badgeKey: 'users' },
+  { key: 'device_registrations', icon: '📲', label: 'Device Reg',          color: '#78909c', bg: 'rgba(120,144,156,0.15)',  shadow: 'rgba(120,144,156,0.3)',  badgeKey: 'devices' },
+  { key: 'active_users',       icon: '🔥', label: 'Active Users',          color: '#ef5350', bg: 'rgba(239,83,80,0.15)',    shadow: 'rgba(239,83,80,0.3)',    badgeKey: 'devicesOnline' },
+  { key: 'mobile_money',       icon: '💰', label: 'Mobile Money',          color: '#66bb6a', bg: 'rgba(102,187,106,0.15)',  shadow: 'rgba(102,187,106,0.3)',  badgeKey: 'transactions' },
+  { key: 'failed_transactions', icon: '❌', label: 'Failed',               color: '#d32f2f', bg: 'rgba(211,47,47,0.15)',    shadow: 'rgba(211,47,47,0.3)',    badgeKey: null },
 ];
 
 let visibleMetrics = new Set(METRICS.map(m => m.key));
+let badgesData = {};
 
 async function api(path) {
   const res = await fetch(API + path, {
@@ -497,7 +528,6 @@ function buildSummaryCards(activity) {
     totals[m.key] = activity.reduce((sum, a) => sum + (a[m.key] || 0), 0);
   });
 
-  // Compute day-over-day trends for each metric
   const lastDay = activity[activity.length - 1];
   const prevDay = activity.length >= 2 ? activity[activity.length - 2] : null;
 
@@ -515,9 +545,14 @@ function buildSummaryCards(activity) {
         trendHtml = `<div class="trend trend-neutral">→ ស្មើ</div>`;
       }
     }
+    const badgeCount = m.badgeKey ? (badgesData[m.badgeKey] || 0) : 0;
+    const badgeClass = badgeCount > 0 ? 'card-badge visible' : 'card-badge';
+    const badgeColor = m.badgeKey === 'devicesOnline' ? ' online' : (m.badgeKey === 'audit' ? ' warning' : '');
+    const badgeHtml = `<div class="${badgeClass}${badgeColor}">${badgeCount > 99 ? '99+' : badgeCount}</div>`;
     return `
       <div class="summary-card" style="--card-color: ${m.color}" onclick="toggleMetric('${m.key}')">
         <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${m.color};border-radius:16px 16px 0 0;"></div>
+        ${badgeHtml}
         <div class="icon">${m.icon}</div>
         <div class="value" style="color:${m.color}">${total.toLocaleString()}</div>
         <div class="label">${m.label}</div>
@@ -704,8 +739,12 @@ function exportData() {
 
 async function loadActivity() {
   try {
-    const data = await api('/usage');
+    const [data, badges] = await Promise.all([
+      api('/usage'),
+      api('/badges'),
+    ]);
     activityData = data.recent_activity;
+    badgesData = badges;
 
     buildSummaryCards(activityData);
     buildControls();
