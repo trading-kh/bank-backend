@@ -1505,6 +1505,7 @@ function parseExternalQr(raw) {
   if (text.length > 1024) return null;
 
   let account = '';
+  let bankId = '';
   let name = '';
   let bankCode = '';
   let amount = null;
@@ -1516,10 +1517,13 @@ function parseExternalQr(raw) {
       const n = parseInt(t.tag, 10);
       if (n >= 26 && n <= 51) {
         const sub = parseEmvTlv(t.value);
+        // sub 00 = Bakong ID (`name@abaa`) → ធនាគារពិតរបស់ QR
+        bankId = (sub.find((x) => x.tag === '00') || {}).value || bankId;
         const acc = (sub.find((x) => x.tag === '01') || sub.find((x) => x.tag === '02'))?.value;
         if (acc) { account = acc; break; }
       }
     }
+    if (!account) account = bankId;
     name = get('59') || get('60') || '';
     const amt = parseFloat(get('54'));
     if (Number.isFinite(amt) && amt > 0) amount = Math.round(amt * 100) / 100;
@@ -1553,7 +1557,8 @@ function parseExternalQr(raw) {
 
   bankCode = bankCode.trim().toUpperCase();
   if (!bankCode) {
-    const suffix = (account.split('@')[1] || '').toLowerCase();
+    const suffix = ((account.split('@')[1] || '') ||
+      (bankId.split('@')[1] || '')).toLowerCase();
     bankCode = QR_BANK_SUFFIX[suffix] || 'OTHER';
   }
   return { account, name: name.slice(0, 60), bankCode, amount };
