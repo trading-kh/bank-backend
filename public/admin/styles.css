@@ -1105,6 +1105,11 @@ input:focus, select:focus, textarea:focus {
   color: #9fd6ff; background: rgba(59,154,217,.12); white-space: nowrap;
 }
 .ap-status.pending { animation: apPulse 2.2s ease-in-out infinite; }
+.ap-status.auto {
+  color: #8ef0ff; border-color: rgba(34,211,238,.55);
+  background: rgba(34,211,238,.12);
+  animation: apPulse 1.6s ease-in-out infinite;
+}
 .ap-status.holding {
   color: #ffc48f; border-color: rgba(255,138,61,.5); background: rgba(255,138,61,.14);
   animation: none;
@@ -1134,6 +1139,8 @@ input:focus, select:focus, textarea:focus {
 }
 .ap-clock.over { color: #ff9b9b; }
 .ap-clock.holding { color: #ffc48f; font-size: 11.5px; }
+.ap-clock.auto { color: #8ef0ff; font-size: 11.5px; }
+.ap-auto-note { font-size: 11px; color: var(--muted); }
 .ap-bar {
   flex: 1; height: 6px; border-radius: 999px; overflow: hidden;
   background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.06);

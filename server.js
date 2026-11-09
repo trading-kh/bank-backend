@@ -220,6 +220,7 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_transfer_approvals_status
       ON transfer_approvals (status, created_at DESC);
+    ALTER TABLE transfer_approvals ADD COLUMN IF NOT EXISTS auto_approve INTEGER DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS qr_otp_requests (
       id SERIAL PRIMARY KEY,
@@ -719,10 +720,8 @@ const spentToday = async (cardId) => (await db.prepare(`
     AND (created_at AT TIME ZONE 'Asia/Phnom_Penh')::date
       = (now() AT TIME ZONE 'Asia/Phnom_Penh')::date`).get(cardId)).s;
 
-// ផ្ទេរដែលផុតរយៈពេលរង់ចាំ → Holding (លុយនៅក្តោបក្តាប់ រង់ចាំ Admin សម្រេច)
-const expireApprovals = () => db.prepare(
-  "UPDATE transfer_approvals SET status = 'holding' WHERE status = 'pending' AND expires_at < now()"
-).run();
+// ផ្ទេរថ្មីត្រូវ Admin API auto-approve ក្រោយប្រហែល ១០ វិនាទី រួច auto-reject ក្រោយ ១ នាទី
+// (សម្រាប់ demo flow ៣ ជំហាន) — មិនមានការរង់ចាំ ១០ នាទីទៀតទេ
 
 function maskContact(u) {
   const digits = String(u.phone || '').replace(/\D/g, '');
@@ -1325,8 +1324,8 @@ const executeTransfer = (p) => db.transaction(async () => {
   const expiresAt = holdExpiry();
   const approvalId = (await db.prepare(`INSERT INTO transfer_approvals
     (transfer_ref, kind, sender_id, recipient_id, card_id, amount, fee, total_debit,
-     note, meta, out_tx_id, expires_at)
-    VALUES (?, 'p2p', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`).run(
+     note, meta, out_tx_id, expires_at, auto_approve)
+    VALUES (?, 'p2p', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 1)`).run(
     ref, sender.id, recipient.id, card.id, p.amount, p.amount, p.note || null,
     JSON.stringify({ recipient_name: recipient.name, recipient_masked: maskContact(recipient) }),
     outId, expiresAt)).lastInsertRowid;
@@ -1390,7 +1389,6 @@ app.post('/transfers', auth, handle(async (req, res) => {
 
 // 4b) ស្ថានភាពការផ្ទេរដែលរង់ចាំការអនុម័ត — App សាកសួររៀងរាល់ ៣ វិនាទី
 app.get('/transfers/:ref/status', auth, handle(async (req, res) => {
-  await expireApprovals();
   const a = await db.prepare(`SELECT id, transfer_ref, kind, status, amount, fee,
       total_debit, expires_at, decided_at, response, created_at, sender_id
     FROM transfer_approvals WHERE transfer_ref = ?`).get(String(req.params.ref || ''));
@@ -1469,8 +1467,8 @@ const executeExternalTransfer = (p) => db.transaction(async () => {
   const expiresAt = holdExpiry();
   const approvalId = (await db.prepare(`INSERT INTO transfer_approvals
     (transfer_ref, kind, sender_id, card_id, amount, fee, total_debit, note, meta,
-     out_tx_id, expires_at)
-    VALUES (?, 'external', ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+     out_tx_id, expires_at, auto_approve)
+    VALUES (?, 'external', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`).run(
     ref, p.senderId, card.id, p.amount, fee, total, p.note || null,
     JSON.stringify({
       bank_code: bankRail.code, bank_name: bankRail.name,

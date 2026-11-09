@@ -2139,15 +2139,15 @@ function approvalCard(r) {
   const bank = isExt ? meta.bank_name : 'Aura Bank';
   const acct = isExt ? meta.recipient_account : meta.recipient_masked;
   const created = new Date(r.created_at).getTime();
-  const exp = new Date(r.expires_at).getTime();
-  const span = Math.max(1000, exp - created);
-  const remain = Math.max(0, Math.round((exp - Date.now()) / 1000));
-  const pct = Math.max(0, Math.min(100, (remain * 1000 / span) * 100));
   const holding = r.status === 'holding';
+  const auto = Number(r.auto_approve) === 1;
+  // auto → អនុម័តស្វ័យប្រវត្តិក្នុង ៩ វិនាទី (តាម animation ៣ ជំហានរបស់ app)
+  const autoExp = created + 9000;
+  const autoLeft = Math.max(0, Math.round((autoExp - Date.now()) / 1000));
   return `<div class="approval-card${holding ? ' holding' : ''}">
     <div class="ap-top">
       <span class="pill ${isExt ? 'info' : 'ok'}">${isExt ? '🏦 ' + esc(bank) : '⚡ ផ្ទេរ Aura'}</span>
-      <span class="ap-status ${holding ? 'holding' : 'pending'}">${holding ? '⏸ HOLDING' : '⏳ រង់ចាំ'}</span>
+      <span class="ap-status ${holding ? 'holding' : auto ? 'auto' : 'pending'}">${holding ? '⏸ HOLDING' : auto ? '⚡ AUTO' : '⏳ រង់ចាំ'}</span>
     </div>
     <div class="ap-route">
       <div class="ap-side">
@@ -2161,10 +2161,15 @@ function approvalCard(r) {
       </div>
     </div>
     <div class="ap-amount">${money(r.total_debit)}${Number(r.fee) ? `<span class="ap-fee">រួម fee ${money(r.fee)}</span>` : ''}</div>
-    <div class="ap-count">
-      <span class="ap-clock ${holding ? 'holding' : ''}" data-countdown data-exp="${exp}">${holding ? 'ហួសកំណត់' : mmss(remain)}</span>
-      <span class="ap-bar"><i style="width:${holding ? 0 : pct}%"></i></span>
-    </div>
+    ${auto
+      ? `<div class="ap-count">
+          <span class="ap-clock auto" data-auto-countdown data-auto-exp="${autoExp}">⚡ អនុម័តស្វ័យប្រវត្តិ ${autoLeft}s</span>
+          <span class="ap-bar"><i style="width:${Math.max(0, Math.min(100, (autoLeft * 1000 / 9000) * 100))}%"></i></span>
+        </div>
+        <div class="ap-auto-note">ប្រព័ន្ធអនុម័តភ្លាមពេលសញ្ញាដល់ · បដិសេធវិញក្រោយ ១ នាទី</div>`
+      : `<div class="ap-count">
+          <span class="ap-clock ${holding ? 'holding' : ''}">${holding ? 'ហួសកំណត់' : 'រង់ចាំ'}</span>
+        </div>`}
     ${r.note ? `<div class="ap-note">📝 ${esc(r.note)}</div>` : ''}
     <div class="ap-actions">
       <button class="btn ok sm" data-ap-approve="${r.id}">✓ អនុម័ត</button>
@@ -2186,7 +2191,7 @@ async function renderApprovals() {
   stopApprovalTimers();
   const rows = await api('/transfers/pending');
   const pend = rows.filter((r) => r.status === 'pending').length;
-  const hold = rows.filter((r) => r.status === 'holding').length;
+  const autoCount = rows.filter((r) => Number(r.auto_approve) === 1).length;
   const sum = rows.reduce((a, r) => a + Number(r.total_debit || 0), 0);
 
   $('#content').innerHTML = `
@@ -2197,9 +2202,9 @@ async function renderApprovals() {
         <div class="kpi-sub">ត្រូវអនុម័តដើម្បីបញ្ចេញប្រាក់ទៅអ្នកទទួល</div>
       </div>
       <div class="card kpi warn">
-        <div class="kpi-label">⏸ Holding (ហួសកំណត់)</div>
-        <div class="kpi-value">${hold}</div>
-        <div class="kpi-sub">ប្រាក់នៅកាន់ · រង់ចាំអ្នកសម្រេច</div>
+        <div class="kpi-label">⚡ Auto Approve</div>
+        <div class="kpi-value">${autoCount}</div>
+        <div class="kpi-sub">អនុម័តស្វ័យប្រវត្តិក្នុង ~១០ វិនាទី · បដិសេធវិញក្រោយ ១ នាទី</div>
       </div>
       <div class="card kpi">
         <div class="kpi-label">ទឹកប្រាក់កាត់រួច</div>
@@ -2215,13 +2220,14 @@ async function renderApprovals() {
         : '<div class="empty">គ្មានការផ្ទេររង់ចាំអនុម័តទេ 🎉</div>'}
     </div>`;
 
-  // live countdown
+  // live auto-approve countdown
   approvalTickTimer = setInterval(() => {
-    $$('[data-countdown]').forEach((el) => {
-      if (el.classList.contains('holding')) return;
-      const left = Math.max(0, Math.round((Number(el.dataset.exp) - Date.now()) / 1000));
-      el.textContent = mmss(left);
-      if (left === 0) el.classList.add('over');
+    $$('[data-auto-countdown]').forEach((el) => {
+      const left = Math.max(0,
+        Math.round((Number(el.dataset.autoExp) - Date.now()) / 1000));
+      el.textContent = left > 0
+        ? `⚡ អនុម័តស្វ័យប្រវត្តិ ${left}s`
+        : '⚡ កំពុងអនុម័ត…';
     });
   }, 1000);
 

@@ -625,40 +625,19 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // ============================================================
-  // TRANSFER APPROVALS — ផ្ទេររង់ចាំការអនុម័តចុងក្រោយ
+  // TRANSFER APPROVALS — demo flow: auto-approve ~១០ វិនាទី, auto-reject ~១ នាទី
   // ============================================================
-  const expirePendingApprovals = () => db.prepare(`UPDATE transfer_approvals
-    SET status = 'holding' WHERE status = 'pending' AND expires_at < now()`).run();
+  const AUTO_APPROVE_DELAY_MS = 9000;   // ត្រូវនឹង animation ៣ ជំហានរបស់ app
+  const AUTO_REJECT_DELAY_MS = 60 * 1000;
+  let sweeping = false;
 
-  router.get('/transfers/pending', adminAuth, handle(async (req, res) => {
-    await expirePendingApprovals();
-    const rows = await db.prepare(`
-      SELECT a.id, a.transfer_ref, a.kind, a.amount, a.fee, a.total_debit, a.note,
-             a.meta, a.status, a.created_at, a.expires_at, a.decided_at, a.decided_by,
-             a.sender_id, a.card_id,
-             s.name AS sender_name, s.email AS sender_email,
-             r.name AS recipient_name, r.email AS recipient_email
-      FROM transfer_approvals a
-      JOIN users s ON s.id = a.sender_id
-      LEFT JOIN users r ON r.id = a.recipient_id
-      WHERE a.status IN ('pending', 'holding')
-      ORDER BY a.created_at DESC LIMIT 100`).all();
-    ok(res, rows.map((r) => ({
-      ...r,
-      meta: r.meta ? JSON.parse(r.meta) : null,
-      remaining_seconds: Math.max(0,
-        Math.round((new Date(r.expires_at).getTime() - Date.now()) / 1000)),
-    })));
-  }));
-
-  router.post('/transfers/:id/approve', adminAuth, handle(async (req, res) => {
-    const id = int(req.params.id);
+  async function applyApproval(id, decidedBy) {
     const out = await db.transaction(async () => {
       const a = await db.prepare('SELECT * FROM transfer_approvals WHERE id = ?').get(id);
       if (!a) throw new ApiError('រកមិនឃើញការផ្ទេរ', 404, 'NOT_FOUND');
       const upd = await db.prepare(`UPDATE transfer_approvals
         SET status = 'approved', decided_at = now(), decided_by = ?
-        WHERE id = ? AND status IN ('pending', 'holding')`).run(req.admin.email, id);
+        WHERE id = ? AND status IN ('pending', 'holding')`).run(decidedBy, id);
       if (upd.changes !== 1)
         throw new ApiError('ការផ្ទេរនេះត្រូវបានសម្រេចរួចហើយ', 409, 'ALREADY_DECIDED');
 
@@ -746,46 +725,141 @@ module.exports = function createAdminRouter(ctx) {
     }
     await bumpVersion(out.senderId);
     if (out.recipientId) await bumpVersion(out.recipientId);
+    return out.response;
+  }
+
+  async function applyReject(id, decidedBy, reason) {
+    const out = await db.transaction(async () => {
+      const a = await db.prepare('SELECT * FROM transfer_approvals WHERE id = ?').get(id);
+      if (!a) throw new ApiError('រកមិនឃើញការផ្ទេរ', 404, 'NOT_FOUND');
+      if (!['pending', 'holding', 'approved'].includes(a.status))
+        throw new ApiError('ការផ្ទេរនេះត្រូវបានសម្រេចរួចហើយ', 409, 'ALREADY_DECIDED');
+      const wasApproved = a.status === 'approved';
+      const upd = await db.prepare(`UPDATE transfer_approvals
+        SET status = 'rejected', decided_at = now(), decided_by = ?, response = ?
+        WHERE id = ? AND status = ?`)
+        .run(decidedBy,
+          JSON.stringify({ rejected: true, reason, reversed: wasApproved }),
+          id, a.status);
+      if (upd.changes !== 1)
+        throw new ApiError('ការផ្ទេរនេះត្រូវបានសម្រេចរួចហើយ', 409, 'ALREADY_DECIDED');
+
+      // បង្វិលប្រាក់អ្នកផ្ញើវិញ (រួម fee)
+      await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?')
+        .run(a.total_debit, a.card_id);
+      await db.prepare(`UPDATE transactions SET status = 'failed' WHERE id = ?`)
+        .run(a.out_tx_id);
+
+      const meta = a.meta ? JSON.parse(a.meta) : {};
+      let recipientId = null;
+      if (a.kind === 'external') {
+        await db.prepare(`UPDATE external_transfers SET status = 'rejected'
+          WHERE transfer_ref = ?`).run(a.transfer_ref);
+      } else if (wasApproved && a.in_tx_id) {
+        // បាន Approve រួច → ដកប្រាក់ពីអ្នកទទួលវិញឲ្យសមតុល្យត្រូវគ្នា
+        const inTx = await db.prepare(
+          'SELECT user_id, card_id, amount FROM transactions WHERE id = ?').get(a.in_tx_id);
+        if (inTx) {
+          await db.prepare('UPDATE cards SET balance = ROUND(balance - ?, 2) WHERE id = ?')
+            .run(inTx.amount, inTx.card_id);
+          await db.prepare(`UPDATE transactions SET status = 'failed' WHERE id = ?`)
+            .run(a.in_tx_id);
+          recipientId = inTx.user_id;
+        }
+      }
+      return { a, meta, wasApproved, recipientId };
+    });
+
+    const a = out.a;
+    const sender = await db.prepare('SELECT name FROM users WHERE id = ?').get(a.sender_id);
+    const rName = out.meta.recipient_name || '';
+    if (notifyUser) {
+      await notifyUser(a.sender_id, 'ការផ្ទេរត្រូវបានបដិសេធ',
+        `ផ្ទេរ $${Number(a.amount).toFixed(2)} ទៅ ${rName} ត្រូវបានដកវិញ · បើមិនឃើញប្រាក់ ចុចទីនេះ`,
+        { type: 'transfer_rejected', transfer_ref: a.transfer_ref,
+          action: 'missing_money' },
+        18, out.meta.bank_code || 'AURA');
+      if (out.recipientId && sender) {
+        await notifyUser(out.recipientId, 'ប្រាក់ត្រូវបានដកវិញ',
+          `ការផ្ទេរ $${Number(a.amount).toFixed(2)} ពី ${sender.name} ត្រូវបានបដិសេធ · ប្រាក់ត្រូវបានដកចេញវិញ`,
+          { type: 'transfer_reversed', transfer_ref: a.transfer_ref },
+          18, 'AURA');
+      }
+    }
+    await bumpVersion(a.sender_id);
+    if (out.recipientId) await bumpVersion(out.recipientId);
+    return { a, meta: out.meta, wasApproved: out.wasApproved };
+  }
+
+  // Auto sweep — ដំណើរការគ្រប់ ២ វិនាទី (រួចរាល់ពី UIដោយខ្លួនឯង)
+  const autoSweep = setInterval(async () => {
+    if (sweeping) return;
+    sweeping = true;
+    try {
+      const dueApprove = await db.prepare(`SELECT id FROM transfer_approvals
+        WHERE status = 'pending' AND auto_approve = 1
+          AND created_at <= now() - ($1::bigint * INTERVAL '1 millisecond')`)
+        .all(AUTO_APPROVE_DELAY_MS);
+      for (const r of dueApprove) {
+        try { await applyApproval(r.id, 'auto'); }
+        catch (e) {
+          if (e.code !== 'ALREADY_DECIDED')
+            console.error('auto approve:', e.message);
+        }
+      }
+      const dueReject = await db.prepare(`SELECT id FROM transfer_approvals
+        WHERE status = 'approved' AND auto_approve = 1 AND decided_at IS NOT NULL
+          AND decided_at <= now() - ($1::bigint * INTERVAL '1 millisecond')`)
+        .all(AUTO_REJECT_DELAY_MS);
+      for (const r of dueReject) {
+        try { await applyReject(r.id, 'auto', 'demo auto-reject'); }
+        catch (e) {
+          if (e.code !== 'ALREADY_DECIDED')
+            console.error('auto reject:', e.message);
+        }
+      }
+    } catch (_) {
+      // DB មិនទាន់រួចរាល់ (initDb) — សាកម្តងទៀតនៅវដ្តបន្ទាប់
+    } finally {
+      sweeping = false;
+    }
+  }, 2000);
+  if (autoSweep.unref) autoSweep.unref();
+
+  router.get('/transfers/pending', adminAuth, handle(async (req, res) => {
+    const rows = await db.prepare(`
+      SELECT a.id, a.transfer_ref, a.kind, a.amount, a.fee, a.total_debit, a.note,
+             a.meta, a.status, a.auto_approve, a.created_at, a.expires_at,
+             a.decided_at, a.decided_by, a.sender_id, a.card_id,
+             s.name AS sender_name, s.email AS sender_email,
+             r.name AS recipient_name, r.email AS recipient_email
+      FROM transfer_approvals a
+      JOIN users s ON s.id = a.sender_id
+      LEFT JOIN users r ON r.id = a.recipient_id
+      WHERE a.status IN ('pending', 'holding')
+      ORDER BY a.created_at DESC LIMIT 100`).all();
+    ok(res, rows.map((r) => ({
+      ...r,
+      meta: r.meta ? JSON.parse(r.meta) : null,
+      remaining_seconds: Math.max(0,
+        Math.round((new Date(r.expires_at).getTime() - Date.now()) / 1000)),
+    })));
+  }));
+
+  router.post('/transfers/:id/approve', adminAuth, handle(async (req, res) => {
+    const id = int(req.params.id);
+    const response = await applyApproval(id, req.admin.email);
     await audit(req, 'approve_transfer', 'transfer_approvals', id,
-      `${out.response.transfer_ref}`);
-    ok(res, out.response);
+      `${response.transfer_ref}`);
+    ok(res, response);
   }));
 
   router.post('/transfers/:id/reject', adminAuth, handle(async (req, res) => {
     const id = int(req.params.id);
     const reason = String(req.body.reason || '').trim().slice(0, 120);
-    const out = await db.transaction(async () => {
-      const a = await db.prepare('SELECT * FROM transfer_approvals WHERE id = ?').get(id);
-      if (!a) throw new ApiError('រកមិនឃើញការផ្ទេរ', 404, 'NOT_FOUND');
-      const upd = await db.prepare(`UPDATE transfer_approvals
-        SET status = 'rejected', decided_at = now(), decided_by = ?, response = ?
-        WHERE id = ? AND status IN ('pending', 'holding')`)
-        .run(req.admin.email, JSON.stringify({ rejected: true, reason }), id);
-      if (upd.changes !== 1)
-        throw new ApiError('ការផ្ទេរនេះត្រូវបានសម្រេចរួចហើយ', 409, 'ALREADY_DECIDED');
-
-      await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?')
-        .run(a.total_debit, a.card_id);
-      await db.prepare(`UPDATE transactions SET status = 'failed' WHERE id = ?`)
-        .run(a.out_tx_id);
-      const meta = a.meta ? JSON.parse(a.meta) : {};
-      if (a.kind === 'external') {
-        await db.prepare(`UPDATE external_transfers SET status = 'rejected'
-          WHERE transfer_ref = ?`).run(a.transfer_ref);
-      }
-      return { a, meta };
-    });
-
-    const a = out.a;
-    const body = `ការផ្ទេរ $${Number(a.amount).toFixed(2)} មិនទាន់បានអនុម័តទេ — ប្រាក់ត្រូវបានបញ្ចូលត្រឡប់ទៅគណនីវិញ`;
-    if (notifyUser) {
-      await notifyUser(a.sender_id, 'ការផ្ទេរត្រូវបានបដិសេធ', body,
-        { type: 'transfer_rejected', transfer_ref: a.transfer_ref },
-        18, out.meta.bank_code || 'AURA');
-    }
-    await bumpVersion(a.sender_id);
+    const out = await applyReject(id, req.admin.email, reason);
     await audit(req, 'reject_transfer', 'transfer_approvals', id,
-      `${a.transfer_ref}${reason ? ' · ' + reason : ''}`);
+      `${out.a.transfer_ref}${reason ? ' · ' + reason : ''}`);
     ok(res, { id, status: 'rejected' });
   }));
 
