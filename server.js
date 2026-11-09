@@ -526,6 +526,22 @@ async function initDb() {
       }
       console.log('✅ Seeded bank directory');
     }
+    // ធនាគារបន្ថែម — បញ្ចូលតែលេខកូដដែលខ្វះ (DB មានស្រាប់មិនប៉ះ)
+    for (const b of [
+      ['CHIPMONG', 'Chip Mong Bank', 'USD', 0.001, 5, 0.01, 10000],
+      ['SATHAPANA', 'Sathapana Bank', 'USD', 0.001, 5, 0.01, 10000],
+      ['VATTANAC', 'Vattanac Bank', 'USD', 0.001, 5, 0.01, 10000],
+      ['CPB', 'Cambodia Post Bank', 'USD', 0.001, 5, 0.01, 10000],
+      ['PPCBANK', 'PPCBank', 'USD', 0.001, 5, 0.01, 10000],
+      ['HATTHA', 'Hattha Bank', 'USD', 0.001, 5, 0.01, 10000],
+      ['MAYBANK', 'Maybank Cambodia', 'USD', 0.001, 5, 0.01, 10000],
+      ['TRUEMONEY', 'TrueMoney', 'USD', 0.002, 8, 0.01, 2000],
+      ['BAKONG', 'Bakong', 'USD', 0.001, 5, 0.01, 10000],
+    ]) {
+      await db.prepare(`INSERT INTO banks
+        (code, name, currency, fee_rate, fee_max, min_amount, max_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (code) DO NOTHING`).run(...b);
+    }
   } catch (e) {
     console.error('❌ Bank directory seed:', e.message);
   }
@@ -1469,7 +1485,16 @@ function parseEmvTlv(s) {
 const QR_BANK_SUFFIX = {
   aba: 'ABA', abaa: 'ABA', acleda: 'ACLEDA', aclb: 'ACLEDA',
   canadia: 'CANADIA', cana: 'CANADIA', wing: 'WING', wingb: 'WING',
-  juntuor: 'JUNTUOR', lyf: 'LYF',
+  juntuor: 'JUNTUOR', jtrust: 'JUNTUOR', lyf: 'LYF',
+  chipmong: 'CHIPMONG', cmb: 'CHIPMONG', cmpb: 'CHIPMONG',
+  sathapana: 'SATHAPANA', sathapanab: 'SATHAPANA', spn: 'SATHAPANA',
+  vattanac: 'VATTANAC', vattanacb: 'VATTANAC', vtb: 'VATTANAC',
+  cpb: 'CPB', cpbank: 'CPB', cambodiapostbank: 'CPB',
+  ppcbank: 'PPCBANK', ppcb: 'PPCBANK',
+  hattha: 'HATTHA', hatthab: 'HATTHA', htb: 'HATTHA',
+  maybank: 'MAYBANK', mbb: 'MAYBANK',
+  truemoney: 'TRUEMONEY', tmn: 'TRUEMONEY',
+  bakong: 'BAKONG', nbc: 'BAKONG',
 };
 
 // បកស្រាយ QR ខាងក្រៅ → { account, name, bankCode, amount }
