@@ -1289,8 +1289,9 @@ const executeTransfer = (p) => db.transaction(async () => {
 
   const insNotif = db.prepare('INSERT INTO notifications (user_id, title, body, icon_code, bank_code) VALUES (?, ?, ?, 18, ?)');
   await insNotif.run(sender.id, 'ផ្ទេរប្រាក់ជោគជ័យ', `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${recipient.name}`, 'AURA');
+  const recvBody = `លោកអ្នកបានទទួលប្រាក់ចំនួន $${p.amount.toFixed(2)} ពីឈ្មោះ ${sender.name}`;
   const recvNotifId = (await insNotif.run(recipient.id, 'បានទទួលប្រាក់',
-    `អ្នកបានទទួល $${p.amount.toFixed(2)} ពី ${sender.name}`, 'AURA')).lastInsertRowid;
+    recvBody, 'AURA')).lastInsertRowid;
 
   const response = {
     id: outId,
@@ -1302,7 +1303,7 @@ const executeTransfer = (p) => db.transaction(async () => {
   await db.prepare('INSERT INTO idempotency_keys (key, user_id, req_hash, response) VALUES (?, ?, ?, ?)')
     .run(p.idem, p.senderId, p.reqHash, JSON.stringify(response));
 
-  return { replay: false, response, recipientId: recipient.id, recvNotifId };
+  return { replay: false, response, recipientId: recipient.id, recvNotifId, recvBody };
 });
 
 app.post('/transfers', auth, handle(async (req, res) => {
@@ -1345,8 +1346,7 @@ app.post('/transfers', auth, handle(async (req, res) => {
 
   if (!result.replay) {
     await unlockAchievement(req.userId, 'first_tx');
-    // FCM: មិនបង្ហាញចំនួនលុយលើ Lock Screen — App ទាញព័ត៌មានលម្អិតពី API
-    sendPushNotification(result.recipientId, 'Aura Bank', 'អ្នកមានការជូនដំណឹងថ្មី', {
+    sendPushNotification(result.recipientId, 'បានទទួលប្រាក់', result.recvBody, {
       type: 'transfer_received',
       id: result.recvNotifId,
       bank_code: 'AURA',
