@@ -173,6 +173,8 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS bank_code TEXT;
+
     CREATE TABLE IF NOT EXISTS qr_otp_requests (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -704,18 +706,22 @@ async function sendPushNotification(userId, title, body, data = {}) {
 }
 
 /// កត់ត្រាការជូនដំណឹងក្នុង DB + ផ្ញើ push — រាល់ប្រតិបត្តិការត្រូវហៅវា
-async function notifyUser(userId, title, body, data = {}, iconCode = 18) {
+/// bankCode: ធនាគារដែលពាក់ព័ន្ធ (App បង្ហាញ logo តាមនេះ)
+async function notifyUser(userId, title, body, data = {}, iconCode = 18,
+  bankCode = null) {
   let id = null;
   try {
     const info = await db.prepare(
-      'INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, ?)'
-    ).run(userId, title, body, iconCode);
+      'INSERT INTO notifications (user_id, title, body, icon_code, bank_code) VALUES (?, ?, ?, ?, ?)'
+    ).run(userId, title, body, iconCode,
+      bankCode ? String(bankCode).toUpperCase() : null);
     id = info.lastInsertRowid ?? null;
   } catch (e) {
     console.error('❌ notification insert failed:', e.message);
   }
   await sendPushNotification(userId, title, body,
-    { ...data, ...(id ? { notification_id: id } : {}) });
+    { ...data, ...(bankCode ? { bank_code: bankCode } : {}),
+      ...(id ? { notification_id: id } : {}) });
   return id;
 }
 
@@ -1102,7 +1108,7 @@ app.post('/transactions', auth, handle(async (req, res) => {
       .run(req.userId, card.id, String(title).slice(0, 100), String(category).slice(0, 50),
         amount, is_expense ? 1 : 0, Number.isInteger(icon_code) ? icon_code : 0);
 
-    await db.prepare(`INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, ?)`)
+    await db.prepare(`INSERT INTO notifications (user_id, title, body, icon_code, bank_code) VALUES (?, ?, ?, ?, 'AURA')`)
       .run(req.userId,
         is_expense ? 'ប្រតិបត្តិការជោគជ័យ' : 'ទទួលបានប្រាក់',
         `${title}  ${is_expense ? '-' : '+'}$${amount.toFixed(2)}`,
@@ -1260,10 +1266,10 @@ const executeTransfer = (p) => db.transaction(async () => {
   await insTx.run(recipient.id, recipientCard.id, `ទទួលពី ${sender.name}${noteSuffix}`.slice(0, 100),
     p.amount, 0, sender.id, ref);
 
-  const insNotif = db.prepare('INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, 18)');
-  await insNotif.run(sender.id, 'ផ្ទេរប្រាក់ជោគជ័យ', `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${recipient.name}`);
+  const insNotif = db.prepare('INSERT INTO notifications (user_id, title, body, icon_code, bank_code) VALUES (?, ?, ?, 18, ?)');
+  await insNotif.run(sender.id, 'ផ្ទេរប្រាក់ជោគជ័យ', `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${recipient.name}`, 'AURA');
   const recvNotifId = (await insNotif.run(recipient.id, 'បានទទួលប្រាក់',
-    `អ្នកបានទទួល $${p.amount.toFixed(2)} ពី ${sender.name}`)).lastInsertRowid;
+    `អ្នកបានទទួល $${p.amount.toFixed(2)} ពី ${sender.name}`, 'AURA')).lastInsertRowid;
 
   const response = {
     id: outId,
@@ -1379,9 +1385,9 @@ const executeExternalTransfer = (p) => db.transaction(async () => {
   const extId = (await insExt.run(p.senderId, card.id, bankRail.code, p.recipientName,
     p.recipientAccount, bankRail.currency, p.amount, fee, ref, p.note || null)).lastInsertRowid;
 
-  const insNotif = db.prepare('INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, 18)');
+  const insNotif = db.prepare('INSERT INTO notifications (user_id, title, body, icon_code, bank_code) VALUES (?, ?, ?, 18, ?)');
   const notifId = (await insNotif.run(p.senderId, 'ផ្ទេរជោគជ័យ',
-    `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${label}`)).lastInsertRowid;
+    `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${label}`, bankRail.code)).lastInsertRowid;
 
   const response = {
     id: outId,
@@ -1624,11 +1630,12 @@ app.post('/qr/external/start', auth, handle(async (req, res) => {
 
   const body = `លេខកូដ OTP របស់អ្នក ${otp}\nផ្ទេរ $${amount.toFixed(2)} ទៅ ${recipientName} · ${rail.name} · អាយុ ៥ នាទី`;
   const notifId = (await db.prepare(
-    'INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, 18)'
-  ).run(req.userId, 'Aura Bank · OTP', body)).lastInsertRowid;
+    'INSERT INTO notifications (user_id, title, body, icon_code, bank_code) VALUES (?, ?, ?, 18, ?)'
+  ).run(req.userId, 'Aura Bank · OTP', body, rail.code)).lastInsertRowid;
 
   const user = await db.prepare('SELECT phone FROM users WHERE id = ?').get(req.userId);
-  sendPushNotification(req.userId, 'Aura Bank · OTP', body, { type: 'otp', id: notifId });
+  sendPushNotification(req.userId, 'Aura Bank · OTP', body,
+    { type: 'otp', id: notifId, bank_code: rail.code });
 
   ok(res, {
     request_id: info.lastInsertRowid,
