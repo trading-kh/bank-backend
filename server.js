@@ -40,9 +40,23 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true, commit: String(process.env.RENDER_GIT_COMMIT || '').slice(0, 7) });
 });
 
+// ---------- BANK LOGOS (សាធារណៈ — FCM large icon) ----------
+app.use('/banks', express.static(path.join(__dirname, 'public', 'banks'), {
+  maxAge: '7d',
+  immutable: true,
+}));
+
 // ---------- CONFIG ----------
 // ទិន្នន័យរក្សាទុកក្នុង Postgres (DATABASE_URL) → មិនបាត់ពេល redeploy
 const IS_PROD = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+
+// URL សាធារណៈ — FCM ទាញយក logo ធនាគារពីទីនេះ (ត្រូវជា HTTPS សាធារណៈ)
+const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL ||
+  'https://bank-backend-f6ay.onrender.com').replace(/\/+$/, '');
+const PUSH_BANK_LOGOS = new Set([
+  'ABA', 'ACLEDA', 'CANADIA', 'WING', 'JUNTUOR', 'CHIPMONG', 'SATHAPANA',
+  'VATTANAC', 'CPB', 'PPCBANK', 'HATTHA', 'TRUEMONEY', 'LYF', 'MAYBANK', 'BAKONG',
+]);
 if (IS_PROD && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be set in production');
 }
@@ -690,13 +704,20 @@ async function sendPushNotification(userId, title, body, data = {}) {
     for (const [k, v] of Object.entries({ click_action: 'FLUTTER_NOTIFICATION_CLICK', ...data })) {
       strData[k] = String(v); // FCM data ត្រូវតែជា string
     }
+    // Logo ធនាគារជា large icon ក្នុង notification ពេល app បិទ/នៅផ្ទៃខាងក្រោយ
+    const bc = String(data.bank_code || '').trim().toUpperCase();
+    const logoUrl = PUSH_BANK_LOGOS.has(bc)
+      ? `${PUBLIC_BASE_URL}/banks/${bc.toLowerCase()}.png` : null;
     await getMessaging().send({
       token: row.token,
       notification: { title, body },
       data: strData,
-      android: { priority: 'high' },
+      android: {
+        priority: 'high',
+        ...(logoUrl ? { notification: { imageUrl: logoUrl } } : {}),
+      },
     });
-    console.log(`✅ FCM sent to user ${userId}`);
+    console.log(`✅ FCM sent to user ${userId}${bc ? ` · ${bc}` : ''}`);
   } catch (error) {
     console.error('❌ FCM sending failed:', error.message);
     if (error.code === 'messaging/registration-token-not-registered') {
@@ -1123,7 +1144,7 @@ app.post('/transactions', auth, handle(async (req, res) => {
     req.userId,
     is_expense ? 'ប្រតិបត្តិការជោគជ័យ' : 'ទទួលបានប្រាក់',
     `${title}  ${is_expense ? '-' : '+'}$${amount.toFixed(2)}`,
-    { type: 'transaction' }
+    { type: 'transaction', bank_code: 'AURA' }
   );
 
   ok(res, {
@@ -1328,6 +1349,7 @@ app.post('/transfers', auth, handle(async (req, res) => {
     sendPushNotification(result.recipientId, 'Aura Bank', 'អ្នកមានការជូនដំណឹងថ្មី', {
       type: 'transfer_received',
       id: result.recvNotifId,
+      bank_code: 'AURA',
     });
   }
 }));
@@ -1456,6 +1478,7 @@ app.post('/transfers/external', auth, handle(async (req, res) => {
     sendPushNotification(req.userId, 'Aura Bank', 'អ្នកមានការជូនដំណឹងថ្មី', {
       type: 'transfer_sent',
       id: result.notifId,
+      bank_code: bankCode,
     });
   }
 }));
@@ -1628,7 +1651,12 @@ app.post('/qr/external/start', auth, handle(async (req, res) => {
     .run(req.userId, bankCode, account, recipientName, amount, cardId,
       note || null, rawQr || null, otpHash);
 
-  const body = `លេខកូដ OTP របស់អ្នក ${otp}\nផ្ទេរ $${amount.toFixed(2)} ទៅ ${recipientName} · ${rail.name} · អាយុ ៥ នាទី`;
+  // ពេលវេលាផុតកំណត់ជាក់លាក់ (ម៉ោងកម្ពុជា) — ជំនួសពាក្យ «អាយុ ៥ នាទី»
+  const expireAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
+  const expireTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Phnom_Penh', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(expireAt);
+  const body = `លេខកូដ OTP របស់អ្នក ${otp}\nផ្ទេរ $${amount.toFixed(2)} ទៅ ${recipientName} · ${rail.name} · ផុតកំណត់ម៉ោង ${expireTime}`;
   const notifId = (await db.prepare(
     'INSERT INTO notifications (user_id, title, body, icon_code, bank_code) VALUES (?, ?, ?, 18, ?)'
   ).run(req.userId, 'Aura Bank · OTP', body, rail.code)).lastInsertRowid;
@@ -1707,6 +1735,7 @@ app.post('/qr/external/confirm', auth, handle(async (req, res) => {
     sendPushNotification(req.userId, 'Aura Bank', 'អ្នកមានការជូនដំណឹងថ្មី', {
       type: 'transfer_sent',
       id: result.notifId,
+      bank_code: r.bank_code,
     });
   }
 }));

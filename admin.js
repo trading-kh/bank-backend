@@ -480,7 +480,7 @@ module.exports = function createAdminRouter(ctx) {
       sendPushNotification(card.user_id,
         delta > 0 ? 'ប្រាក់បានបញ្ចូលចូលគណនីរបស់អ្នក' : 'ប្រាក់ត្រូវបានកាត់ចេញ',
         `កាត ${card.name} · ${delta > 0 ? '+' : '-'}$${Math.abs(delta).toFixed(2)} · សមារាល្ថបន្តិដោយអ្នកគ្រប់គ្រង`,
-        { type: 'admin' });
+        { type: 'admin', bank_code: 'AURA' });
     }
     await audit(req, 'update_card', 'cards', id, fields.map((f) => f.split(' = ')[0]).join(','));
     ok(res, await db.prepare('SELECT * FROM cards WHERE id = ?').get(id));
@@ -598,7 +598,7 @@ module.exports = function createAdminRouter(ctx) {
       sendPushNotification(userId,
         isExpense ? 'មានប្រតិបត្តិការចំណាយលើគណនីរបស់អ្នក' : 'មានប្រតិបត្តិការបញ្ចូលលុយចូលគណនីរបស់អ្នក',
         `${title} · ${isExpense ? '-' : '+'}$${amount.toFixed(2)} · សមារាល្ថបន្តិដោយអ្នកគ្រប់គ្រង`,
-        { type: 'admin' });
+        { type: 'admin', bank_code: 'AURA' });
     }
     ok(res, { id, new_balance: (await db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id)).balance });
   }));
