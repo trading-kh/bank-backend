@@ -11,9 +11,8 @@ const {
 } = require('./loan-engine');
 
 const MAX_MONTHS = 60;
-const KYC_REQUIRED = [
-  'province', 'district', 'commune', 'village',
-];
+// អាសយដ្ឋានលែងតម្រូវឱ្យមានក្នុងទម្រង់ស្នើសុំឥណទាន
+const KYC_REQUIRED = [];
 
 module.exports = function createLoanAppRouter(ctx) {
   const { db, ok, ApiError, handle, auth, sendPushNotification, unlockAchievement } = ctx;
@@ -132,8 +131,6 @@ module.exports = function createLoanAppRouter(ctx) {
       throw new ApiError(`រយៈខែត្រូវក្នុងចន្លោះ 1 – ${MAX_MONTHS}`, 400, 'BAD_MONTHS');
     if (annualRate === null || annualRate < 0 || annualRate > 60)
       throw new ApiError('កាន្លោះត្រូវក្នុងចន្លោះ 0 – 60%', 400, 'BAD_RATE');
-    if (addr.some((s) => !s))
-      throw new ApiError('សូមជ្រើសរើសទីតាំងខេត្ត ស្រុក ឃុំ ភូមិ', 400, 'BAD_ADDRESS');
 
     const open = await db.prepare(
       `SELECT id FROM loans WHERE user_id = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')}) LIMIT 1`
