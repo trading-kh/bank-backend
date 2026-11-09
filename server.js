@@ -35,6 +35,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// ---------- HEALTH ----------
+app.get('/health', (_req, res) => {
+  res.json({ ok: true, commit: String(process.env.RENDER_GIT_COMMIT || '').slice(0, 7) });
+});
+
 // ---------- CONFIG ----------
 // ទិន្នន័យរក្សាទុកក្នុង Postgres (DATABASE_URL) → មិនបាត់ពេល redeploy
 const IS_PROD = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
