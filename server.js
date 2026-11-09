@@ -112,6 +112,8 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS data_version INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'operations';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS bank_name TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS bank_account TEXT;
     UPDATE users SET role = 'management' WHERE is_admin = 1 AND (role IS NULL OR role = 'operations');
 
     CREATE TABLE IF NOT EXISTS cards (
@@ -767,7 +769,7 @@ app.post('/auth/register', handle(async (req, res) => {
   await seedNewUser(userId);
 
   const token = jwt.sign({ id: userId }, SECRET, { expiresIn: '30d' });
-  ok(res, { token, user: { id: userId, name, email, phone, avatar: null } });
+  ok(res, { token, user: { id: userId, name, email, phone, avatar: null, bank_name: null, bank_account: null } });
 }));
 
 app.post('/auth/login', handle(async (req, res) => {
@@ -819,7 +821,7 @@ app.post('/auth/login', handle(async (req, res) => {
   const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: '30d' });
   ok(res, {
     token,
-    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, avatar: user.avatar || null },
+    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, avatar: user.avatar || null, bank_name: user.bank_name || null, bank_account: user.bank_account || null },
   });
 }));
 
@@ -861,18 +863,44 @@ app.post('/auth/google', handle(async (req, res) => {
   const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: '30d' });
   ok(res, {
     token,
-    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, avatar: user.avatar || null },
+    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, avatar: user.avatar || null, bank_name: user.bank_name || null, bank_account: user.bank_account || null },
     generatedPin,
   });
 }));
 
 app.get('/me', auth, async (req, res) => {
   const u = await db.prepare(
-    'SELECT id, name, email, phone, avatar, auth_provider, data_version FROM users WHERE id = ?'
+    'SELECT id, name, email, phone, avatar, auth_provider, data_version, bank_name, bank_account FROM users WHERE id = ?'
   ).get(req.userId);
   if (!u) return fail(res, 'Not found', 404, 'NOT_FOUND');
   ok(res, u);
 });
+
+// ---------- LINKED BANK ACCOUNT (សម្រាប់បង្កើតកាតផ្ទាល់ខ្លួន) ----------
+// ភ្ជាប់/កែ/ផ្ដាច់ គណនីធនាគារ។ ផ្ញើ bank_name + bank_account ទទេ ដើម្បីផ្ដាច់។
+app.post('/me/bank-account', auth, handle(async (req, res) => {
+  const rawName = req.body.bank_name;
+  const rawAccount = req.body.bank_account;
+  const name = typeof rawName === 'string' ? rawName.trim().replace(/\s+/g, ' ') : '';
+  const account = typeof rawAccount === 'string' ? rawAccount.trim() : '';
+
+  // ផ្ដាច់ការភ្ជាប់
+  if (!name && !account) {
+    await db.prepare('UPDATE users SET bank_name = NULL, bank_account = NULL, data_version = data_version + 1 WHERE id = ?')
+      .run(req.userId);
+    return ok(res, { bank_name: null, bank_account: null, linked: false });
+  }
+
+  if (name.length < 2 || name.length > 80)
+    throw new ApiError('សូមបញ្ចូលឈ្មោះធនាគារឱ្យបានត្រឹមត្រូវ', 400, 'BAD_BANK_NAME');
+  const digits = account.replace(/[\s-]/g, '');
+  if (!/^[0-9]{6,30}$/.test(digits))
+    throw new ApiError('លេខគណនីត្រូវមាន ៦–៣០ ខ្ទង់', 400, 'BAD_BANK_ACCOUNT');
+
+  await db.prepare('UPDATE users SET bank_name = ?, bank_account = ?, data_version = data_version + 1 WHERE id = ?')
+    .run(name, digits, req.userId);
+  ok(res, { bank_name: name, bank_account: digits, linked: true });
+}));
 
 // ---------- AVATAR ----------
 const AVATAR_RE = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
