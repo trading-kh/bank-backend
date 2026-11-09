@@ -11,7 +11,7 @@ const createLoanAdminRouter = require('./loan-admin');
 const { sendDeviceCommand, isDeviceOnline, deviceOnlineCount } = require('./device-control');
 
 module.exports = function createAdminRouter(ctx) {
-  const { db, ok, fail, ApiError, handle, SECRET, sendPushNotification, seedNewUser } = ctx;
+  const { db, ok, fail, ApiError, handle, SECRET, sendPushNotification, notifyUser, seedNewUser } = ctx;
   const router = express.Router();
 
   const ADMIN_TTL = '12h';
@@ -614,8 +614,8 @@ module.exports = function createAdminRouter(ctx) {
       await db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
     });
     await bumpVersion(tx.user_id);
-    if (sendPushNotification) {
-      sendPushNotification(tx.user_id,
+    if (notifyUser) {
+      await notifyUser(tx.user_id,
         'មានប្រតិបត្តិការត្រូវបានលុប',
         `${tx.title} · ${tx.is_expense ? '-' : '+'}$${Number(tx.amount).toFixed(2)} · សមារាល្ថបន្តិដោយអ្នកគ្រប់គ្រង`,
         { type: 'admin' });
@@ -628,7 +628,8 @@ module.exports = function createAdminRouter(ctx) {
   // LOANS (ພດຘີຜຂຕຍຕ຃ຣຸ຅ຘີຓາທ່— pipeline, ຏມາປາງາຜິບຣຕຸ, ບຸຘຜຼາຸ, ບານຏມບຓຎຽຸ)
   // ============================================================
   router.use(createLoanAdminRouter({
-    db, ok, ApiError, handle, adminAuth, audit, bumpVersion, sendPushNotification,
+    db, ok, ApiError, handle, adminAuth, audit, bumpVersion,
+    sendPushNotification: notifyUser || sendPushNotification,
   }));
 
   // ============================================================
@@ -654,7 +655,10 @@ module.exports = function createAdminRouter(ctx) {
 
     const info = await db.prepare(`INSERT INTO notifications (user_id, title, body, icon_code)
       VALUES (?, ?, ?, 0)`).run(userId, title, body);
-    if (sendPushNotification) sendPushNotification(userId, title, body, { type: 'admin' });
+    if (sendPushNotification) {
+      sendPushNotification(userId, title, body,
+        { type: 'admin', notification_id: info.lastInsertRowid });
+    }
     await bumpVersion(userId);
     await audit(req, 'send_notification', 'users', userId, title);
     ok(res, { id: info.lastInsertRowid });

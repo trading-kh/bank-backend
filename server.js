@@ -687,6 +687,22 @@ async function sendPushNotification(userId, title, body, data = {}) {
   }
 }
 
+/// កត់ត្រាការជូនដំណឹងក្នុង DB + ផ្ញើ push — រាល់ប្រតិបត្តិការត្រូវហៅវា
+async function notifyUser(userId, title, body, data = {}, iconCode = 18) {
+  let id = null;
+  try {
+    const info = await db.prepare(
+      'INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, ?)'
+    ).run(userId, title, body, iconCode);
+    id = info.lastInsertRowid ?? null;
+  } catch (e) {
+    console.error('❌ notification insert failed:', e.message);
+  }
+  await sendPushNotification(userId, title, body,
+    { ...data, ...(id ? { notification_id: id } : {}) });
+  return id;
+}
+
 // គណនី Admin ប្រព័ន្ធ (ចូលដោយ email + password) — បង្កើត/ធ្វើបច្ចុប្បន្នដោយស្វ័យប្រវត្តិ
 // ពី ADMIN_EMAIL + ADMIN_PASSWORD (កំណត់ជា env var នៅ Render — មិនដែលសរសេរក្នុង code)
 async function ensureAdminAccount() {
@@ -1678,11 +1694,14 @@ app.post('/goals', auth, async (req, res) => {
 app.post('/goals/:id/deposit', auth, async (req, res) => {
   const amount = toMoney(req.body.amount);
   if (!(amount > 0)) return fail(res, 'Invalid amount');
-  const g = await db.prepare('SELECT id FROM goals WHERE id = ? AND user_id = ?')
+  const g = await db.prepare('SELECT id, name FROM goals WHERE id = ? AND user_id = ?')
     .get(req.params.id, req.userId);
   if (!g) return fail(res, 'Not found', 404, 'NOT_FOUND');
   await db.prepare('UPDATE goals SET saved = saved + ? WHERE id = ?').run(amount, req.params.id);
   const g2 = await db.prepare('SELECT saved FROM goals WHERE id = ?').get(req.params.id);
+  await notifyUser(req.userId, 'ដាក់ប្រាក់ចូលគោលដៅ',
+    `បានដាក់ $${amount.toFixed(2)} ចូល "${g.name}" · សរុប $${Number(g2.saved).toFixed(2)}`,
+    { type: 'goal_deposit' }, 19);
   if (g2.saved >= 100) await unlockAchievement(req.userId, 'savings_100');
   if (g2.saved >= 1000) await unlockAchievement(req.userId, 'savings_1000');
   ok(res, { updated: true });
@@ -1706,7 +1725,7 @@ app.post('/notifications/read-all', auth, async (req, res) => {
 // LOANS (កម្មវិធីកម្ចីវីក្រុយ — KYC → សាកលកម្ម → អនុមត្ត → តារាងសងប្រាក់)
 // ============================================================
 app.use(createLoanAppRouter({
-  db, ok, ApiError, handle, auth, sendPushNotification, unlockAchievement,
+  db, ok, ApiError, handle, auth, sendPushNotification: notifyUser, unlockAchievement,
 }));
 
 // ============================================================
@@ -1715,7 +1734,7 @@ app.use(createLoanAppRouter({
 async function runLoanJobs() {
   try {
     await syncArrears(db);
-    const out = await runAutoDebit(db, { sendPushNotification });
+    const out = await runAutoDebit(db, { sendPushNotification: notifyUser });
     const paid = out.results.filter((r) => r.status === 'paid');
     if (paid.length)
       console.log(`💳 បង់ស្វត្តកម្មបាន ${paid.length} វីនុបទ`);
@@ -1909,6 +1928,9 @@ app.post('/recurring/process-due', auth, async (req, res) => {
       await db.prepare('UPDATE recurring SET next_date = ? WHERE id = ?')
         .run(next.toISOString().split('T')[0], r.id);
     });
+    await notifyUser(req.userId, 'ប្រតិបត្តិការស្វ័យប្រវត្តិ',
+      `${r.title} · -$${r.amount.toFixed(2)}`, { type: 'recurring' },
+      Number.isInteger(r.icon_code) ? r.icon_code : 0);
     processed++;
   }
   ok(res, { processed });
@@ -2186,7 +2208,7 @@ app.get('/regions', async (req, res) => {
 // ============================================================
 const createAdminRouter = require('./admin');
 app.use('/admin/api', createAdminRouter({
-  db, ok, fail, ApiError, handle, SECRET, sendPushNotification, seedNewUser,
+  db, ok, fail, ApiError, handle, SECRET, sendPushNotification, notifyUser, seedNewUser,
 }));
 app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
 
