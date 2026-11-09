@@ -37,8 +37,8 @@ module.exports = function createLoanAppRouter(ctx) {
     const b = req.body || {};
     const existing = await db.prepare('SELECT * FROM loan_kyc WHERE user_id = ?')
       .get(req.userId);
-    if (existing?.status === 'verified')
-      throw new ApiError('ព័ត៌មាន KYC ត្រូវបានផ្ទៀងផ្ទាត់រួចហើយ', 400, 'KYC_LOCKED');
+    // KYC ដែលផ្ទៀងផ្ទាត់រួចជាចាក់សោរ — ត្រឡប់ទិន្នន័យដើមវិញ ដើម្បីមិនរារាំងការស្នើកម្ចី
+    if (existing?.status === 'verified') return ok(res, existing);
 
     const fields = {
       full_name: str(b.full_name, 80),
@@ -116,7 +116,8 @@ module.exports = function createLoanAppRouter(ctx) {
       .get(req.userId);
     if (!kyc || !['submitted', 'verified'].includes(kyc.status))
       throw new ApiError('សូមបំពេញ KYC ជាមុនសិន', 400, 'KYC_REQUIRED');
-    const missing = KYC_REQUIRED.filter((k) => !String(kyc[k] || '').trim());
+    const missing = KYC_REQUIRED.filter(
+      (k) => !String(kyc[k] || '').trim() && !str(b[k], 100));
     if (missing.length)
       throw new ApiError('ព័ត៌មាន KYC មិនពេញលេញ (' + missing.join(', ') + ')',
         400, 'KYC_INCOMPLETE');
