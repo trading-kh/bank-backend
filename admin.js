@@ -625,6 +625,171 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // ============================================================
+  // TRANSFER APPROVALS — ផ្ទេររង់ចាំការអនុម័តចុងក្រោយ
+  // ============================================================
+  const expirePendingApprovals = () => db.prepare(`UPDATE transfer_approvals
+    SET status = 'holding' WHERE status = 'pending' AND expires_at < now()`).run();
+
+  router.get('/transfers/pending', adminAuth, handle(async (req, res) => {
+    await expirePendingApprovals();
+    const rows = await db.prepare(`
+      SELECT a.id, a.transfer_ref, a.kind, a.amount, a.fee, a.total_debit, a.note,
+             a.meta, a.status, a.created_at, a.expires_at, a.decided_at, a.decided_by,
+             a.sender_id, a.card_id,
+             s.name AS sender_name, s.email AS sender_email,
+             r.name AS recipient_name, r.email AS recipient_email
+      FROM transfer_approvals a
+      JOIN users s ON s.id = a.sender_id
+      LEFT JOIN users r ON r.id = a.recipient_id
+      WHERE a.status IN ('pending', 'holding')
+      ORDER BY a.created_at DESC LIMIT 100`).all();
+    ok(res, rows.map((r) => ({
+      ...r,
+      meta: r.meta ? JSON.parse(r.meta) : null,
+      remaining_seconds: Math.max(0,
+        Math.round((new Date(r.expires_at).getTime() - Date.now()) / 1000)),
+    })));
+  }));
+
+  router.post('/transfers/:id/approve', adminAuth, handle(async (req, res) => {
+    const id = int(req.params.id);
+    const out = await db.transaction(async () => {
+      const a = await db.prepare('SELECT * FROM transfer_approvals WHERE id = ?').get(id);
+      if (!a) throw new ApiError('រកមិនឃើញការផ្ទេរ', 404, 'NOT_FOUND');
+      const upd = await db.prepare(`UPDATE transfer_approvals
+        SET status = 'approved', decided_at = now(), decided_by = ?
+        WHERE id = ? AND status IN ('pending', 'holding')`).run(req.admin.email, id);
+      if (upd.changes !== 1)
+        throw new ApiError('ការផ្ទេរនេះត្រូវបានសម្រេចរួចហើយ', 409, 'ALREADY_DECIDED');
+
+      const meta = a.meta ? JSON.parse(a.meta) : {};
+      const sender = await db.prepare('SELECT id, name FROM users WHERE id = ?').get(a.sender_id);
+      const notes = [];
+      let response;
+      let inTxId = null;
+
+      if (a.kind === 'p2p') {
+        const recipient = await db.prepare('SELECT id, name FROM users WHERE id = ?')
+          .get(a.recipient_id);
+        const rc = await db.prepare(
+          'SELECT id FROM cards WHERE user_id = ? AND frozen = 0 ORDER BY id LIMIT 1')
+          .get(a.recipient_id);
+        if (!recipient || !rc)
+          throw new ApiError('គណនីអ្នកទទួលមិនអាចទទួលប្រាក់បាន', 400, 'RECIPIENT_UNAVAILABLE');
+
+        await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?')
+          .run(a.amount, rc.id);
+        const noteSuffix = a.note ? ` · ${a.note}` : '';
+        inTxId = (await db.prepare(`INSERT INTO transactions
+          (user_id, card_id, title, category, amount, is_expense, icon_code,
+           counterparty_id, transfer_ref, status)
+          VALUES (?, ?, ?, 'ផ្ទេរប្រាក់', ?, 0, 18, ?, ?, 'completed')`)
+          .run(recipient.id, rc.id,
+            `ទទួលពី ${sender.name}${noteSuffix}`.slice(0, 100),
+            a.amount, sender.id, a.transfer_ref)).lastInsertRowid;
+        await db.prepare(`UPDATE transactions SET status = 'completed' WHERE id = ?`)
+          .run(a.out_tx_id);
+
+        notes.push({
+          user_id: a.sender_id, title: 'ផ្ទេរប្រាក់ជោគជ័យ',
+          body: `ផ្ទេរ $${Number(a.amount).toFixed(2)} ទៅ ${recipient.name}`,
+          bank_code: 'AURA', type: 'transfer_sent',
+        });
+        notes.push({
+          user_id: recipient.id, title: 'បានទទួលប្រាក់',
+          body: `លោកអ្នកបានទទួលប្រាក់ចំនួន $${Number(a.amount).toFixed(2)} ពីឈ្មោះ ${sender.name}`,
+          bank_code: 'AURA', type: 'transfer_received',
+        });
+
+        response = {
+          approved: true, transfer_ref: a.transfer_ref,
+          id: a.out_tx_id, in_tx_id: inTxId,
+          new_balance: (await db.prepare('SELECT balance FROM cards WHERE id = ?')
+            .get(a.card_id)).balance,
+          transaction: await db.prepare('SELECT * FROM transactions WHERE id = ?')
+            .get(a.out_tx_id),
+          recipient: { name: recipient.name, masked_account: meta.recipient_masked || '' },
+        };
+      } else {
+        await db.prepare(`UPDATE external_transfers SET status = 'settled'
+          WHERE transfer_ref = ?`).run(a.transfer_ref);
+        await db.prepare(`UPDATE transactions SET status = 'completed' WHERE id = ?`)
+          .run(a.out_tx_id);
+        notes.push({
+          user_id: a.sender_id, title: 'ផ្ទេរជោគជ័យ',
+          body: `ផ្ទេរ $${Number(a.amount).toFixed(2)} ទៅ ${meta.recipient_name || ''} (${meta.bank_name || meta.bank_code || ''})`,
+          bank_code: meta.bank_code || 'AURA', type: 'transfer_sent',
+        });
+        response = {
+          approved: true, transfer_ref: a.transfer_ref,
+          id: a.out_tx_id, external_transfer_id: meta.external_transfer_id || null,
+          fee: a.fee, total_debit: a.total_debit,
+          new_balance: (await db.prepare('SELECT balance FROM cards WHERE id = ?')
+            .get(a.card_id)).balance,
+          transaction: await db.prepare('SELECT * FROM transactions WHERE id = ?')
+            .get(a.out_tx_id),
+          recipient: { name: meta.recipient_name || '', account: meta.recipient_account || '' },
+        };
+      }
+
+      await db.prepare(`UPDATE transfer_approvals SET response = ?, in_tx_id = ?
+        WHERE id = ?`).run(JSON.stringify(response), inTxId, id);
+      return { response, notes, senderId: a.sender_id,
+        recipientId: a.kind === 'p2p' ? a.recipient_id : null };
+    });
+
+    for (const n of out.notes) {
+      if (notifyUser) {
+        await notifyUser(n.user_id, n.title, n.body,
+          { type: n.type, transfer_ref: out.response.transfer_ref }, 18, n.bank_code);
+      }
+    }
+    await bumpVersion(out.senderId);
+    if (out.recipientId) await bumpVersion(out.recipientId);
+    await audit(req, 'approve_transfer', 'transfer_approvals', id,
+      `${out.response.transfer_ref}`);
+    ok(res, out.response);
+  }));
+
+  router.post('/transfers/:id/reject', adminAuth, handle(async (req, res) => {
+    const id = int(req.params.id);
+    const reason = String(req.body.reason || '').trim().slice(0, 120);
+    const out = await db.transaction(async () => {
+      const a = await db.prepare('SELECT * FROM transfer_approvals WHERE id = ?').get(id);
+      if (!a) throw new ApiError('រកមិនឃើញការផ្ទេរ', 404, 'NOT_FOUND');
+      const upd = await db.prepare(`UPDATE transfer_approvals
+        SET status = 'rejected', decided_at = now(), decided_by = ?, response = ?
+        WHERE id = ? AND status IN ('pending', 'holding')`)
+        .run(req.admin.email, JSON.stringify({ rejected: true, reason }), id);
+      if (upd.changes !== 1)
+        throw new ApiError('ការផ្ទេរនេះត្រូវបានសម្រេចរួចហើយ', 409, 'ALREADY_DECIDED');
+
+      await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?')
+        .run(a.total_debit, a.card_id);
+      await db.prepare(`UPDATE transactions SET status = 'failed' WHERE id = ?`)
+        .run(a.out_tx_id);
+      const meta = a.meta ? JSON.parse(a.meta) : {};
+      if (a.kind === 'external') {
+        await db.prepare(`UPDATE external_transfers SET status = 'rejected'
+          WHERE transfer_ref = ?`).run(a.transfer_ref);
+      }
+      return { a, meta };
+    });
+
+    const a = out.a;
+    const body = `ការផ្ទេរ $${Number(a.amount).toFixed(2)} មិនទាន់បានអនុម័តទេ — ប្រាក់ត្រូវបានបញ្ចូលត្រឡប់ទៅគណនីវិញ`;
+    if (notifyUser) {
+      await notifyUser(a.sender_id, 'ការផ្ទេរត្រូវបានបដិសេធ', body,
+        { type: 'transfer_rejected', transfer_ref: a.transfer_ref },
+        18, out.meta.bank_code || 'AURA');
+    }
+    await bumpVersion(a.sender_id);
+    await audit(req, 'reject_transfer', 'transfer_approvals', id,
+      `${a.transfer_ref}${reason ? ' · ' + reason : ''}`);
+    ok(res, { id, status: 'rejected' });
+  }));
+
+  // ============================================================
   // LOANS (ພດຘີຜຂຕຍຕ຃ຣຸ຅ຘີຓາທ່— pipeline, ຏມາປາງາຜິບຣຕຸ, ບຸຘຜຼາຸ, ບານຏມບຓຎຽຸ)
   // ============================================================
   router.use(createLoanAdminRouter({
@@ -848,6 +1013,7 @@ module.exports = function createAdminRouter(ctx) {
       newUsers,
       newCards,
       pendingTransactions,
+      pendingApprovals,
       pendingLoans,
       pendingKyc,
       overdueLoans,
@@ -863,6 +1029,7 @@ module.exports = function createAdminRouter(ctx) {
       db.prepare(`SELECT COUNT(*) as c FROM users WHERE created_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(*) as c FROM cards WHERE created_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(*) as c FROM external_transfers WHERE status != 'settled'`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM transfer_approvals WHERE status IN ('pending', 'holding')`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status IN ('submitted', 'under_review', 'approved')`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_kyc WHERE status = 'submitted'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls JOIN loans l ON l.id = ls.loan_id WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE AND l.status = 'disbursed'`).get(),
@@ -893,6 +1060,7 @@ module.exports = function createAdminRouter(ctx) {
       users: newUsers?.c || 0,
       cards: newCards?.c || 0,
       transactions: pendingTransactions?.c || 0,
+      approvals: pendingApprovals?.c || 0,
       loans: pendingLoans?.c || 0,
       kyc: pendingKyc?.c || 0,
       collections: overdueLoans?.c || 0,

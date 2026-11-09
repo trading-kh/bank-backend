@@ -264,6 +264,7 @@ function drawLine(canvas, points, opts = {}) {
    ============================================================ */
 const TITLES = {
   dashboard: 'ផ្ទាំងដើម', users: 'អ្នកប្រើ', cards: 'កាត',
+  approvals: 'រង់ចាំអនុម័ត',
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   collections: 'ប្រមូល', reports: 'របាយការណ៍', notifications: 'សេចក្តីសារ',
   data: 'ទិន្នន័យផ្សេង', audit: 'កំណត់ត្រាក្របរបុប',
@@ -2125,8 +2126,145 @@ window.collapseList = function() {
   }
 };
 
+/* ---------- transfer approvals ---------- */
+const mmss = (sec) => {
+  const s = Math.max(0, Math.floor(sec));
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+};
+
+function approvalCard(r) {
+  const isExt = r.kind === 'external';
+  const meta = r.meta || {};
+  const name = isExt ? meta.recipient_name : r.recipient_name;
+  const bank = isExt ? meta.bank_name : 'Aura Bank';
+  const acct = isExt ? meta.recipient_account : meta.recipient_masked;
+  const created = new Date(r.created_at).getTime();
+  const exp = new Date(r.expires_at).getTime();
+  const span = Math.max(1000, exp - created);
+  const remain = Math.max(0, Math.round((exp - Date.now()) / 1000));
+  const pct = Math.max(0, Math.min(100, (remain * 1000 / span) * 100));
+  const holding = r.status === 'holding';
+  return `<div class="approval-card${holding ? ' holding' : ''}">
+    <div class="ap-top">
+      <span class="pill ${isExt ? 'info' : 'ok'}">${isExt ? '🏦 ' + esc(bank) : '⚡ ផ្ទេរ Aura'}</span>
+      <span class="ap-status ${holding ? 'holding' : 'pending'}">${holding ? '⏸ HOLDING' : '⏳ រង់ចាំ'}</span>
+    </div>
+    <div class="ap-route">
+      <div class="ap-side">
+        <div class="ap-role">អ្នកផ្ញើ</div>
+        <div class="cell-user">${avatarHtml(r.sender_name)}<span><b>${esc(r.sender_name)}</b><br><span class="muted">${esc(r.sender_email || '')}</span></span></div>
+      </div>
+      <div class="ap-arrow">→</div>
+      <div class="ap-side">
+        <div class="ap-role">អ្នកទទួល</div>
+        <div class="cell-user">${avatarHtml(name)}<span><b>${esc(name || '—')}</b><br><span class="muted">${esc(acct || '')}</span></span></div>
+      </div>
+    </div>
+    <div class="ap-amount">${money(r.total_debit)}${Number(r.fee) ? `<span class="ap-fee">រួម fee ${money(r.fee)}</span>` : ''}</div>
+    <div class="ap-count">
+      <span class="ap-clock ${holding ? 'holding' : ''}" data-countdown data-exp="${exp}">${holding ? 'ហួសកំណត់' : mmss(remain)}</span>
+      <span class="ap-bar"><i style="width:${holding ? 0 : pct}%"></i></span>
+    </div>
+    ${r.note ? `<div class="ap-note">📝 ${esc(r.note)}</div>` : ''}
+    <div class="ap-actions">
+      <button class="btn ok sm" data-ap-approve="${r.id}">✓ អនុម័ត</button>
+      <button class="btn danger sm" data-ap-reject="${r.id}">✕ បដិសេធ</button>
+    </div>
+    <div class="ap-ref">${esc(r.transfer_ref)} · ${dt(r.created_at)}</div>
+  </div>`;
+}
+
+let approvalTickTimer = null;
+let approvalRefreshTimer = null;
+
+function stopApprovalTimers() {
+  clearInterval(approvalTickTimer); approvalTickTimer = null;
+  clearInterval(approvalRefreshTimer); approvalRefreshTimer = null;
+}
+
+async function renderApprovals() {
+  stopApprovalTimers();
+  const rows = await api('/transfers/pending');
+  const pend = rows.filter((r) => r.status === 'pending').length;
+  const hold = rows.filter((r) => r.status === 'holding').length;
+  const sum = rows.reduce((a, r) => a + Number(r.total_debit || 0), 0);
+
+  $('#content').innerHTML = `
+    <div class="grid k3">
+      <div class="card kpi accent">
+        <div class="kpi-label">⏳ កំពុងរង់ចាំ</div>
+        <div class="kpi-value">${pend}</div>
+        <div class="kpi-sub">ត្រូវអនុម័តដើម្បីបញ្ចេញប្រាក់ទៅអ្នកទទួល</div>
+      </div>
+      <div class="card kpi warn">
+        <div class="kpi-label">⏸ Holding (ហួសកំណត់)</div>
+        <div class="kpi-value">${hold}</div>
+        <div class="kpi-sub">ប្រាក់នៅកាន់ · រង់ចាំអ្នកសម្រេច</div>
+      </div>
+      <div class="card kpi">
+        <div class="kpi-label">ទឹកប្រាក់កាត់រួច</div>
+        <div class="kpi-value">${money0(sum)}</div>
+        <div class="kpi-sub">កាត់ពីអ្នកផ្ញើភ្លាម — បដិសេធនឹងបង្វិលជូនវិញ</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>✅ ការផ្ទេររង់ចាំការអនុម័ត</h3>
+        <span class="muted">${rows.length} ការផ្ទេរ · ធ្វើបច្ចុប្បន្នភាពស្វ័យប្រវត្តិរៀងរាល់ 5 វិនាទី</span></div>
+      ${rows.length
+        ? `<div class="approval-grid">${rows.map(approvalCard).join('')}</div>`
+        : '<div class="empty">គ្មានការផ្ទេររង់ចាំអនុម័តទេ 🎉</div>'}
+    </div>`;
+
+  // live countdown
+  approvalTickTimer = setInterval(() => {
+    $$('[data-countdown]').forEach((el) => {
+      if (el.classList.contains('holding')) return;
+      const left = Math.max(0, Math.round((Number(el.dataset.exp) - Date.now()) / 1000));
+      el.textContent = mmss(left);
+      if (left === 0) el.classList.add('over');
+    });
+  }, 1000);
+
+  // auto refresh while this page is open
+  approvalRefreshTimer = setInterval(() => {
+    if (page !== 'approvals') return stopApprovalTimers();
+    const modalOpen = !$('#modal').classList.contains('hidden');
+    if (!document.hidden && !modalOpen) render();
+  }, 5000);
+
+  $$('[data-ap-approve]').forEach((b) => b.onclick = () => {
+    const id = b.dataset.apApprove;
+    confirmAction('អនុម័តការផ្ទេរ?', 'ប្រាក់នឹងត្រូវបញ្ចូលទៅអ្នកទទួល ហើយអ្នកផ្ញើទទួលបានការជូនដំណឹងជោគជ័យ។', async () => {
+      await api(`/transfers/${id}/approve`, { method: 'POST', body: {} });
+      toast('បានអនុម័តការផ្ទេរ', 'ok');
+      loadBadges();
+      render();
+    });
+  });
+
+  $$('[data-ap-reject]').forEach((b) => b.onclick = () => {
+    const id = b.dataset.apReject;
+    openModal({
+      title: 'បដិសេធការផ្ទេរ',
+      body: `<p class="muted">ប្រាក់នឹងត្រូវបង្វិលទៅអ្នកផ្ញើវិញភ្លាម។</p>
+        <label class="field"><span>មូលហេតុ</span><textarea id="ap_reason" rows="3" placeholder="ឧ. ព័ត៌មានអ្នកទទួលមិនត្រឹមត្រូវ"></textarea></label>`,
+      saveLabel: 'បដិសេធ',
+      onSave: async () => {
+        await api(`/transfers/${id}/reject`, {
+          method: 'POST',
+          body: { reason: $('#ap_reason').value.trim() },
+        });
+        toast('បានបដិសេធ និងបង្វិលប្រាក់ជូនវិញ', 'ok');
+        loadBadges();
+        render();
+      },
+    });
+  });
+}
+
 const RENDERERS = {
   dashboard: renderDashboard, users: renderUsers, cards: renderCards,
+  approvals: renderApprovals,
   transactions: renderTransactions, loans: renderLoans, kyc: renderKyc,
   collections: renderCollections, reports: renderReports,
   notifications: renderNotifications, data: renderData, audit: renderAudit,
@@ -2335,6 +2473,7 @@ async function loadBadges() {
     const badges = await api('/badges');
     setBadge('badge-users', badges.users);
     setBadge('badge-cards', badges.cards);
+    setBadge('badge-approvals', badges.approvals, badges.approvals > 0 ? 'warning' : '');
     setBadge('badge-transactions', badges.transactions);
     setBadge('badge-loans', badges.loans);
     setBadge('badge-kyc', badges.kyc);

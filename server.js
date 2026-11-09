@@ -67,6 +67,9 @@ const SALT = 10;
 const MAX_TX = 10000;                  // កំណត់ចំនួនអតិបរមាក្នុងមួយប្រតិបត្តិការ
 const MAX_PIN_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
+// រយៈពេលរង់ចាំការអនុម័តចុងក្រោយ (គិតជានាទី) — ផុតកំណត់ → ស្ថានភាព Holding
+const HOLD_MINUTES = Math.max(parseInt(process.env.TRANSFER_HOLD_MINUTES, 10) || 10, 1);
+const holdExpiry = () => new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
 // ⚠️ បើអ្នកមានមុខងារ "បញ្ចូលលុយ" សម្រាប់ Demo ទើបបើវា (ក្នុង Production ត្រូវ false)
 const ALLOW_DEMO_INCOME = process.env.ALLOW_DEMO_INCOME === 'true';
 
@@ -167,6 +170,9 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- completed | pending (រង់ចាំអនុម័ត) | failed (បដិសេធ)
+    ALTER TABLE transactions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'completed';
+
     CREATE TABLE IF NOT EXISTS goals (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -188,6 +194,32 @@ async function initDb() {
     );
 
     ALTER TABLE notifications ADD COLUMN IF NOT EXISTS bank_code TEXT;
+
+    -- ការផ្ទេររង់ចាំការអនុម័តពី Admin — លុយកាត់ចេញភ្លាម (hold)
+    -- ហើយបូកចូលអ្នកទទួលតែពេល approved; បើ rejected → បញ្ចូលត្រឡប់អ្នកផ្ញើ
+    CREATE TABLE IF NOT EXISTS transfer_approvals (
+      id SERIAL PRIMARY KEY,
+      transfer_ref TEXT UNIQUE NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'p2p',
+      sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipient_id INTEGER,
+      card_id INTEGER NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      fee DOUBLE PRECISION NOT NULL DEFAULT 0,
+      total_debit DOUBLE PRECISION NOT NULL,
+      note TEXT,
+      meta TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      out_tx_id INTEGER,
+      in_tx_id INTEGER,
+      response TEXT,
+      decided_by TEXT,
+      decided_at TIMESTAMPTZ,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_transfer_approvals_status
+      ON transfer_approvals (status, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS qr_otp_requests (
       id SERIAL PRIMARY KEY,
@@ -683,8 +715,14 @@ async function checkPin(userId, pin) {
 const spentToday = async (cardId) => (await db.prepare(`
   SELECT COALESCE(SUM(amount), 0) AS s FROM transactions
   WHERE card_id = ? AND is_expense = 1
+    AND COALESCE(status, 'completed') <> 'failed'
     AND (created_at AT TIME ZONE 'Asia/Phnom_Penh')::date
       = (now() AT TIME ZONE 'Asia/Phnom_Penh')::date`).get(cardId)).s;
+
+// ផ្ទេរដែលផុតរយៈពេលរង់ចាំ → Holding (លុយនៅក្តោបក្តាប់ រង់ចាំ Admin សម្រេច)
+const expireApprovals = () => db.prepare(
+  "UPDATE transfer_approvals SET status = 'holding' WHERE status = 'pending' AND expires_at < now()"
+).run();
 
 function maskContact(u) {
   const digits = String(u.phone || '').replace(/\D/g, '');
@@ -1271,31 +1309,34 @@ const executeTransfer = (p) => db.transaction(async () => {
   if (p.amount > card.daily_limit || await spentToday(card.id) + p.amount > card.daily_limit)
     throw new ApiError('លើសកម្រិតប្រាក់ប្រចាំថ្ងៃ', 400, 'DAILY_LIMIT');
 
-  // កាត់ (មាន guard កុំឲ្យអវិជ្ជមាន) រួចបូក
+  // កាត់ចេញភ្លាម (hold មិនទាន់បូកចូលអ្នកទទួល) — មាន guard កុំឲ្យអវិជ្ជមាន
   const dec = await db.prepare(`UPDATE cards SET balance = ROUND(balance - ?, 2)
     WHERE id = ? AND balance >= ?`).run(p.amount, card.id, p.amount);
   if (dec.changes !== 1) throw new ApiError('សមតុល្យមិនគ្រប់គ្រាន់', 400, 'INSUFFICIENT_FUNDS');
-  await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?').run(p.amount, recipientCard.id);
 
   const ref = crypto.randomUUID();
   const insTx = db.prepare(`INSERT INTO transactions
-    (user_id, card_id, title, category, amount, is_expense, icon_code, counterparty_id, transfer_ref)
-    VALUES (?, ?, ?, 'ផ្ទេរប្រាក់', ?, ?, 18, ?, ?)`);
+    (user_id, card_id, title, category, amount, is_expense, icon_code, counterparty_id, transfer_ref, status)
+    VALUES (?, ?, ?, 'ផ្ទេរប្រាក់', ?, ?, 18, ?, ?, 'pending')`);
   const noteSuffix = p.note ? ` · ${p.note}` : '';
   const outId = (await insTx.run(sender.id, card.id, `ផ្ទេរទៅ ${recipient.name}${noteSuffix}`.slice(0, 100),
     p.amount, 1, recipient.id, ref)).lastInsertRowid;
-  await insTx.run(recipient.id, recipientCard.id, `ទទួលពី ${sender.name}${noteSuffix}`.slice(0, 100),
-    p.amount, 0, sender.id, ref);
 
-  const insNotif = db.prepare('INSERT INTO notifications (user_id, title, body, icon_code, bank_code) VALUES (?, ?, ?, 18, ?)');
-  await insNotif.run(sender.id, 'ផ្ទេរប្រាក់ជោគជ័យ', `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${recipient.name}`, 'AURA');
-  const recvBody = `លោកអ្នកបានទទួលប្រាក់ចំនួន $${p.amount.toFixed(2)} ពីឈ្មោះ ${sender.name}`;
-  const recvNotifId = (await insNotif.run(recipient.id, 'បានទទួលប្រាក់',
-    recvBody, 'AURA')).lastInsertRowid;
+  const expiresAt = holdExpiry();
+  const approvalId = (await db.prepare(`INSERT INTO transfer_approvals
+    (transfer_ref, kind, sender_id, recipient_id, card_id, amount, fee, total_debit,
+     note, meta, out_tx_id, expires_at)
+    VALUES (?, 'p2p', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`).run(
+    ref, sender.id, recipient.id, card.id, p.amount, p.amount, p.note || null,
+    JSON.stringify({ recipient_name: recipient.name, recipient_masked: maskContact(recipient) }),
+    outId, expiresAt)).lastInsertRowid;
 
   const response = {
-    id: outId,
+    pending: true,
+    approval_id: approvalId,
     transfer_ref: ref,
+    status: 'pending',
+    expires_at: expiresAt.toISOString(),
     new_balance: (await db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id)).balance,
     transaction: await db.prepare('SELECT * FROM transactions WHERE id = ?').get(outId),
     recipient: { name: recipient.name, masked_account: maskContact(recipient) },
@@ -1303,7 +1344,7 @@ const executeTransfer = (p) => db.transaction(async () => {
   await db.prepare('INSERT INTO idempotency_keys (key, user_id, req_hash, response) VALUES (?, ?, ?, ?)')
     .run(p.idem, p.senderId, p.reqHash, JSON.stringify(response));
 
-  return { replay: false, response, recipientId: recipient.id, recvNotifId, recvBody };
+  return { replay: false, response };
 });
 
 app.post('/transfers', auth, handle(async (req, res) => {
@@ -1344,14 +1385,32 @@ app.post('/transfers', auth, handle(async (req, res) => {
   });
   ok(res, result.response);
 
-  if (!result.replay) {
-    await unlockAchievement(req.userId, 'first_tx');
-    sendPushNotification(result.recipientId, 'បានទទួលប្រាក់', result.recvBody, {
-      type: 'transfer_received',
-      id: result.recvNotifId,
-      bank_code: 'AURA',
-    });
-  }
+  if (!result.replay) await unlockAchievement(req.userId, 'first_tx');
+}));
+
+// 4b) ស្ថានភាពការផ្ទេរដែលរង់ចាំការអនុម័ត — App សាកសួររៀងរាល់ ៣ វិនាទី
+app.get('/transfers/:ref/status', auth, handle(async (req, res) => {
+  await expireApprovals();
+  const a = await db.prepare(`SELECT id, transfer_ref, kind, status, amount, fee,
+      total_debit, expires_at, decided_at, response, created_at, sender_id
+    FROM transfer_approvals WHERE transfer_ref = ?`).get(String(req.params.ref || ''));
+  if (!a || a.sender_id !== req.userId)
+    throw new ApiError('រកមិនឃើញការផ្ទេរ', 404, 'NOT_FOUND');
+
+  ok(res, {
+    approval_id: a.id,
+    transfer_ref: a.transfer_ref,
+    kind: a.kind,
+    status: a.status,
+    amount: a.amount,
+    fee: a.fee,
+    total_debit: a.total_debit,
+    expires_at: a.expires_at,
+    decided_at: a.decided_at,
+    remaining_seconds: Math.max(0,
+      Math.round((new Date(a.expires_at).getTime() - Date.now()) / 1000)),
+    result: a.response ? JSON.parse(a.response) : null,
+  });
 }));
 
 // 5) បញ្ជីធនាគារ/MFI ដែលគាំទ្រ (App ប្រើដើម្បីបង្ហាញ fee និងកំណត់ចំនួន)
@@ -1393,8 +1452,8 @@ const executeExternalTransfer = (p) => db.transaction(async () => {
   const ref = crypto.randomUUID();
   const label = `${p.recipientName} (${bankRail.name})`;
   const insTx = db.prepare(`INSERT INTO transactions
-    (user_id, card_id, title, category, amount, is_expense, icon_code, transfer_ref)
-    VALUES (?, ?, ?, 'ផ្ទេរប្រាក់', ?, 1, 18, ?)`);
+    (user_id, card_id, title, category, amount, is_expense, icon_code, transfer_ref, status)
+    VALUES (?, ?, ?, 'ផ្ទេរប្រាក់', ?, 1, 18, ?, 'pending')`);
   const noteSuffix = p.note ? ` · ${p.note}` : '';
   // amount កត់ត្រាតែចំនួនផ្ទេរ ដូច P2P / spend ភាគីទទួល
   const outId = (await insTx.run(p.senderId, card.id,
@@ -1403,18 +1462,29 @@ const executeExternalTransfer = (p) => db.transaction(async () => {
   const insExt = db.prepare(`INSERT INTO external_transfers
     (user_id, card_id, bank_code, recipient_name, recipient_account, currency,
      amount, fee, transfer_ref, status, note)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'settled', ?)`);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`);
   const extId = (await insExt.run(p.senderId, card.id, bankRail.code, p.recipientName,
     p.recipientAccount, bankRail.currency, p.amount, fee, ref, p.note || null)).lastInsertRowid;
 
-  const insNotif = db.prepare('INSERT INTO notifications (user_id, title, body, icon_code, bank_code) VALUES (?, ?, ?, 18, ?)');
-  const notifId = (await insNotif.run(p.senderId, 'ផ្ទេរជោគជ័យ',
-    `ផ្ទេរ $${p.amount.toFixed(2)} ទៅ ${label}`, bankRail.code)).lastInsertRowid;
+  const expiresAt = holdExpiry();
+  const approvalId = (await db.prepare(`INSERT INTO transfer_approvals
+    (transfer_ref, kind, sender_id, card_id, amount, fee, total_debit, note, meta,
+     out_tx_id, expires_at)
+    VALUES (?, 'external', ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    ref, p.senderId, card.id, p.amount, fee, total, p.note || null,
+    JSON.stringify({
+      bank_code: bankRail.code, bank_name: bankRail.name,
+      recipient_name: p.recipientName, recipient_account: p.recipientAccount,
+      currency: bankRail.currency, external_transfer_id: extId,
+    }), outId, expiresAt)).lastInsertRowid;
 
   const response = {
-    id: outId,
-    external_transfer_id: extId,
+    pending: true,
+    approval_id: approvalId,
     transfer_ref: ref,
+    status: 'pending',
+    expires_at: expiresAt.toISOString(),
+    external_transfer_id: extId,
     bank: { code: bankRail.code, name: bankRail.name },
     fee,
     total_debit: total,
@@ -1425,7 +1495,7 @@ const executeExternalTransfer = (p) => db.transaction(async () => {
   await db.prepare('INSERT INTO idempotency_keys (key, user_id, req_hash, response) VALUES (?, ?, ?, ?)')
     .run(p.idem, p.senderId, p.reqHash, JSON.stringify(response));
 
-  return { replay: false, response, notifId };
+  return { replay: false, response };
 });
 
 app.post('/transfers/external', auth, handle(async (req, res) => {
@@ -1472,15 +1542,7 @@ app.post('/transfers/external', auth, handle(async (req, res) => {
   });
   ok(res, result.response);
 
-  if (!result.replay) {
-    await unlockAchievement(req.userId, 'first_tx');
-    // FCM ទៅឧបករណ៍របស់អ្នកផ្ញើ ដើម្បីឲ្យ list ព័ត៌មានលម្អិតក្នុង App ទាន់ពេល
-    sendPushNotification(req.userId, 'Aura Bank', 'អ្នកមានការជូនដំណឹងថ្មី', {
-      type: 'transfer_sent',
-      id: result.notifId,
-      bank_code: bankCode,
-    });
-  }
+  if (!result.replay) await unlockAchievement(req.userId, 'first_tx');
 }));
 
 // 7) ប្រវត្តិការផ្ទេរចេញក្រៅរបស់អ្នកប្រើ
@@ -1732,9 +1794,9 @@ app.post('/qr/external/confirm', auth, handle(async (req, res) => {
 
   if (!result.replay) {
     await unlockAchievement(req.userId, 'first_tx');
-    sendPushNotification(req.userId, 'Aura Bank', 'អ្នកមានការជូនដំណឹងថ្មី', {
-      type: 'transfer_sent',
-      id: result.notifId,
+    sendPushNotification(req.userId, 'Aura Bank', 'ការផ្ទេរកំពុងរង់ចាំការអនុម័ត', {
+      type: 'transfer_pending',
+      id: result.response.approval_id,
       bank_code: r.bank_code,
     });
   }
