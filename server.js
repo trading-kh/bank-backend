@@ -173,6 +173,23 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    CREATE TABLE IF NOT EXISTS qr_otp_requests (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bank_code TEXT NOT NULL,
+      account TEXT NOT NULL,
+      name TEXT NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      card_id INTEGER NOT NULL,
+      note TEXT,
+      raw_qr TEXT,
+      otp_hash TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      used INTEGER NOT NULL DEFAULT 0,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS loans (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1411,6 +1428,235 @@ app.get('/transfers/external', auth, async (req, res) => {
     JOIN banks b ON b.code = e.bank_code
     WHERE e.user_id = ? ORDER BY e.created_at DESC LIMIT 100`).all(req.userId));
 });
+
+// ============================================================
+// QR ខាងក្រៅ (មិនមែន Aura Bank) — ត្រូវការ OTP មុនផ្ទេរប្រាក់
+// ============================================================
+const OTP_TTL_SECONDS = 300;
+const OTP_MAX_ATTEMPTS = 5;
+
+// EMVCo / KHQR: TLV 2 ខ្ទង់ tag + 2 ខ្ទង់ length
+function parseEmvTlv(s) {
+  const out = [];
+  let i = 0;
+  while (i + 4 <= s.length) {
+    const tag = s.slice(i, i + 2);
+    const len = parseInt(s.slice(i + 2, i + 4), 10);
+    if (!/^\d{2}$/.test(tag) || !Number.isInteger(len) || len < 0) break;
+    if (i + 4 + len > s.length) break;
+    out.push({ tag, value: s.slice(i + 4, i + 4 + len) });
+    i += 4 + len;
+  }
+  return out;
+}
+
+const QR_BANK_SUFFIX = {
+  aba: 'ABA', abaa: 'ABA', acleda: 'ACLEDA', aclb: 'ACLEDA',
+  canadia: 'CANADIA', cana: 'CANADIA', wing: 'WING', wingb: 'WING',
+  juntuor: 'JUNTUOR', lyf: 'LYF',
+};
+
+// បកស្រាយ QR ខាងក្រៅ → { account, name, bankCode, amount }
+function parseExternalQr(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  if (/^aurabank:\/\//i.test(text)) return { aura: true };
+  if (text.length > 1024) return null;
+
+  let account = '';
+  let name = '';
+  let bankCode = '';
+  let amount = null;
+
+  if (text.startsWith('000201')) {
+    const top = parseEmvTlv(text);
+    const get = (t) => top.find((x) => x.tag === t)?.value || '';
+    for (const t of top) {
+      const n = parseInt(t.tag, 10);
+      if (n >= 26 && n <= 51) {
+        const sub = parseEmvTlv(t.value);
+        const acc = (sub.find((x) => x.tag === '01') || sub.find((x) => x.tag === '02'))?.value;
+        if (acc) { account = acc; break; }
+      }
+    }
+    name = get('59') || get('60') || '';
+    const amt = parseFloat(get('54'));
+    if (Number.isFinite(amt) && amt > 0) amount = Math.round(amt * 100) / 100;
+  } else if (text.startsWith('{')) {
+    try {
+      const j = JSON.parse(text);
+      account = String(j.account || j.acc || j.number || j.phone || '');
+      name = String(j.name || j.merchant || j.merchant_name || '');
+      bankCode = String(j.bank || j.bank_code || j.bankCode || '');
+      const amt = Number(j.amount);
+      if (Number.isFinite(amt) && amt > 0) amount = Math.round(amt * 100) / 100;
+    } catch { /* មិនមែន JSON */ }
+  } else if (/^https?:\/\//i.test(text)) {
+    try {
+      const u = new URL(text);
+      account = u.searchParams.get('account') || u.searchParams.get('acc')
+        || u.searchParams.get('phone') || '';
+      name = u.searchParams.get('name') || u.searchParams.get('merchant') || '';
+      bankCode = u.searchParams.get('bank') || u.searchParams.get('bank_code') || '';
+      const amt = Number(u.searchParams.get('amount'));
+      if (Number.isFinite(amt) && amt > 0) amount = Math.round(amt * 100) / 100;
+    } catch { /* URL ខូច */ }
+  }
+
+  if (!account) {
+    const bare = text.replace(/[\s-]/g, '');
+    if (/^\d{6,20}$/.test(bare)) account = bare;
+  }
+  if (!account) return null;
+  if (account.length > 64) account = account.slice(0, 64);
+
+  bankCode = bankCode.trim().toUpperCase();
+  if (!bankCode) {
+    const suffix = (account.split('@')[1] || '').toLowerCase();
+    bankCode = QR_BANK_SUFFIX[suffix] || 'OTHER';
+  }
+  return { account, name: name.slice(0, 60), bankCode, amount };
+}
+
+// 1) ពិនិត្យ QR ខាងក្រៅ — App ហៅនៅពេល token Aura មិនត្រូវ
+app.post('/qr/external/inspect', auth, handle(async (req, res) => {
+  rateLimit(`qr:ext:inspect:${req.userId}`, 20, 60 * 1000);
+  const parsed = parseExternalQr(req.body.qr);
+  if (parsed?.aura) throw new ApiError('QR នេះជារបស់ Aura Bank', 400, 'AURA_QR');
+  ok(res, parsed
+    ? {
+        recognized: true,
+        account: parsed.account,
+        name: parsed.name,
+        bank_code: parsed.bankCode,
+        amount: parsed.amount,
+      }
+    : { recognized: false, account: '', name: '', bank_code: 'OTHER', amount: null });
+}));
+
+// 2) ចាប់ផ្ដើមផ្ទេរ QR ខាងក្រៅ → បង្កើត OTP ៦ ខ្ទង់ (អាយុ ៥ នាទី)
+//    OTP ផ្ញើតាម Notification + FCM — មិនដែលត្រឡប់ទៅ Client ទេ
+app.post('/qr/external/start', auth, handle(async (req, res) => {
+  rateLimit(`qr:ext:start:${req.userId}`, 6, 60 * 1000);
+
+  const bankCode = String(req.body.bank_code || '').trim().toUpperCase();
+  const account = String(req.body.account || '').trim().slice(0, 64);
+  const recipientName = (String(req.body.name || '').trim() || 'អ្នកទទួល').slice(0, 60);
+  const cardId = parseInt(req.body.card_id, 10);
+  const amount = toMoney(req.body.amount);
+  const note = String(req.body.note || '').trim().slice(0, 60);
+  const rawQr = String(req.body.raw_qr || '').slice(0, 1024);
+
+  if (!/^[A-Z0-9_]{2,12}$/.test(bankCode))
+    throw new ApiError('សូមជ្រើសរើសធនាគារ', 400, 'BAD_BANK');
+  const rail = await db.prepare('SELECT * FROM banks WHERE code = ? AND active = 1').get(bankCode);
+  if (!rail) throw new ApiError('ធនាគារនេះមិនត្រូវបានគាំទ្រ', 400, 'BANK_NOT_SUPPORTED');
+  if (!/^[A-Za-z0-9._@+\-]{3,64}$/.test(account))
+    throw new ApiError('លេខគណនីមិនត្រឹមត្រូវ', 400, 'BAD_ACCOUNT');
+  if (!Number.isInteger(cardId))
+    throw new ApiError('Invalid input', 400, 'BAD_REQUEST');
+  if (!(amount >= Math.max(0.01, rail.min_amount)) || amount > Math.min(MAX_TX, rail.max_amount))
+    throw new ApiError('ចំនួនទឹកប្រាក់មិនត្រឹមត្រូវ', 400, 'BAD_AMOUNT');
+
+  const card = await db.prepare('SELECT id, frozen FROM cards WHERE id = ? AND user_id = ?')
+    .get(cardId, req.userId);
+  if (!card) throw new ApiError('Card not found', 404, 'CARD_NOT_FOUND');
+  if (card.frozen) throw new ApiError('កាតត្រូវបានបង្កក', 400, 'CARD_FROZEN');
+
+  // OTP ចាស់ដែលមិនទាន់ប្រើ → លុបសិទ្ធិ (មានតែ OTP ចុងក្រោយមួយប៉ុណ្ណោះ)
+  await db.prepare('UPDATE qr_otp_requests SET used = 1 WHERE user_id = ? AND used = 0')
+    .run(req.userId);
+
+  const otp = String(crypto.randomInt(100000, 1000000));
+  const otpHash = await bcrypt.hash(otp, SALT);
+
+  const info = await db.prepare(`INSERT INTO qr_otp_requests
+    (user_id, bank_code, account, name, amount, card_id, note, raw_qr, otp_hash, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now() + interval '${OTP_TTL_SECONDS} seconds')`)
+    .run(req.userId, bankCode, account, recipientName, amount, cardId,
+      note || null, rawQr || null, otpHash);
+
+  const body = `លេខកូដ OTP របស់អ្នក ${otp}\nផ្ទេរ $${amount.toFixed(2)} ទៅ ${recipientName} · ${rail.name} · អាយុ ៥ នាទី`;
+  const notifId = (await db.prepare(
+    'INSERT INTO notifications (user_id, title, body, icon_code) VALUES (?, ?, ?, 18)'
+  ).run(req.userId, 'Aura Bank · OTP', body)).lastInsertRowid;
+
+  const user = await db.prepare('SELECT phone FROM users WHERE id = ?').get(req.userId);
+  sendPushNotification(req.userId, 'Aura Bank · OTP', body, { type: 'otp', id: notifId });
+
+  ok(res, {
+    request_id: info.lastInsertRowid,
+    expires_in: OTP_TTL_SECONDS,
+    hint: maskContact(user || {}),
+    notification_id: notifId,
+  });
+}));
+
+// 3) ផ្ទៀងផ្ទាត់ OTP → ផ្ទេរប្រាក់ (បរិមាណ/គណនី/កាត ត្រូវបានចាក់សោក្នុងសំណើ OTP)
+app.post('/qr/external/confirm', auth, handle(async (req, res) => {
+  rateLimit(`qr:ext:confirm:${req.userId}`, 10, 60 * 1000);
+
+  const idem = req.get('Idempotency-Key');
+  if (!idem || idem.length < 8 || idem.length > 100)
+    throw new ApiError('Missing Idempotency-Key', 400, 'BAD_REQUEST');
+
+  const requestId = parseInt(req.body.request_id, 10);
+  const otp = String(req.body.otp || '').trim();
+  if (!Number.isInteger(requestId))
+    throw new ApiError('Invalid input', 400, 'BAD_REQUEST');
+  if (!/^\d{6}$/.test(otp))
+    throw new ApiError('សូមបំពេញលេខកូដ OTP ៦ ខ្ទង់', 400, 'BAD_OTP');
+
+  const r = await db.prepare('SELECT * FROM qr_otp_requests WHERE id = ? AND user_id = ?')
+    .get(requestId, req.userId);
+  if (!r)
+    throw new ApiError('សំណើ OTP មិនត្រឹមត្រូវ សូមស្នើម្តងទៀត', 400, 'OTP_NOT_FOUND');
+
+  if (r.used) {
+    // ចុចម្តងទៀតបន្ទាប់ពីជោគជ័យ → ត្រឡប់លទ្ធផលដដែល (មិនកាត់លុយពីរដង)
+    const prior = await db.prepare(
+      'SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?'
+    ).get(idem, req.userId);
+    if (prior) return ok(res, JSON.parse(prior.response));
+    throw new ApiError('OTP នេះត្រូវបានប្រើរួចហើយ', 400, 'OTP_USED');
+  }
+  if (new Date(r.expires_at) < new Date())
+    throw new ApiError('OTP ផុតកំណត់ សូមស្នើម្តងទៀត', 400, 'OTP_EXPIRED');
+  if (r.attempts >= OTP_MAX_ATTEMPTS)
+    throw new ApiError('OTP ខុសច្រើនដងពេក សូមស្នើម្តងទៀត', 429, 'OTP_LOCKED');
+
+  let valid = false;
+  try { valid = await bcrypt.compare(otp, r.otp_hash); } catch { valid = false; }
+  if (!valid) {
+    await db.prepare('UPDATE qr_otp_requests SET attempts = attempts + 1 WHERE id = ?')
+      .run(r.id);
+    const left = OTP_MAX_ATTEMPTS - (r.attempts + 1);
+    throw new ApiError(
+      left > 0 ? `OTP មិនត្រឹមត្រូវ (នៅសល់ ${left} ដង)` : 'OTP ខុសច្រើនដងពេក សូមស្នើម្តងទៀត',
+      401, 'WRONG_OTP');
+  }
+
+  await db.prepare('UPDATE qr_otp_requests SET used = 1 WHERE id = ?').run(r.id);
+
+  const reqHash = crypto.createHash('sha256')
+    .update(`${r.bank_code}|${r.account}|${r.card_id}|${r.amount}|${r.name}|${r.note || ''}|otp:${r.id}`)
+    .digest('hex');
+
+  const result = await executeExternalTransfer({
+    idem, reqHash, senderId: req.userId, bankCode: r.bank_code,
+    recipientName: r.name, recipientAccount: r.account,
+    cardId: r.card_id, amount: r.amount, note: r.note || '',
+  });
+  ok(res, result.response);
+
+  if (!result.replay) {
+    await unlockAchievement(req.userId, 'first_tx');
+    sendPushNotification(req.userId, 'Aura Bank', 'អ្នកមានការជូនដំណឹងថ្មី', {
+      type: 'transfer_sent',
+      id: result.notifId,
+    });
+  }
+}));
 
 // ============================================================
 // GOALS
