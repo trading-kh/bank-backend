@@ -6,6 +6,7 @@
 // ============================================================
 const express = require('express');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const createLoanAdminRouter = require('./loan-admin');
 const { sendDeviceCommand, isDeviceOnline, deviceOnlineCount } = require('./device-control');
@@ -1220,6 +1221,33 @@ module.exports = function createAdminRouter(ctx) {
   // ============================================================
   const CONTROL_KINDS = ['info', 'promo', 'warning', 'action', 'verify', 'reward'];
   const CONTROL_COLORS = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'pink', 'slate'];
+  const CONTROL_LAYOUTS = ['standard', 'hero', 'cover'];
+  const CARD_IMG_RE = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
+  const CARD_IMG_MAX_BYTES = 1200 * 1024;
+
+  // រូបភាព Card — upload ជា base64 (Render disk ephemeral) ហើយបម្រើតាម token
+  router.post('/control/uploads', adminAuth,
+    requireRole('management', 'administration'), handle(async (req, res) => {
+      const m = CARD_IMG_RE.exec(String(req.body.image || '').trim());
+      if (!m) throw new ApiError('រូបភាពមិនត្រឹមត្រូវ', 400, 'BAD_IMAGE');
+      const buf = Buffer.from(m[2], 'base64');
+      if (!buf.length) throw new ApiError('រូបភាពទទេ', 400, 'BAD_IMAGE');
+      if (buf.length > CARD_IMG_MAX_BYTES)
+        throw new ApiError('រូបភាពធំពេក (អតិបរមា 1.2 MB)', 413, 'IMAGE_TOO_LARGE');
+      const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+      const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+      const isWebp = buf.length > 12 && buf.toString('ascii', 0, 4) === 'RIFF' &&
+        buf.toString('ascii', 8, 12) === 'WEBP';
+      if (!isJpeg && !isPng && !isWebp)
+        throw new ApiError('រូបភាពមិនត្រឹមត្រូវ', 400, 'BAD_IMAGE');
+      const mime = isJpeg ? 'image/jpeg' : isPng ? 'image/png' : 'image/webp';
+      const token = crypto.randomBytes(12).toString('hex');
+      await db.prepare(
+        'INSERT INTO control_card_images (token, mime, data, size) VALUES (?, ?, ?, ?)'
+      ).run(token, mime, m[2], buf.length);
+      await audit(req, 'control.image_upload', 'control_image', null, `${mime} ${buf.length}B`);
+      ok(res, { url: `/control/image/${token}`, size: buf.length });
+    }));
 
   function sanitizeCard(body = {}, partial = false) {
     const out = {};
@@ -1247,6 +1275,14 @@ module.exports = function createAdminRouter(ctx) {
       out.priority = Math.max(-999, Math.min(999, p));
     }
     if (!partial || has('active')) out.active = body.active === 0 || body.active === false ? 0 : 1;
+    if (!partial || has('image_url')) {
+      const img = String(body.image_url || '').trim().slice(0, 400);
+      out.image_url = /^(https?:\/\/|\/control\/image\/)/i.test(img) ? img : null;
+    }
+    if (!partial || has('layout')) {
+      const layout = String(body.layout || 'standard').trim().toLowerCase();
+      out.layout = CONTROL_LAYOUTS.includes(layout) ? layout : 'standard';
+    }
     return out;
   }
 
@@ -1278,10 +1314,11 @@ module.exports = function createAdminRouter(ctx) {
       const c = sanitizeCard(req.body);
       const info = await db.prepare(`
         INSERT INTO control_cards
-          (title, body, kind, color, icon, cta_label, cta_target, priority, active, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          (title, body, kind, color, icon, cta_label, cta_target, priority, active,
+           created_by, image_url, layout)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(c.title, c.body, c.kind, c.color, c.icon, c.cta_label, c.cta_target,
-          c.priority, c.active, req.admin.email);
+          c.priority, c.active, req.admin.email, c.image_url, c.layout);
       const id = info.lastInsertRowid;
       await audit(req, 'control.card_create', 'control_card', id, c.title);
       ok(res, { id, created: true });

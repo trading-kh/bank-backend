@@ -2512,6 +2512,11 @@ const CONTROL_COLOR_HEX = {
   blue: '#3b9ad9', green: '#22c55e', amber: '#f59e0b', red: '#ef4444',
   violet: '#8b5cf6', teal: '#14b8a6', pink: '#ec4899', slate: '#64748b',
 };
+const CONTROL_LAYOUT_MAP = {
+  standard: 'ស្តង់ដារ (គ្មានរូបភាព)',
+  hero: 'រូបភាពខាងលើ (Hero)',
+  cover: 'រូបភាពពេញផ្ទាំង (Cover)',
+};
 const CONTROL_TARGETS = {
   'feature:home': 'ទំព័រដើម', 'feature:transfer': 'ផ្ទេរប្រាក់',
   'feature:analytics': 'វិភាគ', 'feature:tracking': 'តាមដានកម្ចី',
@@ -2555,6 +2560,7 @@ function controlCardListHtml() {
         <div class="ctl-card-meta">
           <span class="pill">${kIcon} ${kLabel}</span>
           ${target ? `<span class="pill">➜ ${esc(target)}</span>` : ''}
+          ${c.image_url ? `<span class="pill">🖼 ${esc(c.layout || 'hero')}</span>` : ''}
           <span class="pill ${c.active ? 'ok' : 'bad'}">${c.active ? 'សកម្ម' : 'បិទ'}</span>
           ${c.priority ? `<span class="pill">★ ${c.priority}</span>` : ''}
         </div>
@@ -2848,6 +2854,41 @@ async function openControlUser(userId) {
   });
 }
 
+// បង្រួមរូបភាពក្នុង browser មុនផ្ញើ — canvas → JPEG 0.86 (ទំហំតូច ផ្ទុកលឿនក្នុង app)
+function ctlResizeImage(file, maxDim = 1600, quality = 0.86) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('អានរូបភាពមិនបាន'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('រូបភាពមិនត្រឹមត្រូវ'));
+      img.onload = () => {
+        const ratio = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(img.width * ratio));
+        cv.height = Math.max(1, Math.round(img.height * ratio));
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#0b1626';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(img, 0, 0, cv.width, cv.height);
+        resolve(cv.toDataURL('image/jpeg', quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function ctlUploadImage(file) {
+  if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) {
+    throw new Error('សូមជ្រើសរូបភាព JPG / PNG / WEBP');
+  }
+  if (file.size > 12 * 1024 * 1024) throw new Error('រូបភាពធំពេក (អតិបរមា 12 MB)');
+  const dataUrl = await ctlResizeImage(file);
+  const res = await api('/control/uploads', { method: 'POST', body: { image: dataUrl } });
+  return res.url;
+}
+
 function openControlEditor(card, opts = {}) {
   const editing = !!card;
   const prefill = opts.prefill || '';
@@ -2861,6 +2902,8 @@ function openControlEditor(card, opts = {}) {
   const fIcon = card?.icon ?? fnIcon;
   const fCtaLabel = card?.cta_label ?? fnLabel;
   const fTarget = card?.cta_target ?? prefill;
+  const fImage = card?.image_url || '';
+  const fLayout = card?.layout || (fImage ? 'hero' : 'standard');
   const isUrl = /^https?:\/\//i.test(fTarget || '');
   const kindOptions = Object.entries(CONTROL_KIND_MAP).map(([k, [icon, label]]) =>
     `<option value="${k}" ${fKind === k ? 'selected' : ''}>${icon} ${label}</option>`).join('');
@@ -2868,6 +2911,8 @@ function openControlEditor(card, opts = {}) {
     `<option value="${c}" ${fColor === c ? 'selected' : ''}>${c}</option>`).join('');
   const targetOptions = Object.entries(CONTROL_TARGETS).map(([k, label]) =>
     `<option value="${k}" ${fTarget === k ? 'selected' : ''}>${label}</option>`).join('');
+  const layoutOptions = Object.entries(CONTROL_LAYOUT_MAP).map(([k, label]) =>
+    `<option value="${k}" ${fLayout === k ? 'selected' : ''}>${label}</option>`).join('');
 
   openModal({
     title: editing ? 'កែ Control Card' : 'បង្កើត Control Card ថ្មី',
@@ -2900,6 +2945,31 @@ function openControlEditor(card, opts = {}) {
           <label id="ctlFUrlWrap" class="${isUrl ? '' : 'hidden'}">URL (https://…)
             <input id="ctlFUrl" value="${esc(isUrl ? fTarget : '')}" placeholder="https://">
           </label>
+          <div class="ctl-img-block">
+            <div class="ctl-img-head">
+              <b>🖼 រូបភាព Card</b>
+              <button type="button" class="btn ghost sm${fImage ? '' : ' hidden'}" id="ctlFImgClear">លុបរូប</button>
+            </div>
+            <div class="ctl-img-drop" id="ctlFImgDrop">
+              <img id="ctlFImgPreview" alt="" src="${esc(fImage)}" class="${fImage ? '' : 'hidden'}">
+              <div class="ctl-img-empty${fImage ? ' hidden' : ''}" id="ctlFImgEmpty">
+                <span>⬆️</span>
+                <b>ចុច ឬអូសរូបភាពមកទីនេះ</b>
+                <small>JPG · PNG · WEBP — ប្រព័ន្ធបង្រួមទំហំឱ្យតូចស្វ័យប្រវត្តិ</small>
+              </div>
+              <div class="ctl-img-loading hidden" id="ctlFImgLoading">
+                <span class="ctl-spin"></span> កំពុងផ្ទុកឡើង…
+              </div>
+              <input type="file" id="ctlFImgFile" accept="image/jpeg,image/png,image/webp" hidden>
+            </div>
+            <input type="hidden" id="ctlFImage" value="${esc(fImage)}">
+            <label>រចនាបទ Card
+              <select id="ctlFLayout">${layoutOptions}</select>
+            </label>
+            <div class="muted" style="font-size:10.5px">
+              Hero = រូបភាពខាងលើ អត្ថបទខាងក្រោម · Cover = រូបពេញផ្ទាំង អត្ថបទលើរូប
+            </div>
+          </div>
           <label class="ctl-check-row"><input type="checkbox" id="ctlFActive" ${card?.active === 0 ? '' : 'checked'}> សកម្ម (បង្ហាញក្នុង app)</label>
           ${editing ? '<div class="ctl-danger-row"><button class="btn danger sm" id="ctlFDelete" type="button">🗑 លុប Card</button></div>' : ''}
         </div>
@@ -2930,6 +3000,8 @@ function openControlEditor(card, opts = {}) {
         cta_target: ctaTarget,
         priority: Number($('#ctlFPriority').value) || 0,
         active: $('#ctlFActive').checked ? 1 : 0,
+        image_url: $('#ctlFImage').value.trim(),
+        layout: $('#ctlFLayout').value,
       };
       if (!body.title) throw new Error('សូមបញ្ចូលចំណងជើង');
       let savedId = card?.id;
@@ -2960,13 +3032,40 @@ function openControlEditor(card, opts = {}) {
     const txt = $('#ctlFBody').value.trim() || 'អត្ថបទសាររបស់អ្នកនឹងបង្ហាញនៅទីនេះ…';
     const icon = $('#ctlFIcon').value.trim() || '✨';
     const cta = $('#ctlFCtaLabel').value.trim() || ($('#ctlFTarget').value ? 'មើលបន្ថែម' : '');
-    el.innerHTML = `<div class="ctl-preview-band" style="${ctlStyle(color)}">
+    const imgUrl = $('#ctlFImage')?.value.trim() || '';
+    const layout = $('#ctlFLayout')?.value || 'standard';
+    const style = ctlStyle(color);
+
+    if (imgUrl && layout === 'cover') {
+      el.innerHTML = `<div class="ctl-preview-cover" style="${style}">
+        <img src="${esc(imgUrl)}" alt="">
+        <span class="ctl-preview-cover-shade"></span>
+        <div class="ctl-preview-cover-body">
+          <div class="ctl-preview-icon">${esc(icon)}</div>
+          <b>${esc(title)}</b><p>${esc(txt)}</p>
+          ${cta ? `<span class="ctl-preview-cta">${esc(cta)} →</span>` : ''}
+        </div>
+      </div>`;
+      return;
+    }
+    if (imgUrl && layout === 'hero') {
+      el.innerHTML = `<div class="ctl-preview-hero" style="${style}">
+        <div class="ctl-preview-hero-img"><img src="${esc(imgUrl)}" alt=""></div>
+        <div class="ctl-preview-hero-body">
+          <div class="ctl-preview-icon">${esc(icon)}</div>
+          <div><b>${esc(title)}</b><p>${esc(txt)}</p>
+            ${cta ? `<span class="ctl-preview-cta">${esc(cta)} →</span>` : ''}</div>
+        </div>
+      </div>`;
+      return;
+    }
+    el.innerHTML = `<div class="ctl-preview-band" style="${style}">
       <div class="ctl-preview-icon">${esc(icon)}</div>
       <div><b>${esc(title)}</b><p>${esc(txt)}</p>
         ${cta ? `<span class="ctl-preview-cta">${esc(cta)} →</span>` : ''}</div>
     </div>`;
   };
-  ['ctlFTitle', 'ctlFBody', 'ctlFColor', 'ctlFIcon', 'ctlFCtaLabel', 'ctlFTarget', 'ctlFUrl']
+  ['ctlFTitle', 'ctlFBody', 'ctlFColor', 'ctlFIcon', 'ctlFCtaLabel', 'ctlFTarget', 'ctlFUrl', 'ctlFLayout']
     .forEach((id) => {
       const el = $('#' + id);
       if (!el) return;
@@ -2978,6 +3077,50 @@ function openControlEditor(card, opts = {}) {
     preview();
   });
   preview();
+
+  // ផ្ទុករូបភាព — ចុច ឬអូសទម្លាក់ → resize → POST /control/uploads
+  const imgInput = $('#ctlFImgFile');
+  const imgDrop = $('#ctlFImgDrop');
+  const setImg = (url) => {
+    $('#ctlFImage').value = url || '';
+    const img = $('#ctlFImgPreview');
+    if (img) { img.src = url || ''; img.classList.toggle('hidden', !url); }
+    $('#ctlFImgEmpty')?.classList.toggle('hidden', !!url);
+    $('#ctlFImgClear')?.classList.toggle('hidden', !url);
+    if (url && $('#ctlFLayout').value === 'standard') $('#ctlFLayout').value = 'hero';
+    preview();
+  };
+  const pickImage = async (file) => {
+    if (!file) return;
+    const loading = $('#ctlFImgLoading');
+    loading?.classList.remove('hidden');
+    try {
+      const url = await ctlUploadImage(file);
+      setImg(url);
+      toast('បានផ្ទុករូបភាពឡើង');
+    } catch (e) {
+      toast(e.message, 'err');
+    } finally {
+      loading?.classList.add('hidden');
+      if (imgInput) imgInput.value = '';
+    }
+  };
+  imgDrop?.addEventListener('click', () => imgInput?.click());
+  imgDrop?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    imgDrop.classList.add('drop-hot');
+  });
+  imgDrop?.addEventListener('dragleave', () => imgDrop.classList.remove('drop-hot'));
+  imgDrop?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    imgDrop.classList.remove('drop-hot');
+    pickImage(e.dataTransfer.files?.[0]);
+  });
+  imgInput?.addEventListener('change', () => pickImage(imgInput.files?.[0]));
+  $('#ctlFImgClear')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setImg('');
+  });
 
   const del = $('#ctlFDelete');
   if (del) del.onclick = () => {

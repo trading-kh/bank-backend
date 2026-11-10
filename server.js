@@ -599,6 +599,19 @@ async function initDb() {
       ON control_deliveries (user_id, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_control_del_card
       ON control_deliveries (card_id, created_at DESC);
+
+    -- រចនា Card ដោយខ្លួនឯង៖ រូបភាព (upload → /control/image/:token) + layout
+    ALTER TABLE control_cards ADD COLUMN IF NOT EXISTS image_url TEXT;
+    ALTER TABLE control_cards ADD COLUMN IF NOT EXISTS layout TEXT NOT NULL DEFAULT 'standard';
+
+    CREATE TABLE IF NOT EXISTS control_card_images (
+      id SERIAL PRIMARY KEY,
+      token TEXT UNIQUE NOT NULL,
+      mime TEXT NOT NULL,
+      data TEXT NOT NULL,
+      size INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   // កម្មវិធីកម្ចីវីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល
@@ -1982,6 +1995,22 @@ app.post('/notifications/read-all', auth, async (req, res) => {
   ok(res, { read: true });
 });
 
+app.post('/notifications/:id/read', auth, handle(async (req, res) => {
+  const id = Number(req.params.id);
+  await db.prepare('UPDATE notifications SET "read" = 1 WHERE id = ? AND user_id = ?')
+    .run(id, req.userId);
+  ok(res, { read: true });
+}));
+
+// អូសទៅឆ្វេង → លុបសារ (របស់ខ្លួនឯងតែប៉ុណ្ណោះ)
+app.delete('/notifications/:id', auth, handle(async (req, res) => {
+  const id = Number(req.params.id);
+  const r = await db.prepare('DELETE FROM notifications WHERE id = ? AND user_id = ?')
+    .run(id, req.userId);
+  if (!r.changes) throw new ApiError('រកមិនឃើញសារ', 404, 'NOT_FOUND');
+  ok(res, { deleted: true });
+}));
+
 // ============================================================
 // CONTROL U — ប្រអប់សារ/card ដែល Admin ផ្ញើមកអ្នកប្រើដោយផ្ទាល់
 // ============================================================
@@ -1990,13 +2019,24 @@ app.get('/control/inbox', auth, handle(async (req, res) => {
     SELECT d.id AS delivery_id, d.status AS delivery_status,
            d.created_at AS delivered_at, d.seen_at,
            c.id, c.title, c.body, c.kind, c.color, c.icon,
-           c.cta_label, c.cta_target, c.priority
+           c.cta_label, c.cta_target, c.priority, c.image_url, c.layout
     FROM control_deliveries d
     JOIN control_cards c ON c.id = d.card_id
     WHERE d.user_id = ? AND d.status IN ('pending', 'seen') AND c.active = 1
     ORDER BY c.priority DESC, d.created_at ASC, d.id ASC
     LIMIT 20`).all(req.userId);
   ok(res, rows);
+}));
+
+// រូបភាព Control Card — public តាម token មិនអាចទាយបាន (Image.network បង្ហាញបានគ្រប់ platform)
+app.get('/control/image/:token', handle(async (req, res) => {
+  const row = await db.prepare(
+    'SELECT mime, data FROM control_card_images WHERE token = ?'
+  ).get(String(req.params.token));
+  if (!row) throw new ApiError('រកមិនឃើញរូបភាព', 404, 'NOT_FOUND');
+  res.set('Content-Type', row.mime);
+  res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  res.end(Buffer.from(row.data, 'base64'));
 }));
 
 app.post('/control/deliveries/:id/seen', auth, handle(async (req, res) => {
