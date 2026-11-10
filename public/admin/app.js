@@ -266,6 +266,7 @@ const TITLES = {
   dashboard: 'ផ្ទាំងដើម', users: 'អ្នកប្រើ', cards: 'កាត',
   approvals: 'រង់ចាំអនុម័ត',
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
+  identity: 'ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ',
   collections: 'ប្រមូល', reports: 'របាយការណ៍', notifications: 'សេចក្តីសារ',
   data: 'ទិន្នន័យផ្សេង', audit: 'កំណត់ត្រាក្របរបុប',
   devices: 'គ្រប់គ្រងទូរស័ព្ទ', usage: 'ការប្រើប្រាស់',
@@ -2268,10 +2269,214 @@ async function renderApprovals() {
   });
 }
 
+/* ============================================================
+   IDENTITY KYC — ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ (មុខ/ខ្នង/Selfie)
+   ============================================================ */
+let identityFilter = 'pending';
+let identityViewId = null;
+
+const idKycPill = (s) =>
+  `<span class="pill ${s === 'approved' ? 'ok' : s === 'rejected' ? 'bad' : 'warn'}">${
+    s === 'approved' ? 'បានអនុម័ត' : s === 'rejected' ? 'បានបដិសេធ' : 'រង់ចាំពិនិត្យ'}</span>`;
+
+function openDocLightbox(src, title) {
+  if (!src) return;
+  let box = document.getElementById('kycLightbox');
+  if (box) box.remove();
+  box = document.createElement('div');
+  box.id = 'kycLightbox';
+  box.className = 'kyc-lightbox';
+  box.innerHTML = `
+    <div class="kyc-lightbox-bar">
+      <span>${esc(title)}</span>
+      <button class="icon-btn" id="kycLightboxClose">✕</button>
+    </div>
+    <img src="${src}" alt="${esc(title)}">`;
+  document.body.appendChild(box);
+  box.onclick = (e) => { if (e.target === box || e.target.id === 'kycLightboxClose') box.remove(); };
+}
+
+async function renderIdentityKyc() {
+  if (identityViewId != null) return renderIdentityReview(identityViewId);
+
+  const d = await api(`/kyc-identity?status=${identityFilter}&q=${encodeURIComponent(search)}&limit=${LIMIT}&offset=${offset}`);
+  const rows = d.rows || [];
+  const c = d.counts || {};
+  $('#content').innerHTML = `
+    <div class="grid k4">
+      <div class="card kpi ${identityFilter === 'pending' ? 'accent' : ''}">
+        <div class="kpi-label">រង់ចាំពិនិត្យ</div>
+        <div class="kpi-value">${c.pending || 0}</div>
+        <div class="kpi-sub">ត្រូវការការសម្រេចពី Admin</div>
+      </div>
+      <div class="card kpi ok">
+        <div class="kpi-label">បានអនុម័ត</div>
+        <div class="kpi-value">${c.approved || 0}</div>
+        <div class="kpi-sub">អត្តសញ្ញាណផ្ទៀងផ្ទាត់រួច</div>
+      </div>
+      <div class="card kpi warn">
+        <div class="kpi-label">បានបដិសេធ</div>
+        <div class="kpi-value">${c.rejected || 0}</div>
+        <div class="kpi-sub">ត្រូវការដាក់ឯកសារឡើងវិញ</div>
+      </div>
+      <div class="card kpi">
+        <div class="kpi-label">សរុប</div>
+        <div class="kpi-value">${(c.pending || 0) + (c.approved || 0) + (c.rejected || 0)}</div>
+        <div class="kpi-sub">សំណើផ្ទៀងផ្ទាត់ទាំងអស់</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="tabs">
+        ${[['pending', 'រង់ចាំ'], ['approved', 'បានអនុម័ត'], ['rejected', 'បានបដិសេធ'], ['all', 'ទាំងអស់']]
+      .map(([k, l]) => `<button class="tab ${identityFilter === k ? 'active' : ''}" data-idstatus="${k}">${esc(l)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>សំណើផ្ទៀងផ្ទាត់អត្តសញ្ញាណ (${d.total || 0})</h3>
+        <span class="muted">ឯកសារ មុខ + ខ្នង + Selfie</span></div>
+      ${tableHtml([
+    {
+      label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<div>
+        <div>${esc(r.user_name)}</div><div class="muted" style="font-size:11.5px">${esc(r.user_email)}</div></div></div>`
+    },
+    { label: 'លេខយោង', render: (r) => `<span class="muted mono">${esc(r.ref)}</span>` },
+    {
+      label: 'ឯកសារ', render: (r) => `<span class="muted" style="font-size:11.5px">មុខ ${Math.round((r.front_len || 0) / 1024)} KB<br>
+        ខ្នង ${Math.round((r.back_len || 0) / 1024)} KB · Selfie ${Math.round((r.selfie_len || 0) / 1024)} KB</span>`
+    },
+    { label: 'ដាក់ស្នើ', render: (r) => `<span class="muted">${dt(r.submitted_at)}</span>` },
+    { label: 'ស្ថានភាព', render: (r) => idKycPill(r.status) },
+    {
+      label: 'សកម្ម', render: (r) => `<div class="row-actions">
+        <button class="btn primary sm" data-idview="${r.id}">ពិនិត្យ</button></div>`
+    },
+  ], rows, { empty: identityFilter === 'pending' ? 'គ្មានសំណើរង់ចាំពិនិត្យ' : 'គ្មានទិន្នន័យ' })}
+      ${d.total > LIMIT ? pagerHtml(d.total, offset, LIMIT) : ''}
+    </div>`;
+
+  $$('[data-idstatus]').forEach((b) => b.onclick = () => {
+    identityFilter = b.dataset.idstatus; offset = 0; render();
+  });
+  $$('[data-idview]').forEach((b) => b.onclick = () => {
+    identityViewId = Number(b.dataset.idview); offset = 0;
+    $('#search').classList.add('hidden');
+    render();
+  });
+  if (d.total > LIMIT) bindPager(d.total);
+}
+
+async function renderIdentityReview(id) {
+  const r = await api(`/kyc-identity/${id}`);
+  const u = r.user || {};
+  const docs = [
+    { key: 'front', label: 'មុខអត្តសញ្ញាណប័ណ្ណ', icon: '🪪' },
+    { key: 'back', label: 'ខ្នងអត្តសញ្ញាណប័ណ្ណ', icon: '🔄' },
+    { key: 'selfie', label: 'រូប Selfie ជាមួយប័ណ្ណ', icon: '🤳' },
+  ];
+  const pending = r.status === 'pending';
+
+  $('#content').innerHTML = `
+    <div class="idk-review">
+      <button class="btn ghost sm" id="idkBack">‹ ត្រឡប់ទៅបញ្ជី</button>
+
+      <div class="card idk-hero">
+        <div class="idk-hero-glow"></div>
+        <div class="idk-hero-row">
+          ${avatarHtml(u.name, u.avatar_thumb)}
+          <div class="idk-hero-id">
+            <h3>${esc(u.name || '—')}</h3>
+            <div class="idk-hero-meta">✉ ${esc(u.email || '—')} · 📞 ${esc(u.phone || '—')}</div>
+            <div class="idk-hero-tags">
+              ${idKycPill(r.status)}
+              <span class="pill info">${esc(r.ref)}</span>
+            </div>
+          </div>
+          <div class="idk-hero-when">
+            <div class="k">ដាក់ស្នើ</div>
+            <div class="v">${dt(r.submitted_at)}</div>
+            ${r.decided_at ? `<div class="k" style="margin-top:8px">សម្រេច</div><div class="v">${dt(r.decided_at)}</div>` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div class="idk-docs">
+        ${docs.map((doc) => `
+          <div class="card idk-doc">
+            <div class="idk-doc-head"><span>${doc.icon} ${esc(doc.label)}</span>
+              <button class="btn ghost sm" data-doc-zoom="${doc.key}" ${r.images[doc.key] ? '' : 'disabled'}>ពង្រីក</button></div>
+            ${r.images[doc.key]
+      ? `<img class="idk-doc-img" src="${r.images[doc.key]}" alt="${esc(doc.label)}" data-doc-zoom="${doc.key}">`
+      : `<div class="idk-doc-empty">គ្មានរូបភាព</div>`}
+          </div>`).join('')}
+      </div>
+
+      <div class="card idk-actions">
+        ${pending ? `
+          <div class="idk-actions-head">
+            <div><h3>សម្រេចលើសំណើនេះ</h3>
+            <p class="muted">ពិនិត្យឯកសារទាំង ៣ ឱ្យបានច្បាស់មុនសម្រេច។</p></div>
+            <div class="idk-actions-btns">
+              <button class="btn ok" id="idkApprove">✓ អនុម័ត</button>
+              <button class="btn danger" id="idkReject">✕ បដិសេធ</button>
+            </div>
+          </div>
+          <label class="field" style="margin-top:14px"><span>មូលហេតុបដិសេធ (បញ្ចូលតែពេលបដិសេធ)</span>
+            <textarea id="idkReason" rows="3" placeholder="ឧ. រូបភាពស្រអាប់ មិនអាចអានអត្តសញ្ញាណបាន"></textarea></label>
+        ` : `
+          <div class="idk-actions-head">
+            <div><h3>សំណើត្រូវបានដោះស្រាយ</h3>
+            <p class="muted">${esc(r.reason || 'គ្មានមូលហេតុបដិសេធ')}</p></div>
+            <div class="idk-actions-btns">
+              <button class="btn danger" id="idkDelete">🗑 លុបសំណើ</button>
+            </div>
+          </div>
+        `}
+      </div>
+    </div>`;
+
+  $('#idkBack').onclick = () => { identityViewId = null; render(); };
+
+  $$('[data-doc-zoom]').forEach((el) => el.onclick = () => {
+    const key = el.dataset.docZoom;
+    const doc = docs.find((x) => x.key === key);
+    openDocLightbox(r.images[key], doc ? doc.label : key);
+  });
+
+  if (pending) {
+    $('#idkApprove').onclick = async () => {
+      const btn = $('#idkApprove');
+      btn.disabled = true;
+      try {
+        await api(`/kyc-identity/${id}/approve`, { method: 'POST' });
+        toast('បានអនុម័តអត្តសញ្ញាណ', 'ok');
+        identityViewId = null; loadBadges(); render();
+      } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+    };
+    $('#idkReject').onclick = async () => {
+      const reason = $('#idkReason').value.trim();
+      if (!reason) { toast('សូមបញ្ចូលមូលហេតុបដិសេធ', 'err'); return; }
+      const btn = $('#idkReject');
+      btn.disabled = true;
+      try {
+        await api(`/kyc-identity/${id}/reject`, { method: 'POST', body: { reason } });
+        toast('បានបដិសេធសំណើ', 'ok');
+        identityViewId = null; loadBadges(); render();
+      } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+    };
+  } else {
+    $('#idkDelete').onclick = () => confirmDelete(`លុបសំណើ ${r.ref}?`, async () => {
+      await api(`/kyc-identity/${id}`, { method: 'DELETE' });
+      toast('បានលុបសំណើ', 'ok');
+      identityViewId = null; loadBadges(); render();
+    });
+  }
+}
+
 const RENDERERS = {
   dashboard: renderDashboard, users: renderUsers, cards: renderCards,
   approvals: renderApprovals,
   transactions: renderTransactions, loans: renderLoans, kyc: renderKyc,
+  identity: renderIdentityKyc,
   collections: renderCollections, reports: renderReports,
   notifications: renderNotifications, data: renderData, audit: renderAudit,
   devices: renderDevices, usage: renderUsage,
@@ -2303,9 +2508,10 @@ function bindPager(total) {
 }
 
 async function render() {
+  if (page !== 'identity') identityViewId = null;
   $('#pageTitle').textContent = TITLES[page];
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
-  $('#search').classList.toggle('hidden', !['users', 'cards', 'loans'].includes(page));
+  $('#search').classList.toggle('hidden', !['users', 'cards', 'loans', 'identity'].includes(page));
   const action = $('#actionBtn');
   if (page === 'transactions') {
     action.hidden = false; action.textContent = '+ ប្រតិបត្តិការ';
@@ -2483,6 +2689,7 @@ async function loadBadges() {
     setBadge('badge-transactions', badges.transactions);
     setBadge('badge-loans', badges.loans);
     setBadge('badge-kyc', badges.kyc);
+    setBadge('badge-identity', badges.identity, badges.identity > 0 ? 'warning' : '');
     setBadge('badge-collections', badges.collections);
     setBadge('badge-reports', badges.reports);
     setBadge('badge-notifications', badges.notifications);

@@ -22,6 +22,8 @@ const { getMessaging } = require('firebase-admin/messaging');
 const app = express();
 // Avatar ជា base64 data URL (រហូត ~200 KB) → parse មុន global 10 KB limit
 app.use('/me/avatar', express.json({ limit: '300kb' }));
+// KYC: ឯកសារ ៣ សន្លឹកជា base64 data URL → parser ធំជាងគេ ត្រូវ mount មុនគេ
+app.use('/kyc/submissions', express.json({ limit: '14mb' }));
 app.use(express.json({ limit: '10kb' }));
 // Express 5 មិនបំពេញ req.body = {} ទេ ពេលសំណើគ្មាន body → routes ដែល destructure
 // req.body នឹង throw TypeError → 500 "Server error". Normalize ត្រង់នេះម្ដង។
@@ -543,6 +545,27 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_device_locs_user ON device_locations(user_id, recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_login_logs_user ON login_logs(user_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_login_logs_created ON login_logs(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS identity_kyc (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ref TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      reason TEXT,
+      front_mime TEXT,
+      front_data TEXT,
+      back_mime TEXT,
+      back_data TEXT,
+      selfie_mime TEXT,
+      selfie_data TEXT,
+      submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      decided_at TIMESTAMPTZ,
+      decided_by INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_identity_kyc_user ON identity_kyc(user_id, submitted_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_identity_kyc_status ON identity_kyc(status, submitted_at DESC);
   `);
 
   // កម្មវិធីកម្ចីវីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល
@@ -1032,6 +1055,83 @@ app.post('/me/avatar', auth, handle(async (req, res) => {
   await db.prepare('UPDATE users SET avatar = ?, avatar_thumb = ? WHERE id = ?')
     .run(raw, thumb, req.userId);
   ok(res, { updated: true });
+}));
+
+// ---------- IDENTITY KYC (ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ) ----------
+// ឯកសារត្រូវរក្សាទុកជា base64 ក្នុង Postgres ដូច avatar (Render disk ជា ephemeral)
+const KYC_IMG_RE = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
+const KYC_IMG_MAX_BYTES = 2.5 * 1024 * 1024;
+
+function parseKycImage(raw, label) {
+  const m = typeof raw === 'string' ? KYC_IMG_RE.exec(raw.trim()) : null;
+  if (!m) throw new ApiError(`រូបភាព ${label} មិនត្រឹមត្រូវ`, 400, 'BAD_KYC_IMAGE');
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length) throw new ApiError(`រូបភាព ${label} ទទេ`, 400, 'BAD_KYC_IMAGE');
+  if (buf.length > KYC_IMG_MAX_BYTES)
+    throw new ApiError(`រូបភាព ${label} ធំពេក (អតិបរមា 2.5 MB)`, 413, 'KYC_IMAGE_TOO_LARGE');
+
+  const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  const isWebp = buf.length > 12 && buf.toString('ascii', 0, 4) === 'RIFF' &&
+    buf.toString('ascii', 8, 12) === 'WEBP';
+  if (!isJpeg && !isPng && !isWebp)
+    throw new ApiError(`រូបភាព ${label} មិនត្រឹមត្រូវ`, 400, 'BAD_KYC_IMAGE');
+
+  return {
+    mime: isJpeg ? 'image/jpeg' : isPng ? 'image/png' : 'image/webp',
+    data: m[2],
+  };
+}
+
+function makeKycRef() {
+  const d = new Date();
+  const ymd = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+  return `KYC-${ymd}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+}
+
+// ដាក់ស្នើឯកសារផ្ទៀងផ្ទាត់ (មុខ + ខ្នង + Selfie)
+app.post('/kyc/submissions', auth, handle(async (req, res) => {
+  const front = parseKycImage(req.body.front, 'មុខអត្តសញ្ញាណប័ណ្ណ');
+  const back = parseKycImage(req.body.back, 'ខ្នងអត្តសញ្ញាណប័ណ្ណ');
+  const selfie = parseKycImage(req.body.selfie, 'Selfie');
+
+  // បើមានសំណើកំពុងរង់ចាំរួចហើយ → ត្រឡប់សំណើដើមវិញ (មិនបង្កើតស្ទួន)
+  const pending = await db.prepare(`
+    SELECT id, ref, status, submitted_at FROM identity_kyc
+    WHERE user_id = ? AND status = 'pending'
+    ORDER BY submitted_at DESC LIMIT 1`).get(req.userId);
+  if (pending) {
+    return ok(res, {
+      id: pending.id, ref: pending.ref, status: pending.status,
+      submitted_at: pending.submitted_at, duplicate: true,
+    });
+  }
+
+  const ref = makeKycRef();
+  const info = await db.prepare(`
+    INSERT INTO identity_kyc
+      (user_id, ref, status, front_mime, front_data, back_mime, back_data,
+       selfie_mime, selfie_data, submitted_at)
+    VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, now())`)
+    .run(req.userId, ref, front.mime, front.data, back.mime, back.data,
+      selfie.mime, selfie.data);
+
+  await notifyUser(req.userId, 'ទទួលបានឯកសារផ្ទៀងផ្ទាត់',
+    `ឯកសាររបស់អ្នក (${ref}) ត្រូវបានទទួល។ លទ្ធផលនឹងជូនដំណឹងក្នុងរយៈពេលប្រហែល ១ ម៉ោង។`,
+    { kyc_ref: ref, kyc_status: 'pending' }, 18);
+
+  const row = await db.prepare(
+    'SELECT id, ref, status, submitted_at FROM identity_kyc WHERE id = ?'
+  ).get(info.lastInsertRowid);
+  ok(res, { ...row, duplicate: false });
+}));
+
+// ស្ថានភាពផ្ទៀងផ្ទាត់ចុងក្រោយ (គ្មានរូបភាព — ស្រាលសម្រាប់ app)
+app.get('/kyc/status', auth, handle(async (req, res) => {
+  const row = await db.prepare(`
+    SELECT id, ref, status, reason, submitted_at, decided_at FROM identity_kyc
+    WHERE user_id = ? ORDER BY submitted_at DESC, id DESC LIMIT 1`).get(req.userId);
+  ok(res, row || null);
 }));
 
 // ពិនិត្យ PIN (លែងមាន bypass សម្រាប់ Google User)

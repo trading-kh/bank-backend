@@ -1078,6 +1078,125 @@ module.exports = function createAdminRouter(ctx) {
     ok(res, rows);
   }));
 
+  // ---------- IDENTITY KYC — ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ (មុខ/ខ្នង/Selfie) ----------
+  const kycDataUrl = (mime, data) =>
+    data ? `data:${mime || 'image/jpeg'};base64,${data}` : null;
+
+  router.get('/kyc-identity', adminAuth, handle(async (req, res) => {
+    const status = String(req.query.status || 'pending');
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(Math.max(int(req.query.limit, 25), 1), 100);
+    const offset = Math.max(int(req.query.offset, 0), 0);
+
+    const where = [];
+    const args = [];
+    if (['pending', 'approved', 'rejected'].includes(status)) {
+      where.push('k.status = ?');
+      args.push(status);
+    }
+    if (q) {
+      where.push('(lower(u.name) LIKE ? OR lower(u.email) LIKE ? OR lower(k.ref) LIKE ?)');
+      args.push(like(q), like(q), like(q));
+    }
+    const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const rows = await db.prepare(`
+      SELECT k.id, k.ref, k.status, k.reason, k.submitted_at, k.decided_at,
+             k.front_mime, k.back_mime, k.selfie_mime,
+             length(k.front_data) AS front_len,
+             length(k.back_data) AS back_len,
+             length(k.selfie_data) AS selfie_len,
+             u.id AS user_id, u.name AS user_name, u.email AS user_email,
+             u.phone AS user_phone, u.avatar_thumb
+      FROM identity_kyc k JOIN users u ON u.id = k.user_id
+      ${w}
+      ORDER BY k.submitted_at DESC, k.id DESC LIMIT ? OFFSET ?`)
+      .all(...args, limit, offset);
+
+    const total = (await db.prepare(`
+      SELECT COUNT(*) AS n FROM identity_kyc k JOIN users u ON u.id = k.user_id
+      ${w}`).get(...args)).n;
+
+    const counts = await db.prepare(`
+      SELECT status, COUNT(*) AS c FROM identity_kyc GROUP BY status`).all();
+    const byStatus = { pending: 0, approved: 0, rejected: 0 };
+    for (const c of counts) byStatus[c.status] = Number(c.c) || 0;
+
+    ok(res, { rows, total, limit, offset, counts: byStatus });
+  }));
+
+  router.get('/kyc-identity/:id', adminAuth, handle(async (req, res) => {
+    const id = int(req.params.id);
+    const r = await db.prepare(`
+      SELECT k.*, u.name AS user_name, u.email AS user_email,
+             u.phone AS user_phone, u.avatar_thumb
+      FROM identity_kyc k JOIN users u ON u.id = k.user_id
+      WHERE k.id = ?`).get(id);
+    if (!r) throw new ApiError('រកមិនឃើញសំណើផ្ទៀងផ្ទាត់', 404, 'NOT_FOUND');
+    ok(res, {
+      id: r.id, ref: r.ref, status: r.status, reason: r.reason,
+      submitted_at: r.submitted_at, decided_at: r.decided_at,
+      user: {
+        id: r.user_id, name: r.user_name, email: r.user_email,
+        phone: r.user_phone, avatar_thumb: r.avatar_thumb,
+      },
+      images: {
+        front: kycDataUrl(r.front_mime, r.front_data),
+        back: kycDataUrl(r.back_mime, r.back_data),
+        selfie: kycDataUrl(r.selfie_mime, r.selfie_data),
+      },
+    });
+  }));
+
+  async function decideIdentityKyc(req, res, decision) {
+    const id = int(req.params.id);
+    const r = await db.prepare(
+      'SELECT id, user_id, ref, status FROM identity_kyc WHERE id = ?').get(id);
+    if (!r) throw new ApiError('រកមិនឃើញសំណើផ្ទៀងផ្ទាត់', 404, 'NOT_FOUND');
+    if (r.status !== 'pending')
+      throw new ApiError('សំណើនេះត្រូវបានដោះស្រាយរួចហើយ', 400, 'ALREADY_DECIDED');
+
+    let reason = null;
+    if (decision === 'rejected') {
+      reason = String(req.body.reason || '').trim();
+      if (!reason) throw new ApiError('សូមបញ្ចូលមូលហេតុបដិសេធ', 400, 'REASON_REQUIRED');
+      reason = reason.slice(0, 400);
+    }
+
+    await db.prepare(`
+      UPDATE identity_kyc SET status = ?, reason = ?, decided_at = now(), decided_by = ?
+      WHERE id = ?`).run(decision, reason, req.admin.id, id);
+
+    await notifyUser(r.user_id,
+      decision === 'approved' ? 'អត្តសញ្ញាណត្រូវបានផ្ទៀងផ្ទាត់' : 'សំណើផ្ទៀងផ្ទាត់ត្រូវបានបដិសេធ',
+      decision === 'approved'
+        ? `ឯកសាររបស់អ្នក (${r.ref}) ឆ្លងកាត់ការផ្ទៀងផ្ទាត់ដោយជោគជ័យ។`
+        : `ឯកសាររបស់អ្នក (${r.ref}) មិនត្រូវបានអនុម័ត — ${reason}`,
+      { kyc_ref: r.ref, kyc_status: decision }, 18);
+
+    await bumpVersion(r.user_id);
+    await audit(req, `identity_kyc.${decision === 'approved' ? 'approve' : 'reject'}`,
+      'identity_kyc', id, `ref ${r.ref}${reason ? ` · ${reason}` : ''}`);
+    ok(res, { updated: true, status: decision });
+  }
+
+  router.post('/kyc-identity/:id/approve', adminAuth,
+    handle((req, res) => decideIdentityKyc(req, res, 'approved')));
+
+  router.post('/kyc-identity/:id/reject', adminAuth,
+    handle((req, res) => decideIdentityKyc(req, res, 'rejected')));
+
+  router.delete('/kyc-identity/:id', adminAuth,
+    requireRole('management', 'administration'), handle(async (req, res) => {
+      const id = int(req.params.id);
+      const r = await db.prepare('SELECT id, ref, user_id FROM identity_kyc WHERE id = ?').get(id);
+      if (!r) throw new ApiError('រកមិនឃើញសំណើផ្ទៀងផ្ទាត់', 404, 'NOT_FOUND');
+      await db.prepare('DELETE FROM identity_kyc WHERE id = ?').run(id);
+      await bumpVersion(r.user_id);
+      await audit(req, 'identity_kyc.delete', 'identity_kyc', id, `ref ${r.ref}`);
+      ok(res, { deleted: true });
+    }));
+
   // Sidebar notification badges — counts of pending actions per section
   router.get('/badges', adminAuth, handle(async (req, res) => {
     const today = new Date();
@@ -1090,6 +1209,7 @@ module.exports = function createAdminRouter(ctx) {
       pendingApprovals,
       pendingLoans,
       pendingKyc,
+      pendingIdentityKyc,
       overdueLoans,
       newReports,
       unreadNotifications,
@@ -1106,6 +1226,7 @@ module.exports = function createAdminRouter(ctx) {
       db.prepare(`SELECT COUNT(*) as c FROM transfer_approvals WHERE status IN ('pending', 'holding')`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status IN ('submitted', 'under_review', 'approved')`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_kyc WHERE status = 'submitted'`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM identity_kyc WHERE status = 'pending'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls JOIN loans l ON l.id = ls.loan_id WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE AND l.status = 'disbursed'`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status = 'disbursed' AND created_at >= $1`).get(today.toISOString()),
       db.prepare(`SELECT COUNT(*) as c FROM notifications WHERE "read" = 0`).get(),
@@ -1137,6 +1258,7 @@ module.exports = function createAdminRouter(ctx) {
       approvals: pendingApprovals?.c || 0,
       loans: pendingLoans?.c || 0,
       kyc: pendingKyc?.c || 0,
+      identity: pendingIdentityKyc?.c || 0,
       collections: overdueLoans?.c || 0,
       reports: newReports?.c || 0,
       notifications: unreadNotifications?.c || 0,
