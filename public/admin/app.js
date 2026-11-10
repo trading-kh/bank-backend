@@ -263,7 +263,7 @@ function drawLine(canvas, points, opts = {}) {
    PAGES
    ============================================================ */
 const TITLES = {
-  dashboard: 'ផ្ទាំងដើម', users: 'អ្នកប្រើ', cards: 'កាត',
+  dashboard: 'ផ្ទាំងដើម', control: 'Control U', users: 'អ្នកប្រើ', cards: 'កាត',
   approvals: 'រង់ចាំអនុម័ត',
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   identity: 'ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ',
@@ -2473,7 +2473,7 @@ async function renderIdentityReview(id) {
 }
 
 const RENDERERS = {
-  dashboard: renderDashboard, users: renderUsers, cards: renderCards,
+  dashboard: renderDashboard, control: renderControl, users: renderUsers, cards: renderCards,
   approvals: renderApprovals,
   transactions: renderTransactions, loans: renderLoans, kyc: renderKyc,
   identity: renderIdentityKyc,
@@ -2498,6 +2498,497 @@ function renderUsage() {
       </div>
     </div>
   `;
+}
+
+/* ============================================================
+   CONTROL U — backend → user live control workspace
+   ============================================================ */
+const CONTROL_KIND_MAP = {
+  info: ['ℹ️', 'ព័ត៌មាន'], promo: ['🎁', 'ផ្សព្វផ្សាយ'],
+  warning: ['⚠️', 'ការព្រមាន'], action: ['⚡', 'សកម្មភាព'],
+  verify: ['🛡️', 'ផ្ទៀងផ្ទាត់'], reward: ['🏆', 'រង្វាន់'],
+};
+const CONTROL_COLOR_HEX = {
+  blue: '#3b9ad9', green: '#22c55e', amber: '#f59e0b', red: '#ef4444',
+  violet: '#8b5cf6', teal: '#14b8a6', pink: '#ec4899', slate: '#64748b',
+};
+const CONTROL_TARGETS = {
+  'feature:home': 'ទំព័រដើម', 'feature:transfer': 'ផ្ទេរប្រាក់',
+  'feature:analytics': 'វិភាគ', 'feature:tracking': 'តាមដានកម្ចី',
+  'feature:kyc': 'ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ', 'feature:loan': 'កម្ចី',
+  'feature:notifications': 'សេចក្តីសារ',
+};
+const CONTROL_FN_ICONS = {
+  'feature:home': '🏠', 'feature:transfer': '💸', 'feature:analytics': '📊',
+  'feature:tracking': '🎯', 'feature:kyc': '🛡️', 'feature:loan': '💰',
+  'feature:notifications': '🔔',
+};
+const control = {
+  cards: [], users: [], stats: {}, q: '', selected: new Set(),
+  dragCard: null, dragFn: null,
+};
+
+const ctlStyle = (color) => {
+  const hex = CONTROL_COLOR_HEX[color] || CONTROL_COLOR_HEX.blue;
+  return `--c:${hex};--c-soft:${hex}2e;--c-line:${hex}80`;
+};
+const ctlOnline = (u) => !!u.last_seen_at &&
+  Date.now() - new Date(u.last_seen_at).getTime() < 5 * 60 * 1000;
+
+function controlCardListHtml() {
+  if (!control.cards.length) {
+    return `<div class="empty">មិនទាន់មាន Control Card — ចុច “+ បង្កើត Card” ដើម្បីចាប់ផ្ដើម</div>`;
+  }
+  return control.cards.map((c) => {
+    const [kIcon, kLabel] = CONTROL_KIND_MAP[c.kind] || CONTROL_KIND_MAP.info;
+    const target = c.cta_target
+      ? (CONTROL_TARGETS[c.cta_target] || (/^https?:/i.test(c.cta_target) ? 'URL ខាងក្រៅ' : c.cta_target))
+      : '';
+    return `<article class="ctl-card${c.active ? '' : ' off'}" draggable="true"
+        data-card-id="${c.id}" style="${ctlStyle(c.color)}"
+        title="អូសទៅអ្នកប្រើ · ចុចដើម្បីកែ">
+      <span class="ctl-grip">⠿</span>
+      <div class="ctl-card-icon">${esc(c.icon || kIcon)}</div>
+      <div class="ctl-card-main">
+        <b>${esc(c.title)}</b>
+        ${c.body ? `<p>${esc(c.body)}</p>` : ''}
+        <div class="ctl-card-meta">
+          <span class="pill">${kIcon} ${kLabel}</span>
+          ${target ? `<span class="pill">➜ ${esc(target)}</span>` : ''}
+          <span class="pill ${c.active ? 'ok' : 'bad'}">${c.active ? 'សកម្ម' : 'បិទ'}</span>
+          ${c.priority ? `<span class="pill">★ ${c.priority}</span>` : ''}
+        </div>
+      </div>
+      <div class="ctl-card-counts"><b>${c.active_count || 0}</b><small>active</small></div>
+    </article>`;
+  }).join('');
+}
+
+function controlUserListHtml() {
+  if (!control.users.length) return '<div class="empty">មិនមានអ្នកប្រើត្រូវនឹងការស្វែងរក</div>';
+  return control.users.map((u) => {
+    const sel = control.selected.has(u.id);
+    return `<div class="ctl-user${sel ? ' selected' : ''}" data-user-id="${u.id}">
+      <label class="ctl-check" onclick="event.stopPropagation()">
+        <input type="checkbox" data-select-user="${u.id}" ${sel ? 'checked' : ''}>
+      </label>
+      ${avatarHtml(u.name, u.avatar_thumb, ctlOnline(u))}
+      <div class="ctl-user-main">
+        <b>${esc(u.name || '—')}</b>
+        <div class="last-seen">${esc(u.email || u.phone || '')} · ${ago(u.last_seen_at)}</div>
+      </div>
+      <div class="ctl-user-badges">
+        ${u.active_count ? `<span class="pill info">${u.active_count} active</span>` : ''}
+        ${u.acted_count ? `<span class="pill ok">${u.acted_count} ✓</span>` : ''}
+        ${u.is_locked ? '<span class="pill bad">🔒</span>' : ''}
+      </div>
+      <button class="icon-btn" data-user-cards="${u.id}" title="មើល Control ដែលបានផ្ញើ">☰</button>
+    </div>`;
+  }).join('');
+}
+
+async function renderControl() {
+  const [data, users] = await Promise.all([
+    api('/control/cards'),
+    api('/control/users' + (control.q ? `?q=${encodeURIComponent(control.q)}` : '')),
+  ]);
+  control.cards = data.cards || [];
+  control.stats = data.stats || {};
+  control.users = users || [];
+  const ids = new Set(control.users.map((u) => u.id));
+  control.selected = new Set([...control.selected].filter((id) => ids.has(id)));
+  const st = control.stats;
+
+  $('#content').innerHTML = `
+    <div class="grid k4">
+      <div class="card kpi accent">
+        <div class="kpi-label">🎛 Control Card សកម្ម</div>
+        <div class="kpi-value">${st.cards_active || 0}</div>
+        <div class="kpi-sub">${control.cards.length} Card សរុប</div>
+      </div>
+      <div class="card kpi">
+        <div class="kpi-label">📡 កំពុងបង្ហាញលើអ្នកប្រើ</div>
+        <div class="kpi-value">${st.deliveries_active || 0}</div>
+        <div class="kpi-sub">រង់ចាំឆ្លើយតប ឬកំពុងមើល</div>
+      </div>
+      <div class="card kpi ok">
+        <div class="kpi-label">✅ បានឆ្លើយតប</div>
+        <div class="kpi-value">${st.acted || 0}</div>
+        <div class="kpi-sub">ចុច CTA / ធ្វើសកម្មភាព</div>
+      </div>
+      <div class="card kpi">
+        <div class="kpi-label">👥 អ្នកប្រើដែលឈានដល់</div>
+        <div class="kpi-value">${st.users_reached || 0}</div>
+        <div class="kpi-sub">បានទទួល Control យ៉ាងហោចម្តង</div>
+      </div>
+    </div>
+
+    <div class="control-split">
+      <section class="control-col">
+        <header class="control-col-head">
+          <div>
+            <h3>🎛 Backend · Control Cards</h3>
+            <p class="muted">បង្កើត Card · អូសវាទៅខាងស្តាំដើម្បីបញ្ជូន</p>
+          </div>
+          <button class="btn primary sm" id="ctlNewBtn">+ បង្កើត Card</button>
+        </header>
+        <div class="control-cards" id="ctlCards">${controlCardListHtml()}</div>
+        <div class="ctl-fn-strip">
+          <div class="muted" style="font-size:10.5px">⚡ មុខងាររហ័ស — អូសទម្លាក់លើអ្នកប្រើ ដើម្បីបង្កើតសារភ្លាម</div>
+          <div class="ctl-fn-chips">
+            ${Object.entries(CONTROL_TARGETS).map(([k, label]) =>
+              `<span class="ctl-fn-chip" draggable="true" data-fn="${k}">${CONTROL_FN_ICONS[k] || '⚡'} ${esc(label)}</span>`).join('')}
+          </div>
+        </div>
+      </section>
+
+      <section class="control-col">
+        <header class="control-col-head">
+          <div>
+            <h3>👥 ជ្រើសអ្នកប្រើ · Drop targets</h3>
+            <p class="muted">អូស Card មកទម្លាក់លើអ្នកប្រើ — បង្ហាញក្នុង app ភ្លាម</p>
+          </div>
+          <span class="pill info">${control.users.length} នាក់</span>
+        </header>
+        <div class="ctl-search">
+          <input id="ctlUserSearch" placeholder="ស្វែងរកឈ្មោះ / អ៊ីមែល / ទូរស័ព្ទ…" value="${esc(control.q)}">
+          <span class="ctl-drop-hint">⤵ ទម្លាក់ទីនេះ</span>
+        </div>
+        <div class="control-user-list" id="ctlUserList">${controlUserListHtml()}</div>
+      </section>
+    </div>
+
+    <div class="control-sendbar hidden" id="ctlSendBar">
+      <div><b id="ctlSendCount">0</b> <span class="muted">អ្នកប្រើបានជ្រើស</span></div>
+      <div class="ctl-send-actions">
+        <select id="ctlSendCard">${control.cards.filter((c) => c.active).map((c) =>
+          `<option value="${c.id}">${esc(c.icon || '•')} ${esc(c.title)}</option>`).join('')}</select>
+        <button class="btn primary sm" id="ctlSendBtn">📤 ផ្ញើទៅអ្នកដែលជ្រើស</button>
+        <button class="btn ghost sm" id="ctlClearSel">សម្អាត</button>
+      </div>
+    </div>`;
+
+  bindControl();
+  updateControlSendBar();
+}
+
+function bindControl() {
+  const list = $('#ctlCards');
+  if (list) {
+    $$('.ctl-card', list).forEach((el) => {
+      el.addEventListener('dragstart', (e) => {
+        control.dragCard = Number(el.dataset.cardId);
+        e.dataTransfer.setData('text/plain', el.dataset.cardId);
+        e.dataTransfer.effectAllowed = 'copy';
+        el.classList.add('dragging');
+      });
+      el.addEventListener('dragend', () => {
+        el.classList.remove('dragging');
+        control.dragCard = null;
+      });
+      el.addEventListener('click', () => {
+        const c = control.cards.find((x) => x.id === Number(el.dataset.cardId));
+        if (c) openControlEditor(c);
+      });
+    });
+  }
+
+  $('#ctlNewBtn')?.addEventListener('click', () => openControlEditor(null));
+
+  $$('.ctl-fn-chip').forEach((chip) => {
+    chip.addEventListener('dragstart', (e) => {
+      control.dragFn = chip.dataset.fn;
+      e.dataTransfer.setData('text/plain', 'fn:' + chip.dataset.fn);
+      e.dataTransfer.effectAllowed = 'copy';
+      chip.classList.add('dragging');
+    });
+    chip.addEventListener('dragend', () => {
+      chip.classList.remove('dragging');
+      control.dragFn = null;
+    });
+  });
+
+  $('#ctlUserSearch')?.addEventListener('input', (e) => {
+    control.q = e.target.value.trim();
+    clearTimeout(window._ctlSearchT);
+    window._ctlSearchT = setTimeout(async () => {
+      try {
+        const users = await api('/control/users' +
+          (control.q ? `?q=${encodeURIComponent(control.q)}` : ''));
+        control.users = users || [];
+        $('#ctlUserList').innerHTML = controlUserListHtml();
+        bindControlUsers();
+      } catch (err) { toast(err.message, 'err'); }
+    }, 300);
+  });
+
+  bindControlUsers();
+
+  $('#ctlSendBtn')?.addEventListener('click', async () => {
+    const cardId = Number($('#ctlSendCard')?.value);
+    if (!cardId) return toast('សូមបង្កើត Card សកម្មជាមុនសិន', 'err');
+    if (!control.selected.size) return;
+    await controlDeliver(cardId, [...control.selected]);
+  });
+  $('#ctlClearSel')?.addEventListener('click', () => {
+    control.selected.clear();
+    $$('#ctlUserList .ctl-user').forEach((r) => r.classList.remove('selected'));
+    $$('#ctlUserList input[data-select-user]').forEach((i) => (i.checked = false));
+    updateControlSendBar();
+  });
+}
+
+function bindControlUsers() {
+  $$('#ctlUserList .ctl-user').forEach((row) => {
+    const uid = Number(row.dataset.userId);
+    row.addEventListener('dragover', (e) => {
+      if (!control.dragCard && !control.dragFn) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      row.classList.add('drop-hot');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-hot'));
+    row.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      row.classList.remove('drop-hot');
+      const raw = e.dataTransfer.getData('text/plain') || '';
+      control.dragCard = null;
+      control.dragFn = null;
+      if (raw.startsWith('fn:')) {
+        openControlEditor(null, { prefill: raw.slice(3), deliverTo: uid });
+        return;
+      }
+      const cardId = Number(raw);
+      if (!cardId) return;
+      await controlDeliver(cardId, [uid]);
+    });
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('input,button,label')) return;
+      openControlUser(uid);
+    });
+  });
+
+  $$('#ctlUserList input[data-select-user]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      const uid = Number(cb.dataset.selectUser);
+      if (cb.checked) control.selected.add(uid); else control.selected.delete(uid);
+      cb.closest('.ctl-user')?.classList.toggle('selected', cb.checked);
+      updateControlSendBar();
+    });
+  });
+
+  $$('#ctlUserList [data-user-cards]').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openControlUser(Number(b.dataset.userCards));
+    });
+  });
+}
+
+function updateControlSendBar() {
+  const bar = $('#ctlSendBar');
+  if (!bar) return;
+  bar.classList.toggle('hidden', control.selected.size === 0);
+  const n = $('#ctlSendCount');
+  if (n) n.textContent = control.selected.size;
+}
+
+async function controlDeliver(cardId, userIds) {
+  const card = control.cards.find((c) => c.id === Number(cardId));
+  if (card && !card.active) return toast('Card នេះបិទ — សូមបើកជាមុនសិន', 'err');
+  try {
+    const res = await api('/control/deliver', {
+      method: 'POST',
+      body: { card_id: Number(cardId), user_ids: userIds },
+    });
+    const skipped = res.skipped?.length || 0;
+    toast(`បានបញ្ជូនទៅ ${res.delivered} នាក់${skipped ? ` · រំលង ${skipped}` : ''}`,
+      res.delivered ? '' : 'err');
+    control.selected.clear();
+    await renderControl();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function openControlUser(userId) {
+  const user = control.users.find((u) => u.id === userId) || { id: userId, name: `#${userId}`, email: '' };
+  const rows = await api(`/control/deliveries?user_id=${userId}`).catch(() => []);
+  const statusMap = {
+    pending: ['រង់ចាំ', 'warn'], seen: ['បានមើល', 'info'],
+    acted: ['ឆ្លើយតប', 'ok'], dismissed: ['បានបិទ', 'bad'],
+  };
+  const body = `
+    <div class="ctl-user-head">
+      ${avatarHtml(user.name, user.avatar_thumb)}
+      <div><b>${esc(user.name)}</b><div class="muted">${esc(user.email || user.phone || '')}</div></div>
+    </div>
+    <div class="ctl-deliveries">
+      ${rows.length ? rows.map((r) => {
+        const [label, cls] = statusMap[r.status] || [r.status, ''];
+        return `<div class="ctl-delivery-row">
+          <span style="font-size:18px">${esc(r.icon || '•')}</span>
+          <div style="flex:1;min-width:0">
+            <b>${esc(r.title)}</b>
+            <div class="last-seen">${dt(r.created_at)} · ${r.seen_at ? `មើល ${ago(r.seen_at)}` : 'មិនទាន់មើល'}</div>
+          </div>
+          <span class="pill ${cls}">${label}</span>
+          <button class="icon-btn" data-revoke="${r.id}" title="ដកចេញ">✕</button>
+        </div>`;
+      }).join('') : '<div class="empty">មិនទាន់បានផ្ញើ Control ទៅអ្នកនេះ</div>'}
+    </div>`;
+  openModal({ title: `Control · ${user.name || '#' + userId}`, body, wide: true });
+  $$('#modalBody [data-revoke]').forEach((b) => {
+    b.onclick = () => confirmAction('ដក Control ចេញ?',
+      'អ្នកប្រើនឹងលែងឃើញ Card នេះភ្លាមៗ។', async () => {
+        await api(`/control/deliveries/${b.dataset.revoke}`, { method: 'DELETE' });
+        toast('បានដកចេញ');
+        closeModal();
+        await renderControl();
+        openControlUser(userId);
+      });
+  });
+}
+
+function openControlEditor(card, opts = {}) {
+  const editing = !!card;
+  const prefill = opts.prefill || '';
+  const deliverTo = opts.deliverTo || null;
+  const fnLabel = CONTROL_TARGETS[prefill] || '';
+  const fnIcon = CONTROL_FN_ICONS[prefill] || '✨';
+  const fTitle = card?.title ?? fnLabel;
+  const fBody = card?.body ?? '';
+  const fKind = card?.kind ?? (prefill === 'feature:kyc' ? 'verify' : (prefill ? 'action' : 'info'));
+  const fColor = card?.color ?? 'blue';
+  const fIcon = card?.icon ?? fnIcon;
+  const fCtaLabel = card?.cta_label ?? fnLabel;
+  const fTarget = card?.cta_target ?? prefill;
+  const isUrl = /^https?:\/\//i.test(fTarget || '');
+  const kindOptions = Object.entries(CONTROL_KIND_MAP).map(([k, [icon, label]]) =>
+    `<option value="${k}" ${fKind === k ? 'selected' : ''}>${icon} ${label}</option>`).join('');
+  const colorOptions = Object.keys(CONTROL_COLOR_HEX).map((c) =>
+    `<option value="${c}" ${fColor === c ? 'selected' : ''}>${c}</option>`).join('');
+  const targetOptions = Object.entries(CONTROL_TARGETS).map(([k, label]) =>
+    `<option value="${k}" ${fTarget === k ? 'selected' : ''}>${label}</option>`).join('');
+
+  openModal({
+    title: editing ? 'កែ Control Card' : 'បង្កើត Control Card ថ្មី',
+    wide: true,
+    saveLabel: editing ? 'រក្សាទុកការកែ' : 'បង្កើត Card',
+    body: `
+      <div class="ctl-editor">
+        <div class="ctl-form">
+          <label>ចំណងជើង *
+            <input id="ctlFTitle" maxlength="90" value="${esc(fTitle)}" placeholder="ឧ. ផ្តល់ជូនពិសេសសម្រាប់អ្នក…">
+          </label>
+          <label>អត្ថបទ / សារ
+            <textarea id="ctlFBody" maxlength="600" placeholder="ព័ត៌មានលម្អិត ឬការណែនាំអ្នកប្រើ…">${esc(fBody)}</textarea>
+          </label>
+          <div class="ctl-row">
+            <label>ប្រភេទ<select id="ctlFKind">${kindOptions}</select></label>
+            <label>ពណ៌<select id="ctlFColor">${colorOptions}</select></label>
+          </div>
+          <div class="ctl-row">
+            <label>រូបតំណាង (icon)<input id="ctlFIcon" maxlength="8" value="${esc(fIcon)}"></label>
+            <label>អាទិភាព (ខ្ពស់មុន)<input id="ctlFPriority" type="number" value="${card?.priority ?? 0}"></label>
+          </div>
+          <div class="ctl-row">
+            <label>អត្ថបទប៊ូតុង (CTA)<input id="ctlFCtaLabel" maxlength="40" value="${esc(fCtaLabel)}" placeholder="ឧ. មើលឥឡូវ"></label>
+            <label>គោលដៅ CTA<select id="ctlFTarget">
+              <option value="">— គ្មាន —</option>${targetOptions}
+              <option value="url:" ${isUrl ? 'selected' : ''}>🔗 URL ខាងក្រៅ</option>
+            </select></label>
+          </div>
+          <label id="ctlFUrlWrap" class="${isUrl ? '' : 'hidden'}">URL (https://…)
+            <input id="ctlFUrl" value="${esc(isUrl ? fTarget : '')}" placeholder="https://">
+          </label>
+          <label class="ctl-check-row"><input type="checkbox" id="ctlFActive" ${card?.active === 0 ? '' : 'checked'}> សកម្ម (បង្ហាញក្នុង app)</label>
+          ${editing ? '<div class="ctl-danger-row"><button class="btn danger sm" id="ctlFDelete" type="button">🗑 លុប Card</button></div>' : ''}
+        </div>
+        <div class="ctl-preview-pane">
+          <div class="muted" style="font-size:11.5px">📱 មើលជាមុន · បង្ហាញក្នុង app របស់អ្នកប្រើ</div>
+          <div class="ctl-phone">
+            <div class="ctl-phone-top"><i></i><i></i><i></i></div>
+            <div id="ctlPreview"></div>
+          </div>
+          <div class="muted" style="font-size:11.5px">អ្នកប្រើអាចមើល Card និងចុច CTA ដើម្បីទៅកាន់មុខងារដែលអ្នកបានកំណត់។</div>
+        </div>
+      </div>`,
+    onSave: async () => {
+      const targetSel = $('#ctlFTarget').value;
+      let ctaTarget = targetSel;
+      if (targetSel === 'url:') {
+        const url = $('#ctlFUrl').value.trim();
+        if (!/^https?:\/\//i.test(url)) throw new Error('URL ត្រូវចាប់ផ្ដើមដោយ http:// ឬ https://');
+        ctaTarget = url;
+      }
+      const body = {
+        title: $('#ctlFTitle').value.trim(),
+        body: $('#ctlFBody').value.trim(),
+        kind: $('#ctlFKind').value,
+        color: $('#ctlFColor').value,
+        icon: $('#ctlFIcon').value.trim() || '✨',
+        cta_label: $('#ctlFCtaLabel').value.trim(),
+        cta_target: ctaTarget,
+        priority: Number($('#ctlFPriority').value) || 0,
+        active: $('#ctlFActive').checked ? 1 : 0,
+      };
+      if (!body.title) throw new Error('សូមបញ្ចូលចំណងជើង');
+      let savedId = card?.id;
+      if (editing) {
+        await api(`/control/cards/${card.id}`, { method: 'PATCH', body });
+      } else {
+        const res = await api('/control/cards', { method: 'POST', body });
+        savedId = res.id;
+      }
+      if (deliverTo) {
+        const res2 = await api('/control/deliver', {
+          method: 'POST',
+          body: { card_id: savedId, user_ids: [deliverTo] },
+        });
+        toast(`បានបង្កើត Card និងបញ្ជូនទៅ ${res2.delivered} នាក់`);
+      } else {
+        toast(editing ? 'បានកែ Control Card' : 'បានបង្កើត Control Card');
+      }
+      await renderControl();
+    },
+  });
+
+  const preview = () => {
+    const el = $('#ctlPreview');
+    if (!el) return;
+    const color = $('#ctlFColor').value;
+    const title = $('#ctlFTitle').value.trim() || 'ចំណងជើង Card';
+    const txt = $('#ctlFBody').value.trim() || 'អត្ថបទសាររបស់អ្នកនឹងបង្ហាញនៅទីនេះ…';
+    const icon = $('#ctlFIcon').value.trim() || '✨';
+    const cta = $('#ctlFCtaLabel').value.trim() || ($('#ctlFTarget').value ? 'មើលបន្ថែម' : '');
+    el.innerHTML = `<div class="ctl-preview-band" style="${ctlStyle(color)}">
+      <div class="ctl-preview-icon">${esc(icon)}</div>
+      <div><b>${esc(title)}</b><p>${esc(txt)}</p>
+        ${cta ? `<span class="ctl-preview-cta">${esc(cta)} →</span>` : ''}</div>
+    </div>`;
+  };
+  ['ctlFTitle', 'ctlFBody', 'ctlFColor', 'ctlFIcon', 'ctlFCtaLabel', 'ctlFTarget', 'ctlFUrl']
+    .forEach((id) => {
+      const el = $('#' + id);
+      if (!el) return;
+      el.addEventListener('input', preview);
+      el.addEventListener('change', preview);
+    });
+  $('#ctlFTarget')?.addEventListener('change', () => {
+    $('#ctlFUrlWrap')?.classList.toggle('hidden', $('#ctlFTarget').value !== 'url:');
+    preview();
+  });
+  preview();
+
+  const del = $('#ctlFDelete');
+  if (del) del.onclick = () => {
+    closeModal();
+    confirmAction('លុប Control Card?',
+      `Card “${card.title}” និងការបញ្ជូនទាំងអស់នឹងត្រូវលុប។`, async () => {
+        await api(`/control/cards/${card.id}`, { method: 'DELETE' });
+        toast('បានលុប Card');
+        await renderControl();
+      });
+  };
 }
 
 function bindPager(total) {

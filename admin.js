@@ -1215,6 +1215,201 @@ module.exports = function createAdminRouter(ctx) {
       ok(res, { deleted: true });
     }));
 
+  // ============================================================
+  // CONTROL U — បញ្ជូន Control Card ផ្ទាល់ទៅអ្នកប្រើ (banner / action)
+  // ============================================================
+  const CONTROL_KINDS = ['info', 'promo', 'warning', 'action', 'verify', 'reward'];
+  const CONTROL_COLORS = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'pink', 'slate'];
+
+  function sanitizeCard(body = {}, partial = false) {
+    const out = {};
+    const has = (k) => body[k] !== undefined && body[k] !== null;
+
+    if (!partial || has('title')) {
+      const title = String(body.title || '').trim().slice(0, 90);
+      if (!title) throw new ApiError('សូមបញ្ចូលចំណងជើង', 400, 'TITLE_REQUIRED');
+      out.title = title;
+    }
+    if (!partial || has('body')) out.body = String(body.body || '').trim().slice(0, 600);
+    if (!partial || has('kind')) {
+      const kind = String(body.kind || 'info').trim().toLowerCase();
+      out.kind = CONTROL_KINDS.includes(kind) ? kind : 'info';
+    }
+    if (!partial || has('color')) {
+      const color = String(body.color || 'blue').trim().toLowerCase();
+      out.color = CONTROL_COLORS.includes(color) ? color : 'blue';
+    }
+    if (!partial || has('icon')) out.icon = String(body.icon || '✨').trim().slice(0, 8) || '✨';
+    if (!partial || has('cta_label')) out.cta_label = String(body.cta_label || '').trim().slice(0, 40) || null;
+    if (!partial || has('cta_target')) out.cta_target = String(body.cta_target || '').trim().slice(0, 300) || null;
+    if (!partial || has('priority')) {
+      const p = int(body.priority, 0);
+      out.priority = Math.max(-999, Math.min(999, p));
+    }
+    if (!partial || has('active')) out.active = body.active === 0 || body.active === false ? 0 : 1;
+    return out;
+  }
+
+  router.get('/control/cards', adminAuth, handle(async (req, res) => {
+    const cards = await db.prepare(`
+      SELECT c.*,
+        (SELECT COUNT(*) FROM control_deliveries d
+          WHERE d.card_id = c.id AND d.status IN ('pending', 'seen')) AS active_count,
+        (SELECT COUNT(*) FROM control_deliveries d
+          WHERE d.card_id = c.id AND d.status = 'acted') AS acted_count,
+        (SELECT COUNT(*) FROM control_deliveries d WHERE d.card_id = c.id) AS total_count
+      FROM control_cards c
+      ORDER BY c.priority DESC, c.id DESC`).all();
+
+    const stats = await db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM control_cards WHERE active = 1) AS cards_active,
+        (SELECT COUNT(*) FROM control_deliveries WHERE status IN ('pending', 'seen')) AS deliveries_active,
+        (SELECT COUNT(*) FROM control_deliveries WHERE status = 'acted') AS acted,
+        (SELECT COUNT(*) FROM control_deliveries WHERE status = 'dismissed') AS dismissed,
+        (SELECT COUNT(DISTINCT user_id) FROM control_deliveries) AS users_reached
+    `).get();
+
+    ok(res, { cards, stats, kinds: CONTROL_KINDS, colors: CONTROL_COLORS });
+  }));
+
+  router.post('/control/cards', adminAuth,
+    requireRole('management', 'administration'), handle(async (req, res) => {
+      const c = sanitizeCard(req.body);
+      const info = await db.prepare(`
+        INSERT INTO control_cards
+          (title, body, kind, color, icon, cta_label, cta_target, priority, active, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(c.title, c.body, c.kind, c.color, c.icon, c.cta_label, c.cta_target,
+          c.priority, c.active, req.admin.email);
+      const id = info.lastInsertRowid;
+      await audit(req, 'control.card_create', 'control_card', id, c.title);
+      ok(res, { id, created: true });
+    }));
+
+  router.patch('/control/cards/:id', adminAuth,
+    requireRole('management', 'administration'), handle(async (req, res) => {
+      const id = int(req.params.id);
+      const exists = await db.prepare('SELECT id FROM control_cards WHERE id = ?').get(id);
+      if (!exists) throw new ApiError('រកមិនឃើញ Control Card', 404, 'NOT_FOUND');
+      const c = sanitizeCard(req.body, true);
+      const keys = Object.keys(c);
+      if (!keys.length) throw new ApiError('គ្មានទិន្នន័យផ្លាស់ប្តូរ', 400, 'EMPTY_PATCH');
+      const sets = keys.map((k) => `${k} = ?`).join(', ');
+      await db.prepare(`UPDATE control_cards SET ${sets} WHERE id = ?`)
+        .run(...keys.map((k) => c[k]), id);
+      // បើបិទ card → app លាក់ភ្លាមៗ, បើកវិញ → អ្នកដែលមិនទាន់ឆ្លើយតបឃើញឡើងវិញ
+      if (keys.includes('active')) {
+        const users = await db.prepare(`
+          SELECT DISTINCT user_id FROM control_deliveries
+          WHERE card_id = ? AND status IN ('pending', 'seen')`).all(id);
+        for (const u of users) await bumpVersion(u.user_id);
+      }
+      await audit(req, 'control.card_update', 'control_card', id, keys.join(','));
+      ok(res, { updated: true });
+    }));
+
+  router.delete('/control/cards/:id', adminAuth,
+    requireRole('management', 'administration'), handle(async (req, res) => {
+      const id = int(req.params.id);
+      const card = await db.prepare('SELECT id, title FROM control_cards WHERE id = ?').get(id);
+      if (!card) throw new ApiError('រកមិនឃើញ Control Card', 404, 'NOT_FOUND');
+      const users = await db.prepare(`
+        SELECT DISTINCT user_id FROM control_deliveries
+        WHERE card_id = ? AND status IN ('pending', 'seen')`).all(id);
+      await db.prepare('DELETE FROM control_cards WHERE id = ?').run(id);
+      for (const u of users) await bumpVersion(u.user_id);
+      await audit(req, 'control.card_delete', 'control_card', id, card.title);
+      ok(res, { deleted: true, revoked_from: users.length });
+    }));
+
+  // បញ្ជីអ្នកប្រើសម្រាប់ជ្រើសរើស (drop target) — មានចំនួន Control ដែលកំពុងសកម្ម
+  router.get('/control/users', adminAuth, handle(async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(Math.max(int(req.query.limit, 200), 1), 500);
+    const rows = await db.prepare(`
+      SELECT u.id, u.name, u.email, u.phone, u.avatar_thumb, u.role,
+             u.last_seen_at, u.is_locked,
+        (SELECT COUNT(*) FROM control_deliveries d
+          WHERE d.user_id = u.id AND d.status IN ('pending', 'seen')) AS active_count,
+        (SELECT COUNT(*) FROM control_deliveries d
+          WHERE d.user_id = u.id AND d.status = 'acted') AS acted_count
+      FROM users u
+      WHERE (? = '' OR lower(u.name) LIKE ? OR lower(u.email) LIKE ? OR u.phone LIKE ?)
+      ORDER BY (u.last_seen_at IS NULL), u.last_seen_at DESC, u.id DESC
+      LIMIT ${limit}`).all(q, like(q), like(q), `%${q}%`);
+    ok(res, rows);
+  }));
+
+  router.get('/control/deliveries', adminAuth, handle(async (req, res) => {
+    const userId = int(req.query.user_id);
+    if (!userId) throw new ApiError('សូមបញ្ជាក់អ្នកប្រើ', 400, 'USER_REQUIRED');
+    const rows = await db.prepare(`
+      SELECT d.id, d.status, d.created_at, d.seen_at, d.acted_at,
+             c.id AS card_id, c.title, c.body, c.kind, c.color, c.icon,
+             c.cta_label, c.cta_target, c.active AS card_active
+      FROM control_deliveries d
+      JOIN control_cards c ON c.id = d.card_id
+      WHERE d.user_id = ?
+      ORDER BY d.created_at DESC, d.id DESC LIMIT 100`).all(userId);
+    ok(res, rows);
+  }));
+
+  // ទាញទម្លាក់ (assign) card ទៅអ្នកប្រើម្នាក់ ឬច្រើននាក់
+  router.post('/control/deliver', adminAuth,
+    requireRole('management', 'administration'), handle(async (req, res) => {
+      const cardId = int(req.body?.card_id);
+      const raw = req.body?.user_ids ?? (req.body?.user_id != null ? [req.body.user_id] : []);
+      const userIds = [...new Set((Array.isArray(raw) ? raw : [raw]).map((v) => int(v)).filter(Boolean))];
+      if (!cardId) throw new ApiError('សូមជ្រើស Control Card', 400, 'CARD_REQUIRED');
+      if (!userIds.length) throw new ApiError('សូមជ្រើសអ្នកប្រើ', 400, 'USER_REQUIRED');
+      if (userIds.length > 500) throw new ApiError('អ្នកប្រើច្រើនពេក (អតិបរមា 500)', 400, 'TOO_MANY');
+
+      const card = await db.prepare('SELECT * FROM control_cards WHERE id = ?').get(cardId);
+      if (!card) throw new ApiError('រកមិនឃើញ Control Card', 404, 'NOT_FOUND');
+
+      const valid = await db.prepare(
+        `SELECT id FROM users WHERE id IN (${userIds.map(() => '?').join(',')})`
+      ).all(...userIds);
+      const validIds = new Set(valid.map((r) => r.id));
+
+      let delivered = 0;
+      const skipped = [];
+      for (const uid of userIds) {
+        if (!validIds.has(uid)) { skipped.push({ user_id: uid, reason: 'not_found' }); continue; }
+        const dup = await db.prepare(`
+          SELECT id FROM control_deliveries
+          WHERE card_id = ? AND user_id = ? AND status IN ('pending', 'seen') LIMIT 1`)
+          .get(cardId, uid);
+        if (dup) { skipped.push({ user_id: uid, reason: 'already_active' }); continue; }
+        await db.prepare('INSERT INTO control_deliveries (card_id, user_id) VALUES (?, ?)')
+          .run(cardId, uid);
+        await notifyUser(uid, card.title, card.body || 'សារពីធនាគារ', {
+          control: true, control_card_id: card.id, control_kind: card.kind,
+        }, 18);
+        await bumpVersion(uid);
+        delivered++;
+      }
+
+      await audit(req, 'control.deliver', 'control_card', cardId,
+        `${card.title} → ${delivered} user(s)`);
+      ok(res, { delivered, skipped });
+    }));
+
+  // ដកហូត (revoke) Control ចេញពីអ្នកប្រើភ្លាមៗ
+  router.delete('/control/deliveries/:id', adminAuth,
+    requireRole('management', 'administration'), handle(async (req, res) => {
+      const id = int(req.params.id);
+      const row = await db.prepare(`
+        SELECT d.id, d.user_id, c.title FROM control_deliveries d
+        JOIN control_cards c ON c.id = d.card_id WHERE d.id = ?`).get(id);
+      if (!row) throw new ApiError('រកមិនឃើញការបញ្ជូន', 404, 'NOT_FOUND');
+      await db.prepare('DELETE FROM control_deliveries WHERE id = ?').run(id);
+      await bumpVersion(row.user_id);
+      await audit(req, 'control.revoke', 'control_delivery', id, row.title);
+      ok(res, { deleted: true });
+    }));
+
   // Sidebar notification badges — counts of pending actions per section
   router.get('/badges', adminAuth, handle(async (req, res) => {
     const today = new Date();

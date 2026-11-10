@@ -44,6 +44,7 @@ const ID_TABLES = new Set([
   'virtual_cards', 'referrals', 'cashback', 'external_transfers',
   'device_commands', 'device_locations', 'qr_otp_requests',
   'transfer_approvals', 'identity_kyc',
+  'control_cards', 'control_deliveries',
 ]);
 
 // ? -> $1, $2 ... but leave question marks inside string literals alone.

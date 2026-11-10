@@ -566,6 +566,39 @@ async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_identity_kyc_user ON identity_kyc(user_id, submitted_at DESC);
     CREATE INDEX IF NOT EXISTS idx_identity_kyc_status ON identity_kyc(status, submitted_at DESC);
+
+    -- ============================================================
+    -- CONTROL U — backend បង្កើត banner/card ហើយផ្ញើទៅអ្នកប្រើជាក់លាក់
+    -- ============================================================
+    CREATE TABLE IF NOT EXISTS control_cards (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'info',
+      color TEXT NOT NULL DEFAULT 'blue',
+      icon TEXT NOT NULL DEFAULT '✨',
+      cta_label TEXT,
+      cta_target TEXT,
+      priority INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS control_deliveries (
+      id SERIAL PRIMARY KEY,
+      card_id INTEGER NOT NULL REFERENCES control_cards(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      seen_at TIMESTAMPTZ,
+      acted_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_control_del_user
+      ON control_deliveries (user_id, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_control_del_card
+      ON control_deliveries (card_id, created_at DESC);
   `);
 
   // កម្មវិធីកម្ចីវីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល
@@ -1948,6 +1981,47 @@ app.post('/notifications/read-all', auth, async (req, res) => {
   await db.prepare('UPDATE notifications SET "read" = 1 WHERE user_id = ?').run(req.userId);
   ok(res, { read: true });
 });
+
+// ============================================================
+// CONTROL U — ប្រអប់សារ/card ដែល Admin ផ្ញើមកអ្នកប្រើដោយផ្ទាល់
+// ============================================================
+app.get('/control/inbox', auth, handle(async (req, res) => {
+  const rows = await db.prepare(`
+    SELECT d.id AS delivery_id, d.status AS delivery_status,
+           d.created_at AS delivered_at, d.seen_at,
+           c.id, c.title, c.body, c.kind, c.color, c.icon,
+           c.cta_label, c.cta_target, c.priority
+    FROM control_deliveries d
+    JOIN control_cards c ON c.id = d.card_id
+    WHERE d.user_id = ? AND d.status IN ('pending', 'seen') AND c.active = 1
+    ORDER BY c.priority DESC, d.created_at ASC, d.id ASC
+    LIMIT 20`).all(req.userId);
+  ok(res, rows);
+}));
+
+app.post('/control/deliveries/:id/seen', auth, handle(async (req, res) => {
+  await db.prepare(`UPDATE control_deliveries
+    SET status = 'seen', seen_at = COALESCE(seen_at, now())
+    WHERE id = ? AND user_id = ? AND status = 'pending'`)
+    .run(String(req.params.id), req.userId);
+  ok(res, { updated: true });
+}));
+
+app.post('/control/deliveries/:id/acted', auth, handle(async (req, res) => {
+  await db.prepare(`UPDATE control_deliveries
+    SET status = 'acted', acted_at = now(), seen_at = COALESCE(seen_at, now())
+    WHERE id = ? AND user_id = ? AND status IN ('pending', 'seen')`)
+    .run(String(req.params.id), req.userId);
+  ok(res, { updated: true });
+}));
+
+app.post('/control/deliveries/:id/dismiss', auth, handle(async (req, res) => {
+  await db.prepare(`UPDATE control_deliveries
+    SET status = 'dismissed', seen_at = COALESCE(seen_at, now())
+    WHERE id = ? AND user_id = ? AND status IN ('pending', 'seen')`)
+    .run(String(req.params.id), req.userId);
+  ok(res, { updated: true });
+}));
 
 // ============================================================
 // LOANS (កម្មវិធីកម្ចីវីក្រុយ — KYC → សាកលកម្ម → អនុមត្ត → តារាងសងប្រាក់)
