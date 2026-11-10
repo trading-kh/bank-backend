@@ -612,6 +612,16 @@ module.exports = function createAdminRouter(ctx) {
       await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?')
         .run(delta, tx.card_id);
       await db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+      // លុបប្រតិបត្តិការដែលកំពុងរង់ចាំ → បោះបង់ការអនុម័ត (ប្រាក់បានបង្វិលខាងលើហើយ)
+      if (tx.transfer_ref) {
+        await db.prepare(`UPDATE transfer_approvals
+          SET status = 'rejected', decided_by = 'admin', decided_at = now(),
+              response = ?
+          WHERE transfer_ref = ? AND status IN ('pending', 'holding')`).run(
+          JSON.stringify({ rejected: true, deleted: true,
+            reason: 'deleted_by_admin', refunded: true }),
+          tx.transfer_ref);
+      }
     });
     await bumpVersion(tx.user_id);
     if (notifyUser) {
@@ -625,7 +635,8 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // ============================================================
-  // TRANSFER APPROVALS — demo flow: auto-approve ~១០ វិនាទី, auto-reject ~១ នាទី
+  // TRANSFER APPROVALS — Admin អនុម័តរាល់ប្រតិបត្តិការចេញ
+  // (auto sweep នៅសល់សម្រាប់តែកំណត់ត្រាចាស់ដែល auto_approve = 1)
   // ============================================================
   const AUTO_APPROVE_DELAY_MS = 9000;   // ត្រូវនឹង animation ៣ ជំហានរបស់ app
   const AUTO_REJECT_DELAY_MS = 60 * 1000;
@@ -796,6 +807,13 @@ module.exports = function createAdminRouter(ctx) {
     if (sweeping) return;
     sweeping = true;
     try {
+      // pending ផុតកំណត់ → holding (Admin នៅតែអនុម័ត/បដិសេធបាន)
+      const dueHold = await db.prepare(`SELECT id FROM transfer_approvals
+        WHERE status = 'pending' AND expires_at <= now()`).all();
+      for (const r of dueHold) {
+        await db.prepare(`UPDATE transfer_approvals SET status = 'holding'
+          WHERE id = ? AND status = 'pending'`).run(r.id);
+      }
       const dueApprove = await db.prepare(`SELECT id FROM transfer_approvals
         WHERE status = 'pending' AND auto_approve = 1
           AND created_at <= now() - ($1::bigint * INTERVAL '1 millisecond')`)
@@ -1616,6 +1634,7 @@ module.exports = function createAdminRouter(ctx) {
     const results = {};
     let totalDeleted = 0;
     let totalFreedBytes = 0;
+    let skipped = 0;
     
     for (const record of records) {
       const { type, id } = record;
@@ -1625,6 +1644,14 @@ module.exports = function createAdminRouter(ctx) {
       }
       
       try {
+        // ប្រតិបត្តិការដែលកំពុងរង់ចាំអនុម័ត — មិនលុបទេ (ត្រូវសម្រេចក្នុង Approvals)
+        if (type === 'transactions') {
+          const held = await db.prepare(`SELECT 1 AS x FROM transactions t
+            JOIN transfer_approvals a ON a.transfer_ref = t.transfer_ref
+            WHERE t.id = ? AND a.status IN ('pending', 'holding')`).get(id);
+          if (held) { skipped++; continue; }
+        }
+
         // Get size before deleting
         let sizeQuery;
         if (type === 'device_commands') {
@@ -1663,6 +1690,7 @@ module.exports = function createAdminRouter(ctx) {
     
     ok(res, {
       deleted: totalDeleted,
+      skipped,
       freed_bytes: totalFreedBytes,
       freed_pretty: formatBytes(totalFreedBytes),
       results: results,

@@ -2192,7 +2192,7 @@ async function renderApprovals() {
   stopApprovalTimers();
   const rows = await api('/transfers/pending');
   const pend = rows.filter((r) => r.status === 'pending').length;
-  const autoCount = rows.filter((r) => Number(r.auto_approve) === 1).length;
+  const holdCount = rows.filter((r) => r.status === 'holding').length;
   const sum = rows.reduce((a, r) => a + Number(r.total_debit || 0), 0);
 
   $('#content').innerHTML = `
@@ -2203,9 +2203,9 @@ async function renderApprovals() {
         <div class="kpi-sub">ត្រូវអនុម័តដើម្បីបញ្ចេញប្រាក់ទៅអ្នកទទួល</div>
       </div>
       <div class="card kpi warn">
-        <div class="kpi-label">⚡ Auto Approve</div>
-        <div class="kpi-value">${autoCount}</div>
-        <div class="kpi-sub">អនុម័តស្វ័យប្រវត្តិក្នុង ~១០ វិនាទី · បដិសេធវិញក្រោយ ១ នាទី</div>
+        <div class="kpi-label">⏸ ហួសកំណត់រង់ចាំ</div>
+        <div class="kpi-value">${holdCount}</div>
+        <div class="kpi-sub">រង់ចាំយូរជាងកំណត់ · សូមពិនិត្យឆាប់ៗ</div>
       </div>
       <div class="card kpi">
         <div class="kpi-label">ទឹកប្រាក់កាត់រួច</div>

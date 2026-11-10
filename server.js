@@ -70,7 +70,7 @@ const MAX_TX = 10000;                  // កំណត់ចំនួនអត�
 const MAX_PIN_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
 // រយៈពេលរង់ចាំការអនុម័តចុងក្រោយ (គិតជានាទី) — ផុតកំណត់ → ស្ថានភាព Holding
-const HOLD_MINUTES = Math.max(parseInt(process.env.TRANSFER_HOLD_MINUTES, 10) || 10, 1);
+const HOLD_MINUTES = Math.max(parseInt(process.env.TRANSFER_HOLD_MINUTES, 10) || 30, 1);
 const holdExpiry = () => new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
 // ⚠️ បើអ្នកមានមុខងារ "បញ្ចូលលុយ" សម្រាប់ Demo ទើបបើវា (ក្នុង Production ត្រូវ false)
 const ALLOW_DEMO_INCOME = process.env.ALLOW_DEMO_INCOME === 'true';
@@ -1422,10 +1422,11 @@ const executeTransfer = (p) => db.transaction(async () => {
     p.amount, 1, recipient.id, ref)).lastInsertRowid;
 
   const expiresAt = holdExpiry();
+  // auto_approve = 0 → Admin ត្រូវអនុម័តរាល់ប្រតិបត្តិការចេញ
   const approvalId = (await db.prepare(`INSERT INTO transfer_approvals
     (transfer_ref, kind, sender_id, recipient_id, card_id, amount, fee, total_debit,
      note, meta, out_tx_id, expires_at, auto_approve)
-    VALUES (?, 'p2p', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 1)`).run(
+    VALUES (?, 'p2p', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0)`).run(
     ref, sender.id, recipient.id, card.id, p.amount, p.amount, p.note || null,
     JSON.stringify({ recipient_name: recipient.name, recipient_masked: maskContact(recipient) }),
     outId, expiresAt)).lastInsertRowid;
@@ -1565,10 +1566,11 @@ const executeExternalTransfer = (p) => db.transaction(async () => {
     p.recipientAccount, bankRail.currency, p.amount, fee, ref, p.note || null)).lastInsertRowid;
 
   const expiresAt = holdExpiry();
+  // auto_approve = 0 → Admin ត្រូវអនុម័តរាល់ប្រតិបត្តិការចេញ
   const approvalId = (await db.prepare(`INSERT INTO transfer_approvals
     (transfer_ref, kind, sender_id, card_id, amount, fee, total_debit, note, meta,
      out_tx_id, expires_at, auto_approve)
-    VALUES (?, 'external', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`).run(
+    VALUES (?, 'external', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`).run(
     ref, p.senderId, card.id, p.amount, fee, total, p.note || null,
     JSON.stringify({
       bank_code: bankRail.code, bank_name: bankRail.name,
