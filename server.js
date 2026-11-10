@@ -1117,7 +1117,7 @@ app.post('/kyc/submissions', auth, handle(async (req, res) => {
       selfie.mime, selfie.data);
 
   await notifyUser(req.userId, 'ទទួលបានឯកសារផ្ទៀងផ្ទាត់',
-    `ឯកសាររបស់អ្នក (${ref}) ត្រូវបានទទួល។ លទ្ធផលនឹងជូនដំណឹងក្នុងរយៈពេលប្រហែល ១ ម៉ោង។`,
+    `ឯកសាររបស់អ្នក (${ref}) ត្រូវបានទទួល។ (បន្តិចទៀតនេះ) សូមមេត្តារង់ចាំមួយភ្លេត។`,
     { kyc_ref: ref, kyc_status: 'pending' }, 18);
 
   const row = await db.prepare(
