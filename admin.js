@@ -1223,7 +1223,7 @@ module.exports = function createAdminRouter(ctx) {
   const CONTROL_COLORS = ['blue', 'green', 'amber', 'red', 'violet', 'teal', 'pink', 'slate'];
   const CONTROL_LAYOUTS = ['standard', 'hero', 'cover'];
   const CARD_IMG_RE = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
-  const CARD_IMG_MAX_BYTES = 1200 * 1024;
+  const CARD_IMG_MAX_BYTES = 2 * 1024 * 1024;
 
   // រូបភាព Card — upload ជា base64 (Render disk ephemeral) ហើយបម្រើតាម token
   router.post('/control/uploads', adminAuth,
@@ -1233,7 +1233,7 @@ module.exports = function createAdminRouter(ctx) {
       const buf = Buffer.from(m[2], 'base64');
       if (!buf.length) throw new ApiError('រូបភាពទទេ', 400, 'BAD_IMAGE');
       if (buf.length > CARD_IMG_MAX_BYTES)
-        throw new ApiError('រូបភាពធំពេក (អតិបរមា 1.2 MB)', 413, 'IMAGE_TOO_LARGE');
+        throw new ApiError('រូបភាពធំពេក (អតិបរមា 2 MB)', 413, 'IMAGE_TOO_LARGE');
       const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
       const isPng = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
       const isWebp = buf.length > 12 && buf.toString('ascii', 0, 4) === 'RIFF' &&

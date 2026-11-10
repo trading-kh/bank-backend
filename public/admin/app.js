@@ -2854,8 +2854,18 @@ async function openControlUser(userId) {
   });
 }
 
-// បង្រួមរូបភាពក្នុង browser មុនផ្ញើ — canvas → JPEG 0.86 (ទំហំតូច ផ្ទុកលឿនក្នុង app)
-function ctlResizeImage(file, maxDim = 1600, quality = 0.86) {
+// Downscaling / downsampling — បន្ថយចំនួន pixel សរុប (រក្សា ratio ដើម)
+// + បន្ថយ JPEG quality ជាបន្តបន្ទាប់ រហូតរូបភាព ≤ 2 MB មុនផ្ញើទៅ server
+const CTL_IMG_MAX_BYTES = 2 * 1024 * 1024;
+const CTL_IMG_ACCEPT_BYTES = 40 * 1024 * 1024;
+
+function dataUrlBytes(url) {
+  const i = url.indexOf(',');
+  const b64 = i >= 0 ? url.slice(i + 1) : url;
+  return Math.floor((b64.length * 3) / 4);
+}
+
+function ctlResizeImage(file, maxDim = 1920, maxBytes = CTL_IMG_MAX_BYTES) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('អានរូបភាពមិនបាន'));
@@ -2863,15 +2873,36 @@ function ctlResizeImage(file, maxDim = 1600, quality = 0.86) {
       const img = new Image();
       img.onerror = () => reject(new Error('រូបភាពមិនត្រឹមត្រូវ'));
       img.onload = () => {
-        const ratio = Math.min(1, maxDim / Math.max(img.width, img.height));
-        const cv = document.createElement('canvas');
-        cv.width = Math.max(1, Math.round(img.width * ratio));
-        cv.height = Math.max(1, Math.round(img.height * ratio));
-        const ctx = cv.getContext('2d');
-        ctx.fillStyle = '#0b1626';
-        ctx.fillRect(0, 0, cv.width, cv.height);
-        ctx.drawImage(img, 0, 0, cv.width, cv.height);
-        resolve(cv.toDataURL('image/jpeg', quality));
+        const src = Math.max(img.width, img.height);
+        let dim = Math.min(maxDim, src);
+        let quality = 0.88;
+        let url = '';
+        for (let attempt = 0; attempt < 14; attempt++) {
+          const ratio = Math.min(1, dim / src);
+          const w = Math.max(1, Math.round(img.width * ratio));
+          const h = Math.max(1, Math.round(img.height * ratio));
+          const cv = document.createElement('canvas');
+          cv.width = w;
+          cv.height = h;
+          const ctx = cv.getContext('2d');
+          ctx.fillStyle = '#0b1626';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          url = cv.toDataURL('image/jpeg', quality);
+          if (dataUrlBytes(url) <= maxBytes) break;
+          // បន្ថយ pixel ជាមុន (downsampling) រួចទើបបន្ថយ quality
+          if (attempt % 2 === 1 && quality > 0.58) {
+            quality = Math.max(0.58, quality - 0.07);
+          } else {
+            dim = Math.round(dim * 0.8);
+          }
+          if (dim < 720 && quality <= 0.6) break;
+        }
+        if (dataUrlBytes(url) > maxBytes) {
+          reject(new Error('រូបភាពនៅធំពេក សូមជ្រើសរូបផ្សេង'));
+          return;
+        }
+        resolve(url);
       };
       img.src = reader.result;
     };
@@ -2883,7 +2914,9 @@ async function ctlUploadImage(file) {
   if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) {
     throw new Error('សូមជ្រើសរូបភាព JPG / PNG / WEBP');
   }
-  if (file.size > 12 * 1024 * 1024) throw new Error('រូបភាពធំពេក (អតិបរមា 12 MB)');
+  if (file.size > CTL_IMG_ACCEPT_BYTES) {
+    throw new Error('រូបភាពធំពេក (អតិបរមា 40 MB)');
+  }
   const dataUrl = await ctlResizeImage(file);
   const res = await api('/control/uploads', { method: 'POST', body: { image: dataUrl } });
   return res.url;
@@ -2955,7 +2988,7 @@ function openControlEditor(card, opts = {}) {
               <div class="ctl-img-empty${fImage ? ' hidden' : ''}" id="ctlFImgEmpty">
                 <span>⬆️</span>
                 <b>ចុច ឬអូសរូបភាពមកទីនេះ</b>
-                <small>JPG · PNG · WEBP — ប្រព័ន្ធបង្រួមទំហំឱ្យតូចស្វ័យប្រវត្តិ</small>
+                <small>JPG · PNG · WEBP — បង្រួមស្វ័យប្រវត្តិ (downscale) មិនលើស 2 MB</small>
               </div>
               <div class="ctl-img-loading hidden" id="ctlFImgLoading">
                 <span class="ctl-spin"></span> កំពុងផ្ទុកឡើង…

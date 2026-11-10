@@ -24,6 +24,8 @@ const app = express();
 app.use('/me/avatar', express.json({ limit: '300kb' }));
 // KYC: ឯកសារ ៣ សន្លឹកជា base64 data URL → parser ធំជាងគេ ត្រូវ mount មុនគេ
 app.use('/kyc/submissions', express.json({ limit: '14mb' }));
+// Control Card រូបភាព: client បង្រួម ≤ 2 MB → base64 ~2.7 MB → parser 4 MB
+app.use('/admin/api/control/uploads', express.json({ limit: '4mb' }));
 app.use(express.json({ limit: '10kb' }));
 // Express 5 មិនបំពេញ req.body = {} ទេ ពេលសំណើគ្មាន body → routes ដែល destructure
 // req.body នឹង throw TypeError → 500 "Server error". Normalize ត្រង់នេះម្ដង។
