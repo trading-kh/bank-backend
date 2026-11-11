@@ -310,6 +310,7 @@ const DASH_LS = {
   order: 'aura_dash_order_v1',
   hidden: 'aura_dash_hidden_v1',
   sidebar: 'aura_admin_sb_collapsed',
+  archiveOpen: 'aura_admin_sb_archive_open',
 };
 const DASH_COLS = 12;
 const DASH_DEFS = [
@@ -364,7 +365,9 @@ function saveDashOrder() {
 }
 
 function paintArchiveBadge() {
-  setBadge('badge-archive', DASH_DEFS.filter((d) => dashHidden.includes(d.id)).length);
+  const count = DASH_DEFS.filter((d) => dashHidden.includes(d.id)).length;
+  setBadge('badge-archive', count, count ? 'warning' : '');
+  renderSidebarArchive();
 }
 
 function saveDashState() {
@@ -372,6 +375,72 @@ function saveDashState() {
   localStorage.setItem(DASH_LS.layout, JSON.stringify(dashLayout));
   localStorage.setItem(DASH_LS.hidden, JSON.stringify(dashHidden));
   paintArchiveBadge();
+}
+
+/* ---------- sidebar archive folder ---------- */
+function setSidebarArchiveOpen(open, persist = true) {
+  const box = $('#sbArchive');
+  if (!box) return;
+  box.hidden = !open;
+  const btn = $('#navArchiveToggle');
+  if (btn) {
+    btn.classList.toggle('is-open', !!open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  if (persist) localStorage.setItem(DASH_LS.archiveOpen, open ? '1' : '0');
+}
+
+function renderSidebarArchive() {
+  const box = $('#sbArchive');
+  if (!box) return;
+  const hidden = DASH_DEFS.filter((d) => dashHidden.includes(d.id));
+  box.innerHTML = hidden.length
+    ? `<div class="nav-archive-head">
+         <span>${hidden.length} widget</span>
+         <button type="button" class="nav-archive-act" id="sbArchReset" title="កំណត់ទម្រង់ដើមវិញ">⟲</button>
+       </div>
+       ${hidden.map((d) => `<div class="nav-archive-item">
+         <span class="nav-archive-ic">${d.icon}</span>
+         <span class="nav-archive-name" title="${esc(d.name)}">${esc(d.name)}</span>
+         <button type="button" class="nav-archive-act nav-archive-restore" data-sb-restore="${d.id}" title="ស្តារ ${esc(d.name)}">↩</button>
+       </div>`).join('')}`
+    : `<div class="nav-archive-empty">ចុច ✕ លើ widget ណាមួយ ដើម្បីផ្លាស់វាមកទីនេះ</div>`;
+
+  box.querySelectorAll('[data-sb-restore]').forEach((b) => {
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      restoreDashWidget(b.dataset.sbRestore);
+    });
+  });
+  const r = $('#sbArchReset');
+  if (r) r.addEventListener('click', (ev) => { ev.stopPropagation(); resetDashLayout(); });
+
+  const saved = localStorage.getItem(DASH_LS.archiveOpen);
+  setSidebarArchiveOpen(saved === null ? hidden.length > 0 : saved === '1', false);
+}
+
+/* flyout when the sidebar is collapsed to icons */
+function initSidebarArchive() {
+  const wrap = $('#navFolderWrap');
+  const toggle = $('#navArchiveToggle');
+  if (!wrap || !toggle) return;
+  toggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSidebarArchiveOpen($('#sbArchive')?.hidden === true);
+  });
+  wrap.addEventListener('mouseenter', () => {
+    const app = $('#app');
+    if (!app || !app.classList.contains('sb-collapsed')) return;
+    if (window.matchMedia('(max-width: 820px)').matches) return;
+    const box = $('#sbArchive');
+    const item = wrap.querySelector('.nav-item');
+    if (!box || !item) return;
+    const r = item.getBoundingClientRect();
+    box.style.top = Math.max(10, Math.min(r.top - 6, window.innerHeight - 360)) + 'px';
+    box.classList.add('flyout');
+  });
+  wrap.addEventListener('mouseleave', () => $('#sbArchive')?.classList.remove('flyout'));
 }
 
 const DW_GRIP = `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>`;
@@ -427,21 +496,28 @@ function ensureDashEmptyState() {
 function hideDashWidget(id) {
   if (!id || dashHidden.includes(id)) return;
   dashHidden.push(id);
+  localStorage.setItem(DASH_LS.archiveOpen, '1');
   saveDashState();
   const el = $(`.dash-widget[data-widget="${id}"]`);
   if (el) {
     el.classList.add('dw-removing');
     setTimeout(() => { el.remove(); ensureDashEmptyState(); }, 220);
   }
-  toast(`បានផ្លាស់ “${dashMeta[id]?.name || id}” ទៅ Widget ដែលលាក់`, 'ok');
+  toast(`បានផ្លាស់ “${dashMeta[id]?.name || id}” ទៅថត Widget ដែលលាក់`, 'ok');
 }
 
-function restoreDashWidget(id) {
+async function restoreDashWidget(id) {
   if (!dashMeta[id]) return;
   dashHidden = dashHidden.filter((h) => h !== id);
   saveDashState();
   toast(`បានស្តារ “${dashMeta[id].name}” ត្រឡប់ទៅផ្ទាំងដើម`, 'ok');
-  render();
+  await render();
+  const el = $(`.dash-widget[data-widget="${id}"]`);
+  if (el) {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('dw-just-restored');
+    setTimeout(() => el.classList.remove('dw-just-restored'), 1100);
+  }
 }
 
 function resetDashLayout() {
@@ -456,56 +532,235 @@ function resetDashLayout() {
   });
 }
 
-/* ---------- pointer drag / resize ---------- */
+/* ---------- drag / resize engine ---------- */
 const dashIsMobile = () => window.matchMedia('(max-width: 820px)').matches;
+let dashDragging = false;
+
+/* FLIP helpers use offsetLeft/offsetTop (layout position) so in-flight
+   transforms of other widgets don't pollute the measurements. */
+function captureRects(grid, skip) {
+  const map = new Map();
+  $$('.dash-widget', grid).forEach((el) => {
+    if (el !== skip) map.set(el, { left: el.offsetLeft, top: el.offsetTop });
+  });
+  return map;
+}
+
+function playFlip(grid, prev) {
+  if (!prev || !prev.size) return;
+  $$('.dash-widget', grid).forEach((el) => {
+    const before = prev.get(el);
+    if (!before) return;
+    const dx = before.left - el.offsetLeft;
+    const dy = before.top - el.offsetTop;
+    if (!dx && !dy) return;
+    el.style.transition = 'none';
+    el.style.transform = `translate3d(${dx}px,${dy}px,0)`;
+    void el.offsetWidth;
+    el.style.transition = 'transform .24s cubic-bezier(.22,.85,.25,1)';
+    el.style.transform = '';
+    const clear = (ev) => {
+      if (ev && ev.propertyName !== 'transform') return;
+      el.style.transition = '';
+      el.style.transform = '';
+      el.removeEventListener('transitionend', clear);
+    };
+    el.addEventListener('transitionend', clear);
+  });
+}
+
+function showDashGuides(grid) {
+  $$('.dw-guides', grid).forEach((g) => g.remove());
+  const g = document.createElement('div');
+  g.className = 'dw-guides';
+  for (let i = 0; i < DASH_COLS; i++) g.appendChild(document.createElement('i'));
+  grid.appendChild(g);
+  requestAnimationFrame(() => g.classList.add('on'));
+  return g;
+}
+
+function hideDashGuides(grid) {
+  if (!grid) return;
+  $$('.dw-guides', grid).forEach((g) => {
+    g.classList.remove('on');
+    setTimeout(() => g.remove(), 200);
+  });
+}
 
 function startDashDrag(e, grid, widget) {
-  e.preventDefault();
+  if (dashDragging) return;
+  dashDragging = true;
+
+  const id = widget.dataset.widget;
+  const size = dashSize(id);
   const sx = e.clientX, sy = e.clientY;
-  let moved = false, raf = 0, dir = 0;
   let lx = sx, ly = sy;
-  widget.classList.add('dw-dragging');
-  document.body.classList.add('dw-busy');
+  const rect0 = widget.getBoundingClientRect();
+  const grabX = sx - rect0.left;
+  const grabY = sy - rect0.top;
+  // index the dragged widget occupied among its siblings (for Escape)
+  const originSlot = $$('.dash-widget', grid).indexOf(widget);
+
+  let ph = null;
+  let active = false;
+  let moved = false;
+  let raf = 0;
+  let dir = 0;
+
+  const begin = () => {
+    if (active) return;
+    active = true;
+    widget.style.setProperty('--dw-w', size.w);
+    widget.style.setProperty('--dw-h', size.h);
+    widget.classList.add('dw-lifted');
+    widget.style.position = 'fixed';
+    widget.style.left = rect0.left + 'px';
+    widget.style.top = rect0.top + 'px';
+    widget.style.width = rect0.width + 'px';
+    widget.style.height = rect0.height + 'px';
+    widget.style.zIndex = '95';
+    widget.style.margin = '0';
+    widget.style.pointerEvents = 'none';
+    widget.style.transform = 'translate3d(0,0,0) scale(1.02) rotate(.35deg)';
+
+    ph = document.createElement('div');
+    ph.className = 'dw-placeholder';
+    ph.style.setProperty('--dw-w', size.w);
+    ph.style.setProperty('--dw-h', size.h);
+    if (dashIsMobile()) ph.style.height = rect0.height + 'px';
+    ph.innerHTML = '<span class="dw-ph-inner"><span class="dw-ph-dot"></span>ដាក់ទីនេះ</span>';
+    grid.insertBefore(ph, widget);
+
+    showDashGuides(grid);
+    document.body.classList.add('dw-busy');
+  };
 
   const place = () => {
-    const under = document.elementFromPoint(lx, ly);
-    const over = under && under.closest ? under.closest('.dash-widget') : null;
-    if (!over || over === widget || over.parentElement !== grid) return;
-    const r = over.getBoundingClientRect();
-    const midY = r.top + r.height / 2;
-    const after = ly > midY
-      || (Math.abs(ly - midY) < r.height * 0.18 && lx > r.left + r.width / 2);
-    grid.insertBefore(widget, after ? over.nextSibling : over);
+    if (!ph) return;
+    const own = ph.getBoundingClientRect();
+    if (lx >= own.left && lx <= own.right && ly >= own.top && ly <= own.bottom) return;
+    const stack = document.elementsFromPoint(lx, ly) || [];
+    let target = null;
+    for (const node of stack) {
+      if (!node.closest) continue;
+      const w = node.closest('.dash-widget');
+      if (w && w !== widget && w.parentElement === grid) { target = w; break; }
+    }
+    const kids = $$('.dash-widget', grid).filter((el) => el !== widget);
+    if (!target && kids.length) {
+      let best = Infinity;
+      for (const w of kids) {
+        const r = w.getBoundingClientRect();
+        const d = Math.hypot(lx - (r.left + r.width / 2), ly - (r.top + r.height / 2));
+        if (d < best) { best = d; target = w; }
+      }
+    }
+    if (!target) {
+      if (!kids.length) grid.appendChild(ph);
+      return;
+    }
+    const r = target.getBoundingClientRect();
+    const after = ly > r.top + r.height / 2
+      || (ly > r.top + r.height * 0.25 && lx > r.left + r.width * 0.6);
+    const tIdx = kids.indexOf(target);
+    const ref = kids[Math.max(0, Math.min(kids.length, tIdx + (after ? 1 : 0)))] || null;
+
+    let next = ph.nextElementSibling;
+    while (next && !next.classList.contains('dash-widget')) next = next.nextElementSibling;
+    if (next === ref) return;
+
+    const prev = captureRects(grid, widget);
+    grid.insertBefore(ph, ref);
+    playFlip(grid, prev);
   };
-  const tick = () => {
-    if (dir) { window.scrollBy(0, dir * 14); place(); }
-    raf = requestAnimationFrame(tick);
-  };
-  const onMove = (ev) => {
-    lx = ev.clientX; ly = ev.clientY;
-    if (!moved && Math.hypot(lx - sx, ly - sy) < 4) return;
-    moved = true;
-    dir = ly > window.innerHeight - 90 ? 1 : ly < 90 ? -1 : 0;
+
+  const loop = () => {
+    raf = 0;
+    if (!active) return;
+    if (dir) {
+      const dist = dir > 0 ? window.innerHeight - ly : ly;
+      const k = Math.max(0, Math.min(1, 1 - dist / 150));
+      window.scrollBy(0, dir * Math.round(4 + k * 20));
+    }
+    widget.style.transform = `translate3d(${lx - grabX - rect0.left}px,${ly - grabY - rect0.top}px,0) scale(1.02) rotate(.35deg)`;
     place();
+    if (dir) raf = requestAnimationFrame(loop);
   };
-  const done = () => {
-    cancelAnimationFrame(raf);
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(loop); };
+
+  const onMove = (ev) => {
+    lx = ev.clientX;
+    ly = ev.clientY;
+    if (!active) {
+      if (Math.hypot(lx - sx, ly - sy) < 4) return;
+      begin();
+    }
+    moved = true;
+    const edge = Math.min(140, window.innerHeight * 0.2);
+    dir = ly > window.innerHeight - edge ? 1 : ly < edge ? -1 : 0;
+    schedule();
+  };
+
+  const finish = (commit) => {
+    if (!dashDragging) return;
+    dashDragging = false;
     window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', done);
-    window.removeEventListener('pointercancel', done);
-    widget.classList.remove('dw-dragging');
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
+    window.removeEventListener('keydown', onKey);
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
     document.body.classList.remove('dw-busy');
-    if (moved) { saveDashOrder(); redrawDashChart(); }
+
+    if (!active) return;
+    active = false;
+    hideDashGuides(grid);
+
+    if (!commit && ph) {
+      const kids = $$('.dash-widget', grid).filter((el) => el !== widget);
+      const ref = kids[originSlot] || null;
+      if (ref !== ph) grid.insertBefore(ph, ref);
+    }
+
+    const target = ph ? ph.getBoundingClientRect() : null;
+    widget.classList.add('dw-dropping');
+    widget.style.transition = 'transform .22s cubic-bezier(.2,.85,.25,1)';
+    if (target) {
+      widget.style.transform = `translate3d(${target.left - rect0.left}px,${target.top - rect0.top}px,0) scale(1) rotate(0deg)`;
+    }
+    const commitNow = () => {
+      if (ph) {
+        widget.style.transition = '';
+        ['position', 'left', 'top', 'width', 'height', 'zIndex', 'margin', 'pointerEvents', 'transform'].forEach((p) => {
+          widget.style[p] = '';
+        });
+        grid.insertBefore(widget, ph);
+        ph.remove();
+      }
+      widget.classList.remove('dw-lifted', 'dw-dropping');
+      widget.classList.add('dw-settled');
+      setTimeout(() => widget.classList.remove('dw-settled'), 320);
+      if (commit && moved) saveDashOrder();
+      redrawDashChart();
+    };
+    setTimeout(commitNow, 230);
   };
-  raf = requestAnimationFrame(tick);
+
+  const onUp = () => finish(true);
+  const onCancel = () => finish(false);
+  const onKey = (ev) => { if (ev.key === 'Escape') finish(false); };
+
   window.addEventListener('pointermove', onMove);
-  window.addEventListener('pointerup', done);
-  window.addEventListener('pointercancel', done);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onCancel);
+  window.addEventListener('keydown', onKey);
 }
 
 function startDashResize(e, grid, widget) {
+  if (dashDragging) return;
   e.preventDefault();
   e.stopPropagation();
+  dashDragging = true;
+
   const id = widget.dataset.widget;
   const sx = e.clientX, sy = e.clientY;
   const size0 = dashSize(id);
@@ -515,19 +770,40 @@ function startDashResize(e, grid, widget) {
   const gap = parseFloat(cs.columnGap) || 16;
   const colW = (grid.clientWidth - gap * (DASH_COLS - 1)) / DASH_COLS;
   const rowUnit = (parseFloat(cs.gridAutoRows) || 40) + (parseFloat(cs.rowGap) || gap);
-  let w = w0, h = h0;
+  let w = w0, h = h0, raf = 0, lx = sx, ly = sy;
+
   widget.classList.add('dw-resizing');
   document.body.classList.add('dw-busy');
+  showDashGuides(grid);
+
+  const badge = document.createElement('div');
+  badge.className = 'dw-size-badge';
+  badge.textContent = `${w} × ${h}`;
+  badge.style.transform = `translate3d(${lx + 16}px,${ly + 16}px,0)`;
+  document.body.appendChild(badge);
+
+  const apply = () => {
+    raf = 0;
+    if (Number(widget.style.getPropertyValue('--dw-w')) !== w) widget.style.setProperty('--dw-w', w);
+    if (Number(widget.style.getPropertyValue('--dw-h')) !== h) widget.style.setProperty('--dw-h', h);
+    badge.textContent = `${w} × ${h}`;
+    badge.style.transform = `translate3d(${lx + 16}px,${ly + 16}px,0)`;
+  };
   const onMove = (ev) => {
-    w = Math.min(DASH_COLS, Math.max(2, w0 + Math.round((ev.clientX - sx) / (colW + gap))));
-    h = Math.min(14, Math.max(2, h0 + Math.round((ev.clientY - sy) / rowUnit)));
-    widget.style.setProperty('--dw-w', w);
-    widget.style.setProperty('--dw-h', h);
+    lx = ev.clientX;
+    ly = ev.clientY;
+    w = Math.min(DASH_COLS, Math.max(2, w0 + Math.round((lx - sx) / (colW + gap))));
+    h = Math.min(14, Math.max(2, h0 + Math.round((ly - sy) / rowUnit)));
+    if (!raf) raf = requestAnimationFrame(apply);
   };
   const done = () => {
+    dashDragging = false;
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', done);
     window.removeEventListener('pointercancel', done);
+    if (raf) cancelAnimationFrame(raf);
+    badge.remove();
+    hideDashGuides(grid);
     widget.classList.remove('dw-resizing');
     document.body.classList.remove('dw-busy');
     dashLayout[id] = { w, h };
@@ -541,16 +817,22 @@ function startDashResize(e, grid, widget) {
 
 function dashPointerDown(e) {
   if (e.pointerType === 'mouse' && e.button !== 0) return;
-  if (dashIsMobile()) return;
   const grid = e.currentTarget;
   const widget = e.target.closest('.dash-widget');
   if (!widget || !grid.contains(widget)) return;
-  if (e.target.closest('.dw-resize')) { startDashResize(e, grid, widget); return; }
-  if (e.target.closest('.dw-btn') && !e.target.closest('.dw-drag')) return;
 
-  const handle = e.target.closest('.dw-drag');
-  const interactive = e.target.closest('a, button, input, select, textarea, .table-wrap, canvas, .live-chip, .qa-btn, [data-user-view]');
-  if (!handle && !(widget.dataset.drag === 'all' && !interactive)) return;
+  if (e.target.closest('.dw-resize')) {
+    if (dashIsMobile()) return;
+    startDashResize(e, grid, widget);
+    return;
+  }
+  // never start a drag from a real control / scrollable area
+  if (e.target.closest('a, button:not(.dw-drag), input, select, textarea, canvas, .table-wrap, [data-user-view]')) return;
+
+  const head = e.target.closest('.dw-head');
+  const grip = e.target.closest('.dw-drag');
+  const anywhere = widget.dataset.drag === 'all' && e.pointerType === 'mouse';
+  if (!head && !grip && !anywhere) return;
   startDashDrag(e, grid, widget);
 }
 
@@ -565,6 +847,21 @@ function initDashGrid() {
     hideDashWidget(btn.closest('.dash-widget')?.dataset.widget);
   });
   grid.addEventListener('pointerdown', dashPointerDown);
+  grid.addEventListener('dblclick', (e) => {
+    if (e.target.closest('button, a, input')) return;
+    const head = e.target.closest('.dw-head');
+    const widget = head && head.closest('.dash-widget');
+    if (!widget) return;
+    const id = widget.dataset.widget;
+    const d = dashMeta[id];
+    if (!d) return;
+    delete dashLayout[id];
+    localStorage.setItem(DASH_LS.layout, JSON.stringify(dashLayout));
+    widget.style.setProperty('--dw-w', d.w);
+    widget.style.setProperty('--dw-h', d.h);
+    redrawDashChart();
+    toast(`បានកំណត់ទំហំ “${d.name}” ដើមវិញ`, 'ok');
+  });
   const box = grid.querySelector('.chart-box');
   if (dashChartRO) { dashChartRO.disconnect(); dashChartRO = null; }
   if (box && window.ResizeObserver) {
@@ -4111,11 +4408,13 @@ function setSidebarCollapsed(on) {
     const label = b.querySelector('.nav-tx');
     b.title = on && label ? label.textContent.trim() : '';
   });
+  $('#sbArchive')?.classList.remove('flyout');
   setTimeout(redrawDashChart, 300);
 }
 
 $('#sidebarToggle').onclick = () => setSidebarCollapsed(!$('#app').classList.contains('sb-collapsed'));
 setSidebarCollapsed(localStorage.getItem(DASH_LS.sidebar) === '1');
 paintArchiveBadge();
+initSidebarArchive();
 
 boot();

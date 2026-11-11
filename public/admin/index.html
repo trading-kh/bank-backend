@@ -42,7 +42,13 @@
       <div class="nav-group">
         <span class="nav-group-label">ទូទៅ</span>
         <button class="nav-item active" data-page="dashboard"><span class="nav-ic">▤</span><span class="nav-tx">ផ្ទាំងដើម</span><span class="nav-badge" id="badge-dashboard"></span></button>
-        <button class="nav-item" data-page="archive"><span class="nav-ic">🗄</span><span class="nav-tx">Widget ដែលលាក់</span><span class="nav-badge" id="badge-archive"></span></button>
+        <div class="nav-folder-wrap" id="navFolderWrap">
+          <button class="nav-item nav-folder" data-page="archive"><span class="nav-ic">🗄</span><span class="nav-tx">Widget ដែលលាក់</span><span class="nav-badge" id="badge-archive"></span></button>
+          <button type="button" class="nav-caret" id="navArchiveToggle" title="បើក/បិទបញ្ជី widget ដែលលាក់" aria-label="បើក ឬបិទបញ្ជី widget ដែលលាក់" aria-expanded="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="nav-archive" id="sbArchive" hidden></div>
+        </div>
         <button class="nav-item" data-page="control"><span class="nav-ic">🎛</span><span class="nav-tx">Control U</span><span class="nav-badge" id="badge-control"></span></button>
       </div>
 
