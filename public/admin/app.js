@@ -310,6 +310,7 @@ const DASH_LS = {
   layout: 'aura_dash_layout_v1',
   order: 'aura_dash_order_v1',
   hidden: 'aura_dash_hidden_v1',
+  theme: 'aura_dash_theme_v1',
   sidebar: 'aura_admin_sb_collapsed',
   archiveOpen: 'aura_admin_sb_archive_open',
 };
@@ -332,15 +333,30 @@ const DASH_DEFS = [
 ];
 const dashMeta = Object.fromEntries(DASH_DEFS.map((d) => [d.id, d]));
 
+const DASH_THEMES = [
+  { id: 'blue', name: 'ខៀវស្រាល' },
+  { id: 'app', name: 'ដើម (Main App)' },
+  { id: 'navy', name: 'Navy' },
+  { id: 'glass', name: 'Glassmorphism' },
+];
+
 /* free-placement boxes: { id: { x, y, w, h } } in px on the canvas surface */
 let dashFree = {};
 let dashHidden = [];
+let dashThemes = {};
 let dashChartDays = [];
 let dashChartRO = null;
 let dashCanvasW = 0;
 try { dashFree = JSON.parse(localStorage.getItem(DASH_LS.free) || '{}') || {}; } catch (_) { dashFree = {}; }
 try { dashHidden = JSON.parse(localStorage.getItem(DASH_LS.hidden) || '[]') || []; } catch (_) { dashHidden = []; }
+try { dashThemes = JSON.parse(localStorage.getItem(DASH_LS.theme) || '{}') || {}; } catch (_) { dashThemes = {}; }
 if (!Array.isArray(dashHidden)) dashHidden = [];
+if (!dashThemes || typeof dashThemes !== 'object' || Array.isArray(dashThemes)) dashThemes = {};
+
+function dashThemeOf(id) {
+  const t = dashThemes[id];
+  return DASH_THEMES.some((x) => x.id === t) ? t : 'blue';
+}
 
 const DASH_MIN_W = 160;
 const DASH_MIN_H = 120;
@@ -460,16 +476,18 @@ function initSidebarArchive() {
   wrap.addEventListener('mouseleave', () => $('#sbArchive')?.classList.remove('flyout'));
 }
 
-const DW_CLOSE = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+const DW_CLOSE = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+const DW_SWATCH = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></svg>`;
 const dwTools = () => `<div class="dw-tools">
-  <button type="button" class="dw-btn dw-hide" title="បិទ — លាក់ទៅ “Widget ដែលលាក់”" aria-label="បិទ">${DW_CLOSE}</button>
+  <button type="button" class="dw-btn dw-theme" aria-label="ប្ដូរពណ៌កាត">${DW_SWATCH}</button>
+  <button type="button" class="dw-btn dw-hide" aria-label="បិទ">${DW_CLOSE}</button>
 </div>`;
 
 const DW_HANDLES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
   .map((d) => `<span class="dw-h dw-h-${d}" data-dir="${d}" aria-hidden="true"></span>`).join('');
 
 function dwShell(id, inner, { cls = 'card', dragAll = false } = {}) {
-  return `<section class="dash-widget ${cls}" data-widget="${id}" tabindex="-1"${dragAll ? ' data-drag="all"' : ''}>
+  return `<section class="dash-widget ${cls}" data-widget="${id}" data-theme="${dashThemeOf(id)}" tabindex="-1"${dragAll ? ' data-drag="all"' : ''}>
     ${inner}${DW_HANDLES}</section>`;
 }
 
@@ -482,7 +500,14 @@ function dwCard(id, title, body, meta = '', bodyCls = '') {
 function redrawDashChart() {
   const cv = $('#txChart');
   if (cv && cv.isConnected && dashChartDays.length) {
-    drawLine(cv, dashChartDays, {
+    const dark = dashThemeOf('txchart') !== 'blue';
+    drawLine(cv, dashChartDays, dark ? {
+      color: '#7FB6E8',
+      grid: 'rgba(146,186,226,.18)',
+      axis: '#93AECB',
+      fillTop: 'rgba(106,160,214,.34)',
+      fillBottom: 'rgba(106,160,214,0)',
+    } : {
       color: '#3E6C9C',
       grid: 'rgba(23,44,68,.14)',
       axis: '#6E87A3',
@@ -552,11 +577,12 @@ async function restoreDashWidget(id) {
 
 function resetDashLayout() {
   confirmAction('កំណត់ទម្រង់ដើមវិញ', 'ទីតាំង ទំហំ និង widget ទាំងអស់ដែលបានលាក់ នឹងត្រឡប់ទៅដើមវិញ។', () => {
-    dashFree = {}; dashHidden = [];
+    dashFree = {}; dashHidden = []; dashThemes = {};
     localStorage.removeItem(DASH_LS.free);
     localStorage.removeItem(DASH_LS.layout);
     localStorage.removeItem(DASH_LS.order);
     localStorage.removeItem(DASH_LS.hidden);
+    localStorage.removeItem(DASH_LS.theme);
     freeDefaultsCache = { w: 0, map: null };
     paintArchiveBadge();
     toast('បានកំណត់ទម្រង់ដើមវិញ', 'ok');
@@ -910,10 +936,89 @@ function dashKeyNudge(e) {
   applyCanvasHeight(canvas);
 }
 
+/* one floating palette popover shared by every card */
+let dwThemePop = null;
+let dwThemeBound = false;
+
+function ensureThemePop() {
+  if (dwThemePop && dwThemePop.isConnected) return dwThemePop;
+  dwThemePop = document.createElement('div');
+  dwThemePop.className = 'dw-theme-pop';
+  dwThemePop.hidden = true;
+  dwThemePop.innerHTML = `<div class="dw-theme-pop-title">ពណ៌កាត</div>` +
+    DASH_THEMES.map((t) => `<button type="button" class="dw-theme-opt" data-dash-theme="${t.id}"><i></i><span>${t.name}</span></button>`).join('');
+  document.body.appendChild(dwThemePop);
+  dwThemePop.addEventListener('click', (e) => {
+    const opt = e.target.closest('[data-dash-theme]');
+    if (!opt) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (dwThemePop.dataset.widget) setDashTheme(dwThemePop.dataset.widget, opt.dataset.dashTheme);
+  });
+  if (!dwThemeBound) {
+    dwThemeBound = true;
+    document.addEventListener('pointerdown', (e) => {
+      if (!dwThemePop || dwThemePop.hidden) return;
+      if (e.target.closest('.dw-theme-pop') || e.target.closest('.dw-theme')) return;
+      closeThemePop();
+    }, true);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && dwThemePop && !dwThemePop.hidden) closeThemePop();
+    });
+  }
+  return dwThemePop;
+}
+
+function closeThemePop() {
+  if (dwThemePop) { dwThemePop.hidden = true; dwThemePop.dataset.widget = ''; }
+}
+
+function openThemePop(btn, widget) {
+  const pop = ensureThemePop();
+  const id = widget.dataset.widget;
+  pop.dataset.widget = id;
+  pop.querySelectorAll('[data-dash-theme]').forEach((o) => {
+    o.classList.toggle('on', o.dataset.dashTheme === dashThemeOf(id));
+  });
+  pop.hidden = false;
+  const r = btn.getBoundingClientRect();
+  const pr = pop.getBoundingClientRect();
+  const x = Math.max(10, Math.min(r.right - pr.width, window.innerWidth - pr.width - 10));
+  let y = r.bottom + 8;
+  if (y + pr.height > window.innerHeight - 10) y = Math.max(10, r.top - pr.height - 8);
+  pop.style.left = Math.round(x) + 'px';
+  pop.style.top = Math.round(y) + 'px';
+}
+
+function toggleThemePop(btn, widget) {
+  const pop = ensureThemePop();
+  if (!pop.hidden && pop.dataset.widget === widget.dataset.widget) { closeThemePop(); return; }
+  openThemePop(btn, widget);
+}
+
+function setDashTheme(id, theme) {
+  if (!dashMeta[id] || !DASH_THEMES.some((t) => t.id === theme)) return;
+  if (theme === 'blue') delete dashThemes[id]; else dashThemes[id] = theme;
+  localStorage.setItem(DASH_LS.theme, JSON.stringify(dashThemes));
+  const widget = $(`.dash-widget[data-widget="${id}"]`);
+  if (widget) widget.dataset.theme = dashThemeOf(id);
+  closeThemePop();
+  if (id === 'txchart') redrawDashChart();
+}
+
 function initDashCanvas() {
   const canvas = $('#dashGrid');
   if (!canvas) return;
+  closeThemePop();
   canvas.addEventListener('click', (e) => {
+    const themeBtn = e.target.closest('.dw-theme');
+    if (themeBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const widget = themeBtn.closest('.dash-widget');
+      if (widget) toggleThemePop(themeBtn, widget);
+      return;
+    }
     const btn = e.target.closest('.dw-hide');
     if (!btn) return;
     e.preventDefault();
@@ -1052,7 +1157,7 @@ async function renderDashboard() {
     recenttx: dwCard('recenttx', '💸 ប្រតិបត្តិការថ្មីៗ', tableHtml([
       { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id) },
       { label: 'ចំណងជើង', render: (r) => esc(r.title) },
-      { label: 'ទឹកប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#a8534a' : '#4d7a53'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
+      { label: 'ទឹកប្រាក់', num: true, render: (r) => `<span class="tx-amt ${r.is_expense ? 'tx-out' : 'tx-in'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
       { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
     ], s.recentTx, { empty: 'មិនទាន់មានប្រតិបត្តិការ' })),
 
