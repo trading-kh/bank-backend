@@ -240,8 +240,8 @@ function drawLine(canvas, points, opts = {}) {
   const y = (v) => h - padB - (h - padT - padB) * (v / max);
 
   // grid
-  ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = 1;
-  ctx.fillStyle = '#8fa6c4'; ctx.font = '10px system-ui'; ctx.textAlign = 'right';
+  ctx.strokeStyle = opts.grid || 'rgba(255,255,255,.08)'; ctx.lineWidth = 1;
+  ctx.fillStyle = opts.axis || '#8fa6c4'; ctx.font = '10px system-ui'; ctx.textAlign = 'right';
   for (let g = 0; g <= 3; g++) {
     const gy = padT + (h - padT - padB) * (g / 3);
     ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(w - padR, gy); ctx.stroke();
@@ -249,8 +249,8 @@ function drawLine(canvas, points, opts = {}) {
   }
   // area + line
   const grad = ctx.createLinearGradient(0, padT, 0, h - padB);
-  grad.addColorStop(0, 'rgba(59,154,217,.45)');
-  grad.addColorStop(1, 'rgba(59,154,217,0)');
+  grad.addColorStop(0, opts.fillTop || 'rgba(59,154,217,.45)');
+  grad.addColorStop(1, opts.fillBottom || 'rgba(59,154,217,0)');
   ctx.beginPath();
   points.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p.value)) : ctx.moveTo(x(i), y(p.value))));
   ctx.lineTo(x(points.length - 1), h - padB); ctx.lineTo(x(0), h - padB); ctx.closePath();
@@ -463,8 +463,11 @@ function initSidebarArchive() {
 const DW_GRIP = `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>`;
 const DW_CLOSE = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
 const dwTools = () => `<div class="dw-tools">
-  <button type="button" class="dw-btn dw-drag" title="អូសដើម្បីរៀបចំ">${DW_GRIP}</button>
-  <button type="button" class="dw-btn dw-hide" title="លាក់ទៅ “Widget ដែលលាក់”">${DW_CLOSE}</button>
+  <button type="button" class="dw-btn dw-drag" title="អូសដើម្បីរៀបចំ" aria-label="អូស">${DW_GRIP}</button>
+  <button type="button" class="dw-btn dw-hide" title="លាក់ទៅ “Widget ដែលលាក់”" aria-label="លាក់">${DW_CLOSE}</button>
+  <button type="button" class="dw-btn dw-reset" title="ត្រឡប់ទំហំ និងទីតាំងដើម" aria-label="កំណត់ទម្រង់ដើម">
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>
+  </button>
 </div>`;
 
 const DW_HANDLES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
@@ -476,13 +479,22 @@ function dwShell(id, inner, { cls = 'card', dragAll = false } = {}) {
 }
 
 function dwCard(id, title, body, meta = '', bodyCls = '') {
-  return dwShell(id, `<div class="dw-head"><h3>${title}</h3>${meta ? `<div class="dw-meta">${meta}</div>` : ''}${dwTools()}</div>
+  return dwShell(id, `<div class="dw-head"><h3>${title}</h3>${dwTools()}</div>
+    ${meta ? `<div class="dw-meta">${meta}</div>` : ''}
     <div class="dw-body${bodyCls ? ' ' + bodyCls : ''}">${body}</div>`);
 }
 
 function redrawDashChart() {
   const cv = $('#txChart');
-  if (cv && cv.isConnected && dashChartDays.length) drawLine(cv, dashChartDays);
+  if (cv && cv.isConnected && dashChartDays.length) {
+    drawLine(cv, dashChartDays, {
+      color: '#5F7F94',
+      grid: 'rgba(63,70,57,.14)',
+      axis: '#8A887A',
+      fillTop: 'rgba(125,157,177,.32)',
+      fillBottom: 'rgba(125,157,177,0)',
+    });
+  }
 }
 
 function dashAllHiddenHtml() {
@@ -908,6 +920,14 @@ function initDashCanvas() {
   const canvas = $('#dashGrid');
   if (!canvas) return;
   canvas.addEventListener('click', (e) => {
+    const resetBtn = e.target.closest('.dw-reset');
+    if (resetBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const widget = resetBtn.closest('.dash-widget');
+      if (widget) resetDashWidgetBox(widget);
+      return;
+    }
     const btn = e.target.closest('.dw-hide');
     if (!btn) return;
     e.preventDefault();
@@ -984,15 +1004,17 @@ async function renderDashboard() {
   const greet = hour < 12 ? 'អរុណសួស្តី' : hour < 18 ? 'សាយ័ន្តសួស្តី' : 'រាត្រីសួស្តី';
 
   const kpi = (id, icon, tone, label, value, sub) => dwShell(id, `
-    ${dwTools()}
-    <div class="kpi-top"><span class="kpi-label">${label}</span><span class="kpi-ic ${tone}">${icon}</span></div>
-    <div class="kpi-value">${value}</div>
-    <div class="kpi-sub">${sub}</div>`, { cls: 'card kpi', dragAll: true });
+    <div class="dw-head"><h3><span class="kpi-emoji">${icon}</span>${label}</h3>${dwTools()}</div>
+    <div class="kpi-body">
+      <div class="kpi-value">${value}</div>
+      <div class="kpi-sub">${sub}</div>
+    </div>`, { cls: 'card kpi' + (tone ? ' tone-' + tone : ''), dragAll: true });
 
   const parts = {
-    hero: dwShell('hero', `<div class="dash-hero">
+    hero: dwShell('hero', `
+      <div class="dw-head"><h3>⚡ Aura Bank · Admin</h3>${dwTools()}</div>
+      <div class="dash-hero">
       <div class="hero-left">
-        <span class="hero-kicker">⚡ Aura Bank · Admin</span>
         <h1 class="hero-title">${greet}, ${esc(admin?.name || 'Admin')}</h1>
         <p class="hero-sub">ទិដ្ឋភាពរួមនៃគណនី ប្រតិបត្តិការ និងសុខភាពប្រព័ន្ធ — គ្រប់គ្រងអ្នកប្រើបានពេញលេញពីទីនេះ។</p>
       </div>
@@ -1001,7 +1023,7 @@ async function renderDashboard() {
         <button class="btn ghost" id="dashMsg">✉️ ផ្ញើសារ</button>
         <button class="btn ghost" id="dashControl">🎛 Control U</button>
       </div>
-    </div>${dwTools()}`, { cls: 'dash-widget-hero', dragAll: true }),
+    </div>`, { cls: 'dash-widget-hero', dragAll: true }),
 
     quick: dwCard('quick', '⚡ ចាប់ផ្ដើមរហ័ស', `
       <div class="quick-grid">
@@ -1044,7 +1066,7 @@ async function renderDashboard() {
     recenttx: dwCard('recenttx', '💸 ប្រតិបត្តិការថ្មីៗ', tableHtml([
       { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id) },
       { label: 'ចំណងជើង', render: (r) => esc(r.title) },
-      { label: 'ទឹកប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#ff9b9b' : '#7ee2a8'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
+      { label: 'ទឹកប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#a8534a' : '#4d7a53'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
       { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
     ], s.recentTx, { empty: 'មិនទាន់មានប្រតិបត្តិការ' })),
 
