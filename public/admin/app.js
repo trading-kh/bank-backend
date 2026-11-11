@@ -460,14 +460,9 @@ function initSidebarArchive() {
   wrap.addEventListener('mouseleave', () => $('#sbArchive')?.classList.remove('flyout'));
 }
 
-const DW_GRIP = `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>`;
 const DW_CLOSE = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
 const dwTools = () => `<div class="dw-tools">
-  <button type="button" class="dw-btn dw-drag" title="អូសដើម្បីរៀបចំ" aria-label="អូស">${DW_GRIP}</button>
-  <button type="button" class="dw-btn dw-hide" title="លាក់ទៅ “Widget ដែលលាក់”" aria-label="លាក់">${DW_CLOSE}</button>
-  <button type="button" class="dw-btn dw-reset" title="ត្រឡប់ទំហំ និងទីតាំងដើម" aria-label="កំណត់ទម្រង់ដើម">
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>
-  </button>
+  <button type="button" class="dw-btn dw-hide" title="បិទ — លាក់ទៅ “Widget ដែលលាក់”" aria-label="បិទ">${DW_CLOSE}</button>
 </div>`;
 
 const DW_HANDLES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
@@ -488,11 +483,11 @@ function redrawDashChart() {
   const cv = $('#txChart');
   if (cv && cv.isConnected && dashChartDays.length) {
     drawLine(cv, dashChartDays, {
-      color: '#5F7F94',
-      grid: 'rgba(63,70,57,.14)',
-      axis: '#8A887A',
-      fillTop: 'rgba(125,157,177,.32)',
-      fillBottom: 'rgba(125,157,177,0)',
+      color: '#3E6C9C',
+      grid: 'rgba(23,44,68,.14)',
+      axis: '#6E87A3',
+      fillTop: 'rgba(96,144,192,.34)',
+      fillBottom: 'rgba(96,144,192,0)',
     });
   }
 }
@@ -878,12 +873,11 @@ function dashPointerDown(e) {
     return;
   }
   // never start a drag from a real control / scrollable area
-  if (e.target.closest('a, button:not(.dw-drag), input, select, textarea, canvas, .table-wrap, [data-user-view]')) return;
+  if (e.target.closest('a, button, input, select, textarea, canvas, .table-wrap, [data-user-view]')) return;
 
   const head = e.target.closest('.dw-head');
-  const grip = e.target.closest('.dw-drag');
   const anywhere = widget.dataset.drag === 'all' && e.pointerType === 'mouse';
-  if (!head && !grip) {
+  if (!head) {
     if (!anywhere || e.target.closest(DW_TEXT_SEL)) return;
   }
   startDashDrag(e, canvas, widget);
@@ -920,14 +914,6 @@ function initDashCanvas() {
   const canvas = $('#dashGrid');
   if (!canvas) return;
   canvas.addEventListener('click', (e) => {
-    const resetBtn = e.target.closest('.dw-reset');
-    if (resetBtn) {
-      e.preventDefault();
-      e.stopPropagation();
-      const widget = resetBtn.closest('.dash-widget');
-      if (widget) resetDashWidgetBox(widget);
-      return;
-    }
     const btn = e.target.closest('.dw-hide');
     if (!btn) return;
     e.preventDefault();
