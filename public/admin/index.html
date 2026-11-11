@@ -43,8 +43,8 @@
         <span class="nav-group-label">ទូទៅ</span>
         <button class="nav-item active" data-page="dashboard"><span class="nav-ic">▤</span><span class="nav-tx">ផ្ទាំងដើម</span><span class="nav-badge" id="badge-dashboard"></span></button>
         <div class="nav-folder-wrap" id="navFolderWrap">
-          <button class="nav-item nav-folder" data-page="archive"><span class="nav-ic">🗄</span><span class="nav-tx">Widget ដែលលាក់</span><span class="nav-badge" id="badge-archive"></span></button>
-          <button type="button" class="nav-caret" id="navArchiveToggle" title="បើក/បិទបញ្ជី widget ដែលលាក់" aria-label="បើក ឬបិទបញ្ជី widget ដែលលាក់" aria-expanded="false">
+          <button class="nav-item nav-folder" data-page="archive"><span class="nav-ic">🗄</span><span class="nav-tx">Widget</span><span class="nav-badge" id="badge-archive"></span></button>
+          <button type="button" class="nav-caret" id="navArchiveToggle" title="បើក/បិទបញ្ជី widget" aria-label="បើក ឬបិទបញ្ជី widget" aria-expanded="false">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </button>
           <div class="nav-archive" id="sbArchive" hidden></div>
@@ -108,11 +108,17 @@
     </div>
   </aside>
 
+  <button class="sb-reveal" id="sbReveal" type="button" aria-label="បង្ហាញរបារចំហៀង" title="បង្ហាញរបារចំហៀង" aria-hidden="true" tabindex="-1">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="m9 6 6 6-6 6"/>
+    </svg>
+  </button>
+
   <main class="main">
     <header class="topbar">
       <div class="topbar-left">
         <button class="icon-btn menu-btn only-mobile" id="menuBtn" aria-label="ម៉ឺនុយ">☰</button>
-        <button class="icon-btn sb-toggle only-desktop" id="sidebarToggle" title="បត់ Sidebar" aria-label="បត់ Sidebar" aria-pressed="false">
+        <button class="icon-btn sb-toggle only-desktop" id="sidebarToggle" title="លាក់ Sidebar" aria-label="លាក់ Sidebar" aria-pressed="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M15 18l-6-6 6-6"/>
           </svg>

@@ -234,18 +234,22 @@ function drawLine(canvas, points, opts = {}) {
   ctx.clearRect(0, 0, w, h);
   if (!points.length) return;
 
-  const padL = 46, padR = 12, padT = 14, padB = 26;
+  const narrow = w < 320;
+  const tiny = w < 220 || h < 130;
+  const padL = tiny ? 24 : narrow ? 32 : 46, padR = tiny ? 6 : 12, padT = tiny ? 8 : 14;
+  const padB = tiny ? 12 : 26;
   const max = Math.max(...points.map((p) => p.value), 1);
   const x = (i) => padL + (w - padL - padR) * (points.length === 1 ? .5 : i / (points.length - 1));
   const y = (v) => h - padB - (h - padT - padB) * (v / max);
 
   // grid
+  const rows = tiny ? 2 : 3;
   ctx.strokeStyle = opts.grid || 'rgba(255,255,255,.08)'; ctx.lineWidth = 1;
-  ctx.fillStyle = opts.axis || '#8fa6c4'; ctx.font = '10px system-ui'; ctx.textAlign = 'right';
-  for (let g = 0; g <= 3; g++) {
-    const gy = padT + (h - padT - padB) * (g / 3);
+  ctx.fillStyle = opts.axis || '#8fa6c4'; ctx.font = `${tiny ? 9 : 10}px system-ui`; ctx.textAlign = 'right';
+  for (let g = 0; g <= rows; g++) {
+    const gy = padT + (h - padT - padB) * (g / rows);
     ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(w - padR, gy); ctx.stroke();
-    ctx.fillText(money0(max * (1 - g / 3)), padL - 6, gy + 3);
+    ctx.fillText(money0(max * (1 - g / rows)), padL - 5, gy + 3);
   }
   // area + line
   const grad = ctx.createLinearGradient(0, padT, 0, h - padB);
@@ -257,16 +261,19 @@ function drawLine(canvas, points, opts = {}) {
   ctx.fillStyle = grad; ctx.fill();
   ctx.beginPath();
   points.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p.value)) : ctx.moveTo(x(i), y(p.value))));
-  ctx.strokeStyle = opts.color || '#3b9ad9'; ctx.lineWidth = 2.2; ctx.stroke();
-  // dots + labels
+  ctx.strokeStyle = opts.color || '#3b9ad9'; ctx.lineWidth = tiny ? 1.6 : 2.2; ctx.stroke();
+  // dots + labels (step adapts to the visible width, never crowded)
   ctx.fillStyle = opts.color || '#3b9ad9';
   points.forEach((p, i) => {
-    ctx.beginPath(); ctx.arc(x(i), y(p.value), 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x(i), y(p.value), tiny ? 2 : 3, 0, Math.PI * 2); ctx.fill();
   });
+  if (h < 96) return;
   ctx.fillStyle = '#8fa6c4'; ctx.textAlign = 'center';
+  const slot = tiny ? 34 : narrow ? 40 : 48;
+  const step = Math.max(1, Math.ceil(points.length / Math.max(2, Math.floor((w - padL - padR) / slot))));
   points.forEach((p, i) => {
-    if (points.length > 8 && i % 2) return;
-    ctx.fillText(p.label, x(i), h - 8);
+    if (i % step) return;
+    ctx.fillText(p.label, x(i), h - (tiny ? 4 : 8));
   });
 }
 
@@ -275,7 +282,7 @@ function drawLine(canvas, points, opts = {}) {
    ============================================================ */
 const TITLES = {
   dashboard: 'ផ្ទាំងដើម', control: 'Control U', users: 'អ្នកប្រើ', cards: 'កាត',
-  approvals: 'រង់ចាំអនុម័ត', archive: 'Widget ដែលលាក់',
+  approvals: 'រង់ចាំអនុម័ត', archive: 'Widget',
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   identity: 'ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ',
   collections: 'ប្រមូលប្រាក់', reports: 'របាយការណ៍', notifications: 'សារជូនដំណឹង',
@@ -284,7 +291,7 @@ const TITLES = {
 };
 const PAGE_SUBS = {
   dashboard: 'ទិដ្ឋភាពរួម · KPI · សកម្មភាពថ្មីៗ',
-  archive: 'ថត Widget ដែលអ្នកបានលាក់ — ស្តារឬកំណត់ទម្រង់ដើមវិញបានគ្រប់ពេល',
+  archive: 'ថត Widget — អូសចូលផ្ទាំងដើម ឬស្តារវិញបានគ្រប់ពេល',
   control: 'ផ្ញើកាតបញ្ជាផ្ទាល់ទៅអ្នកប្រើក្នុង app',
   users: 'ស្វែងរក កែសម្រួល ផ្អាក លុប និងគ្រប់គ្រងគណនី',
   cards: 'គណនី/កាត សមតុល្យ និងកំណត់ប្រចាំថ្ងៃ',
@@ -387,8 +394,7 @@ function freeDefaults(cw) {
 function clampBox(b, cw) {
   const w = Math.max(DASH_MIN_W, Math.min(cw, Math.round(b.w)));
   const h = Math.max(DASH_MIN_H, Math.round(b.h));
-  const keep = Math.min(160, w * 0.6);
-  const x = Math.max(-(w - keep), Math.min(Math.round(b.x), cw - keep));
+  const x = Math.max(0, Math.min(Math.round(b.x), cw - w));
   const y = Math.max(0, Math.round(b.y));
   return { x, y, w, h };
 }
@@ -410,7 +416,7 @@ function saveDashState() {
   paintArchiveBadge();
 }
 
-/* ---------- sidebar archive folder ---------- */
+/* ---------- sidebar widget folder ---------- */
 function setSidebarArchiveOpen(open, persist = true) {
   const box = $('#sbArchive');
   if (!box) return;
@@ -423,23 +429,31 @@ function setSidebarArchiveOpen(open, persist = true) {
   if (persist) localStorage.setItem(DASH_LS.archiveOpen, open ? '1' : '0');
 }
 
+function archiveItemHtml(d) {
+  const off = dashHidden.includes(d.id);
+  return `<div class="nav-archive-item ${off ? 'is-off' : 'is-on'}" data-sb-widget="${d.id}" data-sb-hidden="${off ? 1 : 0}" title="${esc(d.name)} — អូសចូលផ្ទាំងដើម">
+    <span class="nav-archive-ic">${d.icon}</span>
+    <span class="nav-archive-name">${esc(d.name)}</span>
+    ${off
+      ? `<button type="button" class="nav-archive-act nav-archive-restore" data-sb-restore="${d.id}" title="ស្តារ ${esc(d.name)}">↩</button>`
+      : `<span class="nav-archive-state" aria-hidden="true"></span>`}
+  </div>`;
+}
+
 function renderSidebarArchive() {
   const box = $('#sbArchive');
   if (!box) return;
   const hidden = DASH_DEFS.filter((d) => dashHidden.includes(d.id));
-  box.innerHTML = hidden.length
-    ? `<div class="nav-archive-head">
-         <span>${hidden.length} widget</span>
-         <button type="button" class="nav-archive-act" id="sbArchReset" title="កំណត់ទម្រង់ដើមវិញ">⟲</button>
-       </div>
-       ${hidden.map((d) => `<div class="nav-archive-item">
-         <span class="nav-archive-ic">${d.icon}</span>
-         <span class="nav-archive-name" title="${esc(d.name)}">${esc(d.name)}</span>
-         <button type="button" class="nav-archive-act nav-archive-restore" data-sb-restore="${d.id}" title="ស្តារ ${esc(d.name)}">↩</button>
-       </div>`).join('')}`
-    : `<div class="nav-archive-empty">ចុច ✕ លើ widget ណាមួយ ដើម្បីផ្លាស់វាមកទីនេះ</div>`;
+  const active = DASH_DEFS.filter((d) => !dashHidden.includes(d.id));
+  box.innerHTML = `<div class="nav-archive-head">
+      <span>${hidden.length ? `${hidden.length} លាក់ · ` : ''}${active.length} សកម្ម</span>
+      <button type="button" class="nav-archive-act" id="sbArchReset" title="កំណត់ទម្រង់ដើមវិញ">⟲</button>
+    </div>
+    <div class="nav-archive-hint">អូសចូលផ្ទាំងដើម ដើម្បីដាក់ widget</div>
+    ${hidden.map(archiveItemHtml).join('')}${active.map(archiveItemHtml).join('')}`;
 
   box.querySelectorAll('[data-sb-restore]').forEach((b) => {
+    b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
     b.addEventListener('click', (ev) => {
       ev.stopPropagation();
       restoreDashWidget(b.dataset.sbRestore);
@@ -448,32 +462,207 @@ function renderSidebarArchive() {
   const r = $('#sbArchReset');
   if (r) r.addEventListener('click', (ev) => { ev.stopPropagation(); resetDashLayout(); });
 
-  const saved = localStorage.getItem(DASH_LS.archiveOpen);
-  setSidebarArchiveOpen(saved === null ? hidden.length > 0 : saved === '1', false);
+  /* a plain click: restore a hidden widget, or fly to it on the canvas */
+  box.querySelectorAll('[data-sb-widget]').forEach((rowEl) => {
+    rowEl.addEventListener('click', (ev) => {
+      if (ev.target.closest('.nav-archive-act')) return;
+      if (performance.now() - sbPullSilence < 350) return;
+      const id = rowEl.dataset.sbWidget;
+      if (rowEl.dataset.sbHidden === '1') restoreDashWidget(id);
+      else focusDashWidget(id);
+    });
+  });
+
+  /* folded until the user opens it — never force it open */
+  setSidebarArchiveOpen(localStorage.getItem(DASH_LS.archiveOpen) === '1', false);
 }
 
-/* flyout when the sidebar is collapsed to icons */
 function initSidebarArchive() {
-  const wrap = $('#navFolderWrap');
   const toggle = $('#navArchiveToggle');
-  if (!wrap || !toggle) return;
-  toggle.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSidebarArchiveOpen($('#sbArchive')?.hidden === true);
-  });
-  wrap.addEventListener('mouseenter', () => {
-    const app = $('#app');
-    if (!app || !app.classList.contains('sb-collapsed')) return;
-    if (window.matchMedia('(max-width: 820px)').matches) return;
-    const box = $('#sbArchive');
-    const item = wrap.querySelector('.nav-item');
-    if (!box || !item) return;
-    const r = item.getBoundingClientRect();
-    box.style.top = Math.max(10, Math.min(r.top - 6, window.innerHeight - 360)) + 'px';
-    box.classList.add('flyout');
-  });
-  wrap.addEventListener('mouseleave', () => $('#sbArchive')?.classList.remove('flyout'));
+  if (toggle) {
+    toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setSidebarArchiveOpen($('#sbArchive')?.hidden === true);
+    });
+  }
+  const box = $('#sbArchive');
+  if (box) {
+    box.addEventListener('pointerdown', (e) => {
+      const row = e.target.closest('[data-sb-widget]');
+      if (!row || e.target.closest('.nav-archive-act')) return;
+      beginWidgetPull(e, row);
+    });
+  }
+}
+
+/* keep a widget (or its folder row) visible without re-rendering the page */
+async function focusDashWidget(id) {
+  if (page !== 'dashboard') await goPage('dashboard');
+  const el = $(`.dash-widget[data-widget="${id}"]`);
+  if (!el) return;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  bumpZ(el, true);
+  el.classList.add('dw-just-restored');
+  setTimeout(() => el.classList.remove('dw-just-restored'), 1150);
+}
+
+/* ---------- pull a widget out of the folder and drop it on the canvas ---------- */
+let sbPullSilence = 0;
+
+function beginWidgetPull(e, row) {
+  if (dashIsMobile() || page !== 'dashboard') return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  const id = row.dataset.sbWidget;
+  const meta = dashMeta[id];
+  const canvas = $('#dashGrid');
+  if (!meta || !canvas) return;
+  e.preventDefault();
+
+  const startX = e.clientX, startY = e.clientY;
+  const srcRect = row.getBoundingClientRect();
+  const wasHidden = row.dataset.sbHidden === '1';
+  const cw = dashCanvasW || Math.round(canvas.clientWidth) || 1100;
+  let active = false, ghost = null, slot = null, raf = 0;
+  let lx = startX, ly = startY, box = null, over = false;
+
+  const blockSel = (ev) => ev.preventDefault();
+
+  const makeGhost = () => {
+    ghost = document.createElement('div');
+    ghost.className = 'sb-drag-ghost';
+    ghost.innerHTML = `<span class="sb-ghost-ic">${meta.icon}</span>
+      <span class="sb-ghost-tt"><b>${esc(meta.name)}</b><small>${wasHidden ? 'ដាក់ចូលផ្ទាំងដើម' : 'ផ្លាស់ទីតាំង'}</small></span>`;
+    ghost.style.transform = `translate3d(${lx + 14}px, ${ly - 30}px, 0)`;
+    document.body.appendChild(ghost);
+    requestAnimationFrame(() => ghost?.classList.add('on'));
+  };
+
+  const track = () => {
+    raf = 0;
+    if (!ghost) return;
+    ghost.style.transform = `translate3d(${lx + 14}px, ${ly - 30}px, 0)`;
+    if (!canvas.isConnected) return;
+    const cr = canvas.getBoundingClientRect();
+    const base = dashBox(id, cw);
+    const w = Math.min(base.w, cw);
+    box = clampBox({ x: lx - cr.left - w / 2, y: ly - cr.top - base.h / 2, w, h: base.h }, cw);
+    over = lx >= cr.left && lx <= cr.right && ly >= cr.top && ly <= cr.bottom;
+    canvas.classList.toggle('dw-drop-ready', over);
+    if (over) {
+      if (!slot) {
+        slot = document.createElement('div');
+        slot.className = 'dw-drop-slot';
+        canvas.appendChild(slot);
+      }
+      slot.style.left = box.x + 'px';
+      slot.style.top = box.y + 'px';
+      slot.style.width = box.w + 'px';
+      slot.style.height = box.h + 'px';
+    } else if (slot) {
+      slot.remove(); slot = null;
+    }
+  };
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(track); };
+
+  const onMove = (ev) => {
+    if (ev.pointerType === 'mouse' && ev.buttons === 0) { finish(false); return; }
+    lx = ev.clientX; ly = ev.clientY;
+    if (!active) {
+      if (Math.hypot(lx - startX, ly - startY) < 6) return;
+      active = true;
+      document.body.classList.add('dw-busy', 'sb-pulling');
+      document.addEventListener('selectstart', blockSel);
+      makeGhost();
+      schedule();
+      return;
+    }
+    schedule();
+  };
+
+  const removeGhost = (settle) => {
+    if (!ghost) return;
+    const g = ghost;
+    ghost = null;
+    g.animate([
+      { transform: g.style.transform, opacity: 1 },
+      { transform: `translate3d(${srcRect.left}px, ${srcRect.top}px, 0) scale(.55)`, opacity: 0 },
+    ], { duration: settle ? 320 : 220, easing: 'cubic-bezier(.4, 0, .6, 1)' })
+      .onfinish = () => g.remove();
+  };
+
+  const animateInto = (el, r) => {
+    if (!r) return;
+    const to = el.getBoundingClientRect();
+    const s = Math.max(.3, Math.min(1, r.height / Math.max(1, to.height)));
+    el.animate([
+      { opacity: .25, transform: `translate3d(${r.left - to.left}px, ${r.top - to.top}px, 0) scale(${s})`, transformOrigin: 'top left' },
+      { opacity: 1, transform: 'translate3d(0, 0, 0) scale(1)', transformOrigin: 'top left' },
+    ], { duration: 540, easing: 'cubic-bezier(.16, 1, .3, 1)' });
+    el.classList.add('dw-dropped');
+    setTimeout(() => el.classList.remove('dw-dropped'), 640);
+  };
+
+  const cleanup = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onCancel);
+    window.removeEventListener('keydown', onKey);
+    document.removeEventListener('selectstart', blockSel);
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    canvas.classList.remove('dw-drop-ready');
+    if (slot) { slot.remove(); slot = null; }
+    document.body.classList.remove('dw-busy', 'sb-pulling');
+  };
+
+  const onUp = () => {
+    if (!active) { cleanup(); return; }
+    sbPullSilence = performance.now();
+    const target = over ? box : null;
+    if (!target) {
+      cleanup();
+      removeGhost(false);
+      return;
+    }
+    dashHidden = dashHidden.filter((h) => h !== id);
+    dashFree[id] = { ...target, z: ++dashZTop };
+    saveDashState();
+    const existing = $(`.dash-widget[data-widget="${id}"]`);
+    const from = ghost ? ghost.getBoundingClientRect() : null;
+    cleanup();
+    if (existing) {
+      setWidgetBox(existing, target);
+      existing.style.zIndex = String(dashFree[id].z);
+      applyCanvasHeight(canvas);
+      animateInto(existing, from);
+      const g = ghost;
+      ghost = null;
+      if (g) {
+        g.animate([{ opacity: 1 }, { opacity: 0, transform: `${g.style.transform} scale(1.12)` }], { duration: 280, easing: 'ease-out' })
+          .onfinish = () => g.remove();
+      }
+    } else {
+      const g = ghost;
+      ghost = null;
+      render().then(() => {
+        const el = $(`.dash-widget[data-widget="${id}"]`);
+        if (el) animateInto(el, from);
+        if (g) {
+          g.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 260, easing: 'ease-out' })
+            .onfinish = () => g.remove();
+        }
+      });
+    }
+    toast(wasHidden ? `បានដាក់ “${meta.name}” ចូលផ្ទាំងដើម` : `បានផ្លាស់ “${meta.name}” មកទីតាំងថ្មី`, 'ok');
+  };
+  const onCancel = () => finish(true);
+  const onKey = (ev) => { if (ev.key === 'Escape') finish(true); };
+  const finish = (settle) => { cleanup(); removeGhost(settle); };
+
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onCancel);
+  window.addEventListener('keydown', onKey);
 }
 
 const DW_CLOSE = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
@@ -544,11 +733,20 @@ function ensureDashEmptyState() {
   }
 }
 
+function pulseWidgetFolder() {
+  const w = $('#navFolderWrap');
+  if (!w) return;
+  w.classList.remove('pulse');
+  void w.offsetWidth;
+  w.classList.add('pulse');
+  setTimeout(() => w.classList.remove('pulse'), 1600);
+}
+
 function hideDashWidget(id) {
   if (!id || dashHidden.includes(id)) return;
   dashHidden.push(id);
-  localStorage.setItem(DASH_LS.archiveOpen, '1');
   saveDashState();
+  pulseWidgetFolder();
   const el = $(`.dash-widget[data-widget="${id}"]`);
   if (el) {
     el.classList.add('dw-removing');
@@ -558,7 +756,7 @@ function hideDashWidget(id) {
       ensureDashEmptyState();
     }, 220);
   }
-  toast(`បានផ្លាស់ “${dashMeta[id]?.name || id}” ទៅថត Widget ដែលលាក់`, 'ok');
+  toast(`បានផ្លាស់ “${dashMeta[id]?.name || id}” ទៅថត Widget`, 'ok');
 }
 
 async function restoreDashWidget(id) {
@@ -4272,7 +4470,7 @@ function goPage(p) {
   offset = 0;
   $('.sidebar')?.classList.remove('open');
   window.scrollTo({ top: 0, behavior: 'instant' });
-  render();
+  return render();
 }
 
 function bindPager(total) {
@@ -4561,7 +4759,7 @@ $('#actionBtn').onclick = () => {
   else if (page === 'notifications') renderNotifications();
 };
 
-// ---------- collapsible sidebar ----------
+// ---------- collapsible sidebar: full glass hide, one handle to bring it back ----------
 function setSidebarCollapsed(on) {
   const app = $('#app');
   if (!app) return;
@@ -4570,17 +4768,19 @@ function setSidebarCollapsed(on) {
   const btn = $('#sidebarToggle');
   if (btn) {
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    btn.title = on ? 'ពង្រីក Sidebar' : 'បត់ Sidebar';
+    btn.title = on ? 'បង្ហាញ Sidebar' : 'លាក់ Sidebar';
+    btn.setAttribute('aria-label', btn.title);
   }
-  $$('.nav-item').forEach((b) => {
-    const label = b.querySelector('.nav-tx');
-    b.title = on && label ? label.textContent.trim() : '';
-  });
-  $('#sbArchive')?.classList.remove('flyout');
-  setTimeout(() => { applyFreeLayout(); redrawDashChart(); }, 300);
+  const reveal = $('#sbReveal');
+  if (reveal) {
+    reveal.setAttribute('aria-hidden', on ? 'false' : 'true');
+    reveal.tabIndex = on ? 0 : -1;
+  }
+  setTimeout(() => { applyFreeLayout(); redrawDashChart(); }, 480);
 }
 
 $('#sidebarToggle').onclick = () => setSidebarCollapsed(!$('#app').classList.contains('sb-collapsed'));
+$('#sbReveal').onclick = () => setSidebarCollapsed(false);
 setSidebarCollapsed(localStorage.getItem(DASH_LS.sidebar) === '1');
 paintArchiveBadge();
 initSidebarArchive();
