@@ -275,7 +275,7 @@ function drawLine(canvas, points, opts = {}) {
    ============================================================ */
 const TITLES = {
   dashboard: 'ផ្ទាំងដើម', control: 'Control U', users: 'អ្នកប្រើ', cards: 'កាត',
-  approvals: 'រង់ចាំអនុម័ត',
+  approvals: 'រង់ចាំអនុម័ត', archive: 'Widget ដែលលាក់',
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   identity: 'ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ',
   collections: 'ប្រមូលប្រាក់', reports: 'របាយការណ៍', notifications: 'សារជូនដំណឹង',
@@ -284,6 +284,7 @@ const TITLES = {
 };
 const PAGE_SUBS = {
   dashboard: 'ទិដ្ឋភាពរួម · KPI · សកម្មភាពថ្មីៗ',
+  archive: 'ថត Widget ដែលអ្នកបានលាក់ — ស្តារឬកំណត់ទម្រង់ដើមវិញបានគ្រប់ពេល',
   control: 'ផ្ញើកាតបញ្ជាផ្ទាល់ទៅអ្នកប្រើក្នុង app',
   users: 'ស្វែងរក កែសម្រួល ផ្អាក លុប និងគ្រប់គ្រងគណនី',
   cards: 'គណនី/កាត សមតុល្យ និងកំណត់ប្រចាំថ្ងៃ',
@@ -301,6 +302,325 @@ const PAGE_SUBS = {
   usage: 'ស្ថិតិការប្រើប្រាស់ប្រព័ន្ធ',
 };
 
+/* ============================================================
+   DASHBOARD WIDGETS — អូសរៀបចំ · ពង្រីក/បង្រួម · លាក់ទៅថត
+   ============================================================ */
+const DASH_LS = {
+  layout: 'aura_dash_layout_v1',
+  order: 'aura_dash_order_v1',
+  hidden: 'aura_dash_hidden_v1',
+  sidebar: 'aura_admin_sb_collapsed',
+};
+const DASH_COLS = 12;
+const DASH_DEFS = [
+  { id: 'hero', name: 'សួស្តី & សកម្មភាពរហ័ស', icon: '⚡', desc: 'បន្ទាត់ស្វាគមន៍ និងប៊ូតុងបង្កើតប្រតិបត្តិការ/សារ', w: 12, h: 3, dragAll: true },
+  { id: 'quick', name: 'ចាប់ផ្ដើមរហ័ស', icon: '🚀', desc: 'ផ្លូវកាត់ ប្រតិបត្តិការ សារ អនុម័ត Control U និងអ្នកប្រើ', w: 12, h: 3 },
+  { id: 'kpi_users', name: 'អ្នកប្រើសរុប', icon: '👥', desc: 'ចំនួនគណនីសរុប និងអ្នកថ្មីក្នុង 7 ថ្ងៃ', w: 2, h: 3, dragAll: true },
+  { id: 'kpi_online', name: 'កំពុងប្រើ', icon: '🟢', desc: 'អ្នកប្រើដែល active ក្នុងរយៈពេលខ្លី', w: 2, h: 3, dragAll: true },
+  { id: 'kpi_balance', name: 'សមតុល្យសរុប', icon: '💰', desc: 'ផលបូកសមតុល្យគ្រប់គណនី', w: 2, h: 3, dragAll: true },
+  { id: 'kpi_tx', name: 'ប្រតិបត្តិការ', icon: '💸', desc: 'ចំនួនប្រតិបត្តិការ និង 24 ម៉ោងចុងក្រោយ', w: 2, h: 3, dragAll: true },
+  { id: 'kpi_loans', name: 'កម្ចីនៅសល់', icon: '📋', desc: 'សមតុល្យកម្ចី និងចំនួនកម្ចីសកម្ម', w: 2, h: 3, dragAll: true },
+  { id: 'kpi_locked', name: 'គណនីផ្អាក', icon: '🔒', desc: 'គណនីដែលត្រូវបានផ្អាកបណ្ដោះអាសន្ន', w: 2, h: 3, dragAll: true },
+  { id: 'live', name: 'អ្នកប្រើកំពុងប្រើឥឡូវ', icon: '🟢', desc: 'បញ្ជីអ្នកប្រើ online ជាមួយរូបភាព', w: 12, h: 4 },
+  { id: 'txchart', name: 'ប្រតិបត្តិការ 14 ថ្ងៃ', icon: '📈', desc: 'ក្រាហ្វប្រតិបត្តិការប្រចាំថ្ងៃ', w: 6, h: 7 },
+  { id: 'categories', name: 'ប្រភេទចំណាយច្រើនបំផុត', icon: '🏷️', desc: 'ចំណាត់ថ្នាក់ប្រភេទចំណាយ', w: 6, h: 7 },
+  { id: 'newusers', name: 'អ្នកប្រើថ្មីៗ', icon: '👤', desc: 'គណនីដែលចុះឈ្មោះថ្មីៗ', w: 6, h: 8 },
+  { id: 'recenttx', name: 'ប្រតិបត្តិការថ្មីៗ', icon: '💸', desc: 'ប្រតិបត្តិការចុងក្រោយ', w: 6, h: 8 },
+  { id: 'topusers', name: 'អ្នកប្រើមានសមតុល្យខ្ពស់បំផុត', icon: '🏆', desc: 'ចំណាត់ថ្នាក់អ្នកប្រើតាមសមតុល្យ', w: 12, h: 7 },
+];
+const dashMeta = Object.fromEntries(DASH_DEFS.map((d) => [d.id, d]));
+
+let dashLayout = {};
+let dashOrder = [];
+let dashHidden = [];
+let dashChartDays = [];
+let dashChartRO = null;
+try { dashLayout = JSON.parse(localStorage.getItem(DASH_LS.layout) || '{}') || {}; } catch (_) { dashLayout = {}; }
+try { dashOrder = JSON.parse(localStorage.getItem(DASH_LS.order) || '[]') || []; } catch (_) { dashOrder = []; }
+try { dashHidden = JSON.parse(localStorage.getItem(DASH_LS.hidden) || '[]') || []; } catch (_) { dashHidden = []; }
+if (!Array.isArray(dashOrder)) dashOrder = [];
+if (!Array.isArray(dashHidden)) dashHidden = [];
+
+const dashSize = (id) => {
+  const d = dashMeta[id] || {};
+  const s = dashLayout[id] || {};
+  return {
+    w: Math.min(DASH_COLS, Math.max(2, Number(s.w) || d.w || 6)),
+    h: Math.min(14, Math.max(2, Number(s.h) || d.h || 4)),
+  };
+};
+
+/* DOM order → persistent order (unknown/hidden ids kept out) */
+function dashWidgetsInOrder() {
+  const known = DASH_DEFS.map((d) => d.id);
+  const ordered = dashOrder.filter((id) => known.includes(id));
+  return ordered.concat(known.filter((id) => !ordered.includes(id)));
+}
+
+function saveDashOrder() {
+  const grid = $('#dashGrid');
+  if (grid) dashOrder = $$('.dash-widget', grid).map((el) => el.dataset.widget);
+  localStorage.setItem(DASH_LS.order, JSON.stringify(dashOrder));
+}
+
+function paintArchiveBadge() {
+  setBadge('badge-archive', DASH_DEFS.filter((d) => dashHidden.includes(d.id)).length);
+}
+
+function saveDashState() {
+  saveDashOrder();
+  localStorage.setItem(DASH_LS.layout, JSON.stringify(dashLayout));
+  localStorage.setItem(DASH_LS.hidden, JSON.stringify(dashHidden));
+  paintArchiveBadge();
+}
+
+const DW_GRIP = `<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>`;
+const DW_CLOSE = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+const dwTools = () => `<div class="dw-tools">
+  <button type="button" class="dw-btn dw-drag" title="អូសដើម្បីរៀបចំ">${DW_GRIP}</button>
+  <button type="button" class="dw-btn dw-hide" title="លាក់ទៅ “Widget ដែលលាក់”">${DW_CLOSE}</button>
+</div>`;
+
+function dwShell(id, inner, { cls = 'card', dragAll = false } = {}) {
+  const { w, h } = dashSize(id);
+  return `<section class="dash-widget ${cls}" data-widget="${id}"${dragAll ? ' data-drag="all"' : ''} style="--dw-w:${w};--dw-h:${h}">
+    ${inner}<span class="dw-resize" title="អូសដើម្បីពង្រីក"></span></section>`;
+}
+
+function dwCard(id, title, body, meta = '', bodyCls = '') {
+  return dwShell(id, `<div class="dw-head"><h3>${title}</h3>${meta ? `<div class="dw-meta">${meta}</div>` : ''}${dwTools()}</div>
+    <div class="dw-body${bodyCls ? ' ' + bodyCls : ''}">${body}</div>`);
+}
+
+function redrawDashChart() {
+  const cv = $('#txChart');
+  if (cv && cv.isConnected && dashChartDays.length) drawLine(cv, dashChartDays);
+}
+
+function dashAllHiddenHtml() {
+  return `<div class="card dash-all-hidden">
+    <div class="dash-all-hidden-ic">🗄</div>
+    <h3>Widget ទាំងអស់ត្រូវបានលាក់</h3>
+    <p class="muted">អ្នកអាចស្តារពួកវាឡើងវិញពីថត “Widget ដែលលាក់” នៅរបារចំហៀង។</p>
+    <div class="toolbar" style="justify-content:center">
+      <button class="btn ghost" id="dashShowArchive">🗄 បើកថត Widget</button>
+      <button class="btn primary" id="dashRestoreAll">↩ ស្តារទាំងអស់</button>
+    </div>
+  </div>`;
+}
+
+function bindDashEmpty() {
+  const a = $('#dashShowArchive');
+  const r = $('#dashRestoreAll');
+  if (a) a.onclick = () => goPage('archive');
+  if (r) r.onclick = () => { dashHidden = []; saveDashState(); render(); };
+}
+
+function ensureDashEmptyState() {
+  const grid = $('#dashGrid');
+  if (grid && grid.children.length === 0) {
+    grid.outerHTML = dashAllHiddenHtml();
+    bindDashEmpty();
+  }
+}
+
+function hideDashWidget(id) {
+  if (!id || dashHidden.includes(id)) return;
+  dashHidden.push(id);
+  saveDashState();
+  const el = $(`.dash-widget[data-widget="${id}"]`);
+  if (el) {
+    el.classList.add('dw-removing');
+    setTimeout(() => { el.remove(); ensureDashEmptyState(); }, 220);
+  }
+  toast(`បានផ្លាស់ “${dashMeta[id]?.name || id}” ទៅ Widget ដែលលាក់`, 'ok');
+}
+
+function restoreDashWidget(id) {
+  if (!dashMeta[id]) return;
+  dashHidden = dashHidden.filter((h) => h !== id);
+  saveDashState();
+  toast(`បានស្តារ “${dashMeta[id].name}” ត្រឡប់ទៅផ្ទាំងដើម`, 'ok');
+  render();
+}
+
+function resetDashLayout() {
+  confirmAction('កំណត់ទម្រង់ដើមវិញ', 'ទំហំ លំដាប់ និង widget ទាំងអស់ដែលបានលាក់ នឹងត្រឡប់ទៅដើមវិញ។', () => {
+    dashLayout = {}; dashOrder = []; dashHidden = [];
+    localStorage.removeItem(DASH_LS.layout);
+    localStorage.removeItem(DASH_LS.order);
+    localStorage.removeItem(DASH_LS.hidden);
+    paintArchiveBadge();
+    toast('បានកំណត់ទម្រង់ដើមវិញ', 'ok');
+    render();
+  });
+}
+
+/* ---------- pointer drag / resize ---------- */
+const dashIsMobile = () => window.matchMedia('(max-width: 820px)').matches;
+
+function startDashDrag(e, grid, widget) {
+  e.preventDefault();
+  const sx = e.clientX, sy = e.clientY;
+  let moved = false, raf = 0, dir = 0;
+  let lx = sx, ly = sy;
+  widget.classList.add('dw-dragging');
+  document.body.classList.add('dw-busy');
+
+  const place = () => {
+    const under = document.elementFromPoint(lx, ly);
+    const over = under && under.closest ? under.closest('.dash-widget') : null;
+    if (!over || over === widget || over.parentElement !== grid) return;
+    const r = over.getBoundingClientRect();
+    const midY = r.top + r.height / 2;
+    const after = ly > midY
+      || (Math.abs(ly - midY) < r.height * 0.18 && lx > r.left + r.width / 2);
+    grid.insertBefore(widget, after ? over.nextSibling : over);
+  };
+  const tick = () => {
+    if (dir) { window.scrollBy(0, dir * 14); place(); }
+    raf = requestAnimationFrame(tick);
+  };
+  const onMove = (ev) => {
+    lx = ev.clientX; ly = ev.clientY;
+    if (!moved && Math.hypot(lx - sx, ly - sy) < 4) return;
+    moved = true;
+    dir = ly > window.innerHeight - 90 ? 1 : ly < 90 ? -1 : 0;
+    place();
+  };
+  const done = () => {
+    cancelAnimationFrame(raf);
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', done);
+    window.removeEventListener('pointercancel', done);
+    widget.classList.remove('dw-dragging');
+    document.body.classList.remove('dw-busy');
+    if (moved) { saveDashOrder(); redrawDashChart(); }
+  };
+  raf = requestAnimationFrame(tick);
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', done);
+  window.addEventListener('pointercancel', done);
+}
+
+function startDashResize(e, grid, widget) {
+  e.preventDefault();
+  e.stopPropagation();
+  const id = widget.dataset.widget;
+  const sx = e.clientX, sy = e.clientY;
+  const size0 = dashSize(id);
+  const w0 = Number(widget.style.getPropertyValue('--dw-w')) || size0.w;
+  const h0 = Number(widget.style.getPropertyValue('--dw-h')) || size0.h;
+  const cs = getComputedStyle(grid);
+  const gap = parseFloat(cs.columnGap) || 16;
+  const colW = (grid.clientWidth - gap * (DASH_COLS - 1)) / DASH_COLS;
+  const rowUnit = (parseFloat(cs.gridAutoRows) || 40) + (parseFloat(cs.rowGap) || gap);
+  let w = w0, h = h0;
+  widget.classList.add('dw-resizing');
+  document.body.classList.add('dw-busy');
+  const onMove = (ev) => {
+    w = Math.min(DASH_COLS, Math.max(2, w0 + Math.round((ev.clientX - sx) / (colW + gap))));
+    h = Math.min(14, Math.max(2, h0 + Math.round((ev.clientY - sy) / rowUnit)));
+    widget.style.setProperty('--dw-w', w);
+    widget.style.setProperty('--dw-h', h);
+  };
+  const done = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', done);
+    window.removeEventListener('pointercancel', done);
+    widget.classList.remove('dw-resizing');
+    document.body.classList.remove('dw-busy');
+    dashLayout[id] = { w, h };
+    localStorage.setItem(DASH_LS.layout, JSON.stringify(dashLayout));
+    redrawDashChart();
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', done);
+  window.addEventListener('pointercancel', done);
+}
+
+function dashPointerDown(e) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  if (dashIsMobile()) return;
+  const grid = e.currentTarget;
+  const widget = e.target.closest('.dash-widget');
+  if (!widget || !grid.contains(widget)) return;
+  if (e.target.closest('.dw-resize')) { startDashResize(e, grid, widget); return; }
+  if (e.target.closest('.dw-btn') && !e.target.closest('.dw-drag')) return;
+
+  const handle = e.target.closest('.dw-drag');
+  const interactive = e.target.closest('a, button, input, select, textarea, .table-wrap, canvas, .live-chip, .qa-btn, [data-user-view]');
+  if (!handle && !(widget.dataset.drag === 'all' && !interactive)) return;
+  startDashDrag(e, grid, widget);
+}
+
+function initDashGrid() {
+  const grid = $('#dashGrid');
+  if (!grid) return;
+  grid.addEventListener('click', (e) => {
+    const btn = e.target.closest('.dw-hide');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    hideDashWidget(btn.closest('.dash-widget')?.dataset.widget);
+  });
+  grid.addEventListener('pointerdown', dashPointerDown);
+  const box = grid.querySelector('.chart-box');
+  if (dashChartRO) { dashChartRO.disconnect(); dashChartRO = null; }
+  if (box && window.ResizeObserver) {
+    dashChartRO = new ResizeObserver(() => redrawDashChart());
+    dashChartRO.observe(box);
+  }
+}
+
+async function renderArchive() {
+  const hidden = DASH_DEFS.filter((d) => dashHidden.includes(d.id));
+  const active = DASH_DEFS.filter((d) => !dashHidden.includes(d.id));
+  const sizeLabel = (d) => {
+    const s = dashSize(d.id);
+    return `ទទឹង ${s.w}/12 · កម្ពស់ ${s.h} ជួរ`;
+  };
+  $('#content').innerHTML = `
+    <div class="card">
+      <div class="card-head">
+        <h3>🗄 Widget ដែលលាក់ · ${hidden.length}</h3>
+        <div class="toolbar">
+          <button class="btn ghost sm" id="archRestoreAll" ${hidden.length ? '' : 'disabled'}>↩ ស្តារទាំងអស់</button>
+          <button class="btn ghost sm" id="archReset">⟲ កំណត់ទម្រង់ដើម</button>
+        </div>
+      </div>
+      ${hidden.length ? `<div class="archive-list">${hidden.map((d) => `
+        <div class="archive-item">
+          <span class="archive-ic">${d.icon}</span>
+          <div class="archive-tt">
+            <b>${esc(d.name)}</b>
+            <small>${esc(d.desc)}</small>
+            <span class="archive-size">${sizeLabel(d)}</span>
+          </div>
+          <button class="btn ok sm arch-restore" data-restore="${d.id}">↩ ស្តារ</button>
+        </div>`).join('')}</div>`
+      : `<div class="empty">គ្មាន widget ដែលលាក់ទេ — ចុច (✕) លើ widget ណាមួយនៅផ្ទាំងដើម ដើម្បីផ្លាស់វាមកទីនេះ។
+          <br><button class="btn ghost sm" id="archGoDash" style="margin-top:12px">→ ត្រឡប់ទៅផ្ទាំងដើម</button></div>`}
+    </div>
+    <div class="card">
+      <div class="card-head"><h3>🧩 Widget សកម្ម</h3><span class="muted">${active.length} / ${DASH_DEFS.length}</span></div>
+      <div class="archive-grid">${active.map((d) => `
+        <div class="archive-mini">
+          <span>${d.icon}</span>
+          <b>${esc(d.name)}</b>
+          <small>${sizeLabel(d)}</small>
+        </div>`).join('')}</div>
+    </div>`;
+
+  $$('[data-restore]').forEach((btn) => { btn.onclick = () => restoreDashWidget(btn.dataset.restore); });
+  const all = $('#archRestoreAll');
+  if (all) all.onclick = () => { dashHidden = []; saveDashState(); toast('បានស្តារ widget ទាំងអស់', 'ok'); render(); };
+  const reset = $('#archReset');
+  if (reset) reset.onclick = resetDashLayout;
+  const back = $('#archGoDash');
+  if (back) back.onclick = () => goPage('dashboard');
+}
+
 async function renderDashboard() {
   const [s, live] = await Promise.all([
     api('/stats'),
@@ -311,15 +631,15 @@ async function renderDashboard() {
   const pendingApprovals = Number($('#badge-approvals')?.textContent) || 0;
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'អរុណសួស្តី' : hour < 18 ? 'សាយ័ន្តសួស្តី' : 'រាត្រីសួស្តី';
-  const kpi = (icon, tone, label, value, sub) => `
-    <div class="card kpi">
-      <div class="kpi-top"><span class="kpi-label">${label}</span><span class="kpi-ic ${tone}">${icon}</span></div>
-      <div class="kpi-value">${value}</div>
-      <div class="kpi-sub">${sub}</div>
-    </div>`;
 
-  $('#content').innerHTML = `
-    <section class="dash-hero">
+  const kpi = (id, icon, tone, label, value, sub) => dwShell(id, `
+    ${dwTools()}
+    <div class="kpi-top"><span class="kpi-label">${label}</span><span class="kpi-ic ${tone}">${icon}</span></div>
+    <div class="kpi-value">${value}</div>
+    <div class="kpi-sub">${sub}</div>`, { cls: 'card kpi', dragAll: true });
+
+  const parts = {
+    hero: dwShell('hero', `<div class="dash-hero">
       <div class="hero-left">
         <span class="hero-kicker">⚡ Aura Bank · Admin</span>
         <h1 class="hero-title">${greet}, ${esc(admin?.name || 'Admin')}</h1>
@@ -330,114 +650,94 @@ async function renderDashboard() {
         <button class="btn ghost" id="dashMsg">✉️ ផ្ញើសារ</button>
         <button class="btn ghost" id="dashControl">🎛 Control U</button>
       </div>
-    </section>
+    </div>${dwTools()}`, { cls: 'dash-widget-hero', dragAll: true }),
 
-    <div class="card">
-      <div class="card-head"><h3>⚡ ចាប់ផ្ដើមរហ័ស</h3><span class="muted">ចូលដំណើរការបានភ្លាមៗ</span></div>
+    quick: dwCard('quick', '⚡ ចាប់ផ្ដើមរហ័ស', `
       <div class="quick-grid">
         <button class="qa-btn" id="qaTx"><span class="qa-ic">💸</span><span>បន្ថែមប្រតិបត្តិការ<small>កែសមតុល្យដោយដៃ</small></span></button>
         <button class="qa-btn" id="qaMsg"><span class="qa-ic">✉️</span><span>ផ្ញើសារជូនដំណឹង<small>ទាក់ទងអ្នកប្រើផ្ទាល់</small></span></button>
         <button class="qa-btn" id="qaApprovals"><span class="qa-ic">✅</span><span>អនុម័តការផ្ទេរ<small>${pendingApprovals ? pendingApprovals + ' រង់ចាំ' : 'គ្មានរង់ចាំ'}</small></span></button>
         <button class="qa-btn" id="qaControl"><span class="qa-ic">🎛</span><span>Control U<small>ផ្ញើកាតទៅអ្នកប្រើ</small></span></button>
         <button class="qa-btn" id="qaUsers"><span class="qa-ic">👤</span><span>គ្រប់គ្រងអ្នកប្រើ<small>${t.users} គណនីសរុប</small></span></button>
-      </div>
-    </div>
+      </div>`, '<span>ចូលដំណើរការបានភ្លាមៗ</span>'),
 
-    <div class="kpi-grid-6">
-      ${kpi('👥', '', 'អ្នកប្រើសរុប', `${t.users}`, `ថ្មី ${t.new_users_7d} ក្នុង 7 ថ្ងៃ`)}
-      ${kpi('🟢', 'ok', 'កំពុងប្រើ', `${t.online_users || 0}`, `ក្នុង ${s.online_minutes || 5} នាទីចុងក្រោយ`)}
-      ${kpi('💰', 'violet', 'សមតុល្យសរុប', money0(t.total_balance), `${t.cards} គណនី`)}
-      ${kpi('💸', '', 'ប្រតិបត្តិការ', `${t.transactions}`, `${t.tx_24h} ក្នុង 24 ម៉ោង`)}
-      ${kpi('📋', 'warn', 'កម្ចីនៅសល់', money0(t.loan_outstanding), `${t.active_loans} កម្ចីសកម្ម`)}
-      ${kpi('🔒', 'danger', 'គណនីផ្អាក', `${t.locked_users || 0}`, 'ត្រូវបានផ្អាកបណ្ដោះអាសន្ន')}
-    </div>
+    kpi_users: kpi('kpi_users', '👥', '', 'អ្នកប្រើសរុប', `${t.users}`, `ថ្មី ${t.new_users_7d} ក្នុង 7 ថ្ងៃ`),
+    kpi_online: kpi('kpi_online', '🟢', 'ok', 'កំពុងប្រើ', `${t.online_users || 0}`, `ក្នុង ${s.online_minutes || 5} នាទីចុងក្រោយ`),
+    kpi_balance: kpi('kpi_balance', '💰', 'violet', 'សមតុល្យសរុប', money0(t.total_balance), `${t.cards} គណនី`),
+    kpi_tx: kpi('kpi_tx', '💸', '', 'ប្រតិបត្តិការ', `${t.transactions}`, `${t.tx_24h} ក្នុង 24 ម៉ោង`),
+    kpi_loans: kpi('kpi_loans', '📋', 'warn', 'កម្ចីនៅសល់', money0(t.loan_outstanding), `${t.active_loans} កម្ចីសកម្ម`),
+    kpi_locked: kpi('kpi_locked', '🔒', 'danger', 'គណនីផ្អាក', `${t.locked_users || 0}`, 'ត្រូវបានផ្អាកបណ្ដោះអាសន្ន'),
 
-    <div class="card">
-      <div class="card-head">
-        <h3>🟢 អ្នកប្រើកំពុងប្រើឥឡូវ</h3>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span class="muted">${s.liveUsers.length} នាក់ · ${s.online_minutes || 5} នាទីចុងក្រោយ</span>
-          <button class="btn ghost sm" id="dashLiveAll">មើលទាំងអស់</button>
-        </div>
-      </div>
-      ${s.liveUsers.length ? `<div class="live-strip">${s.liveUsers.map((u) => `
+    live: dwCard('live', '🟢 អ្នកប្រើកំពុងប្រើឥឡូវ',
+      s.liveUsers.length ? `<div class="live-strip">${s.liveUsers.map((u) => `
         <button class="live-chip" data-user-view="${u.id}" title="គ្រប់គ្រង ${esc(u.name)}">
           ${avatarHtml(u.name, u.avatar_thumb, true)}
           <span><b>${esc(u.name)}</b><br><span class="t">${ago(u.last_seen_at)}</span></span>
         </button>`).join('')}</div>`
-        : '<div class="empty">គ្មានអ្នកប្រើកំពុងប្រើឥឡូវ</div>'}
-    </div>
+        : '<div class="empty">គ្មានអ្នកប្រើកំពុងប្រើឥឡូវ</div>',
+      `<span>${s.liveUsers.length} នាក់ · ${s.online_minutes || 5} នាទីចុងក្រោយ</span>
+       <button class="btn ghost sm" id="dashLiveAll">មើលទាំងអស់</button>`),
 
-    <div class="grid k2">
-      <div class="card">
-        <div class="card-head"><h3>📈 ប្រតិបត្តិការ 14 ថ្ងៃ</h3>
-          <span class="muted">${t.tx_24h} ថ្ងៃនេះ · ${money0(t.spend_30d)} ចំណាយ 30 ថ្ងៃ</span>
-        </div>
-        <div class="chart-box"><canvas id="txChart"></canvas></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h3>🏷️ ប្រភេទចំណាយច្រើនបំផុត</h3></div>
-        <div class="bars" id="catBars"></div>
-      </div>
-    </div>
+    txchart: dwCard('txchart', '📈 ប្រតិបត្តិការ 14 ថ្ងៃ',
+      '<div class="chart-box"><canvas id="txChart"></canvas></div>',
+      `<span>${t.tx_24h} ថ្ងៃនេះ · ${money0(t.spend_30d)} ចំណាយ 30 ថ្ងៃ</span>`, 'dw-body-chart'),
 
-    <div class="grid k2">
-      <div class="card">
-        <div class="card-head"><h3>👤 អ្នកប្រើថ្មីៗ</h3><span class="muted">ចុចឈ្មោះដើម្បីគ្រប់គ្រង</span></div>
-        ${tableHtml([
-    { label: 'ឈ្មោះ', render: (r) => userChip(r.name, r.avatar_thumb, r.id) },
-    { label: 'អ៊ីមែល', render: (r) => `<span class="muted">${esc(r.email)}</span>` },
-    { label: 'ចូលថ្ងៃ', num: true, render: (r) => dateOnly(r.created_at) },
-  ], s.recentUsers)}
-      </div>
-      <div class="card">
-        <div class="card-head"><h3>💸 ប្រតិបត្តិការថ្មីៗ</h3></div>
-        ${tableHtml([
-    { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id) },
-    { label: 'ចំណងជើង', render: (r) => esc(r.title) },
-    { label: 'ទឹកប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#ff9b9b' : '#7ee2a8'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
-    { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
-  ], s.recentTx, { empty: 'មិនទាន់មានប្រតិបត្តិការ' })}
-      </div>
-    </div>
+    categories: dwCard('categories', '🏷️ ប្រភេទចំណាយច្រើនបំផុត', '<div class="bars" id="catBars"></div>'),
 
-    <div class="card">
-      <div class="card-head"><h3>🏆 អ្នកប្រើមានសមតុល្យខ្ពស់បំផុត</h3><span class="muted">ចុចឈ្មោះដើម្បីកែ ឬគ្រប់គ្រង</span></div>
-      ${tableHtml([
-    { label: 'អ្នកប្រើ', render: (r) => userChip(r.name, r.avatar_thumb, r.id) },
-    { label: 'អ៊ីមែល', render: (r) => `<span class="muted">${esc(r.email)}</span>` },
-    { label: 'ប្រតិបត្តិការ', num: true, render: (r) => r.tx_count },
-    { label: 'សមតុល្យ', num: true, render: (r) => money(r.balance) },
-  ], s.topUsers)}
-    </div>`;
+    newusers: dwCard('newusers', '👤 អ្នកប្រើថ្មីៗ', tableHtml([
+      { label: 'ឈ្មោះ', render: (r) => userChip(r.name, r.avatar_thumb, r.id) },
+      { label: 'អ៊ីមែល', render: (r) => `<span class="muted">${esc(r.email)}</span>` },
+      { label: 'ចូលថ្ងៃ', num: true, render: (r) => dateOnly(r.created_at) },
+    ], s.recentUsers), '<span>ចុចឈ្មោះដើម្បីគ្រប់គ្រង</span>'),
 
-  const days = s.daily.map((d) => ({
+    recenttx: dwCard('recenttx', '💸 ប្រតិបត្តិការថ្មីៗ', tableHtml([
+      { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id) },
+      { label: 'ចំណងជើង', render: (r) => esc(r.title) },
+      { label: 'ទឹកប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#ff9b9b' : '#7ee2a8'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
+      { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
+    ], s.recentTx, { empty: 'មិនទាន់មានប្រតិបត្តិការ' })),
+
+    topusers: dwCard('topusers', '🏆 អ្នកប្រើមានសមតុល្យខ្ពស់បំផុត', tableHtml([
+      { label: 'អ្នកប្រើ', render: (r) => userChip(r.name, r.avatar_thumb, r.id) },
+      { label: 'អ៊ីមែល', render: (r) => `<span class="muted">${esc(r.email)}</span>` },
+      { label: 'ប្រតិបត្តិការ', num: true, render: (r) => r.tx_count },
+      { label: 'សមតុល្យ', num: true, render: (r) => money(r.balance) },
+    ], s.topUsers), '<span>ចុចឈ្មោះដើម្បីកែ ឬគ្រប់គ្រង</span>'),
+  };
+
+  const visible = dashWidgetsInOrder().filter((id) => !dashHidden.includes(id));
+  $('#content').innerHTML = visible.length
+    ? `<div class="dash-grid" id="dashGrid">${visible.map((id) => parts[id]).join('')}</div>`
+    : dashAllHiddenHtml();
+
+  dashChartDays = s.daily.map((d) => ({
     label: new Date(d.day).toLocaleDateString('km-KH', { day: 'numeric', month: 'numeric' }),
     value: Number(d.tx),
   }));
-  const cv = $('#txChart');
-  if (cv) {
-    const draw = () => drawLine(cv, days);
-    draw();
-    window.addEventListener('resize', draw, { once: true });
-  }
-  const maxCat = Math.max(...s.categories.map((c) => Number(c.total)), 1);
-  $('#catBars').innerHTML = s.categories.length ? s.categories.map((c) => `
-    <div class="bar-row">
-      <span>${esc(c.category)}</span>
-      <span class="bar-track"><span class="bar-fill" style="width:${(Number(c.total) / maxCat * 100).toFixed(1)}%"></span></span>
-      <span class="bar-val">${money0(c.total)}</span>
-    </div>`).join('') : '<div class="empty">មិនទាន់មានទិន្នន័យ</div>';
+  redrawDashChart();
 
-  $('#dashNewTx').onclick = createTransaction;
-  $('#qaTx').onclick = createTransaction;
-  $('#dashMsg').onclick = () => openNotifyModal();
-  $('#qaMsg').onclick = () => openNotifyModal();
-  $('#dashControl').onclick = () => goPage('control');
-  $('#qaControl').onclick = () => goPage('control');
-  $('#qaApprovals').onclick = () => goPage('approvals');
-  $('#qaUsers').onclick = () => goPage('users');
-  $('#dashLiveAll').onclick = openLiveUsers;
+  const bars = $('#catBars');
+  if (bars) {
+    const maxCat = Math.max(...s.categories.map((c) => Number(c.total)), 1);
+    bars.innerHTML = s.categories.length ? s.categories.map((c) => `
+      <div class="bar-row">
+        <span>${esc(c.category)}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${(Number(c.total) / maxCat * 100).toFixed(1)}%"></span></span>
+        <span class="bar-val">${money0(c.total)}</span>
+      </div>`).join('') : '<div class="empty">មិនទាន់មានទិន្នន័យ</div>';
+  }
+
+  const on = (sel, fn) => { const el = $(sel); if (el) el.onclick = fn; };
+  on('#dashNewTx', createTransaction);
+  on('#qaTx', createTransaction);
+  on('#dashMsg', () => openNotifyModal());
+  on('#qaMsg', () => openNotifyModal());
+  on('#dashControl', () => goPage('control'));
+  on('#qaControl', () => goPage('control'));
+  on('#qaApprovals', () => goPage('approvals'));
+  on('#qaUsers', () => goPage('users'));
+  on('#dashLiveAll', openLiveUsers);
+  if (!visible.length) bindDashEmpty(); else initDashGrid();
 }
 
 async function renderUsers() {
@@ -2530,7 +2830,7 @@ async function renderIdentityReview(id) {
 
 const RENDERERS = {
   dashboard: renderDashboard, control: renderControl, users: renderUsers, cards: renderCards,
-  approvals: renderApprovals,
+  approvals: renderApprovals, archive: renderArchive,
   transactions: renderTransactions, loans: renderLoans, kyc: renderKyc,
   identity: renderIdentityKyc,
   collections: renderCollections, reports: renderReports,
@@ -3795,5 +4095,27 @@ $('#actionBtn').onclick = () => {
   if (page === 'transactions') createTransaction();
   else if (page === 'notifications') renderNotifications();
 };
+
+// ---------- collapsible sidebar ----------
+function setSidebarCollapsed(on) {
+  const app = $('#app');
+  if (!app) return;
+  app.classList.toggle('sb-collapsed', on);
+  localStorage.setItem(DASH_LS.sidebar, on ? '1' : '0');
+  const btn = $('#sidebarToggle');
+  if (btn) {
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? 'ពង្រីក Sidebar' : 'បត់ Sidebar';
+  }
+  $$('.nav-item').forEach((b) => {
+    const label = b.querySelector('.nav-tx');
+    b.title = on && label ? label.textContent.trim() : '';
+  });
+  setTimeout(redrawDashChart, 300);
+}
+
+$('#sidebarToggle').onclick = () => setSidebarCollapsed(!$('#app').classList.contains('sb-collapsed'));
+setSidebarCollapsed(localStorage.getItem(DASH_LS.sidebar) === '1');
+paintArchiveBadge();
 
 boot();
