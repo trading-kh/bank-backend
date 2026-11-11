@@ -306,6 +306,7 @@ const PAGE_SUBS = {
    DASHBOARD WIDGETS — អូសរៀបចំ · ពង្រីក/បង្រួម · លាក់ទៅថត
    ============================================================ */
 const DASH_LS = {
+  free: 'aura_dash_free_v1',
   layout: 'aura_dash_layout_v1',
   order: 'aura_dash_order_v1',
   hidden: 'aura_dash_hidden_v1',
@@ -331,37 +332,54 @@ const DASH_DEFS = [
 ];
 const dashMeta = Object.fromEntries(DASH_DEFS.map((d) => [d.id, d]));
 
-let dashLayout = {};
-let dashOrder = [];
+/* free-placement boxes: { id: { x, y, w, h } } in px on the canvas surface */
+let dashFree = {};
 let dashHidden = [];
 let dashChartDays = [];
 let dashChartRO = null;
-try { dashLayout = JSON.parse(localStorage.getItem(DASH_LS.layout) || '{}') || {}; } catch (_) { dashLayout = {}; }
-try { dashOrder = JSON.parse(localStorage.getItem(DASH_LS.order) || '[]') || []; } catch (_) { dashOrder = []; }
+let dashCanvasW = 0;
+try { dashFree = JSON.parse(localStorage.getItem(DASH_LS.free) || '{}') || {}; } catch (_) { dashFree = {}; }
 try { dashHidden = JSON.parse(localStorage.getItem(DASH_LS.hidden) || '[]') || []; } catch (_) { dashHidden = []; }
-if (!Array.isArray(dashOrder)) dashOrder = [];
 if (!Array.isArray(dashHidden)) dashHidden = [];
 
-const dashSize = (id) => {
-  const d = dashMeta[id] || {};
-  const s = dashLayout[id] || {};
-  return {
-    w: Math.min(DASH_COLS, Math.max(2, Number(s.w) || d.w || 6)),
-    h: Math.min(14, Math.max(2, Number(s.h) || d.h || 4)),
-  };
-};
+const DASH_MIN_W = 160;
+const DASH_MIN_H = 120;
 
-/* DOM order → persistent order (unknown/hidden ids kept out) */
-function dashWidgetsInOrder() {
-  const known = DASH_DEFS.map((d) => d.id);
-  const ordered = dashOrder.filter((id) => known.includes(id));
-  return ordered.concat(known.filter((id) => !ordered.includes(id)));
+/* default positions flow the old 12-column spans into pixels */
+let freeDefaultsCache = { w: 0, map: null };
+function freeDefaults(cw) {
+  if (freeDefaultsCache.w === cw && freeDefaultsCache.map) return freeDefaultsCache.map;
+  const gap = 16;
+  const colW = Math.max(20, (cw - gap * (DASH_COLS - 1)) / DASH_COLS);
+  const colSpan = (n) => Math.min(cw, Math.max(DASH_MIN_W, Math.floor(n * colW + (n - 1) * gap)));
+  const rowSpan = (n) => n * 40 + (n - 1) * gap;
+  const map = {};
+  let y = 0, x = 0, rowH = 0;
+  DASH_DEFS.forEach((d) => {
+    const w = colSpan(d.w);
+    const h = rowSpan(d.h);
+    if (x + w > cw + 1) { y += rowH + gap; x = 0; rowH = 0; }
+    map[d.id] = { x, y, w, h };
+    x += w + gap;
+    rowH = Math.max(rowH, h);
+    if (x >= cw - 1) { y += rowH + gap; x = 0; rowH = 0; }
+  });
+  freeDefaultsCache = { w: cw, map };
+  return map;
 }
 
-function saveDashOrder() {
-  const grid = $('#dashGrid');
-  if (grid) dashOrder = $$('.dash-widget', grid).map((el) => el.dataset.widget);
-  localStorage.setItem(DASH_LS.order, JSON.stringify(dashOrder));
+function clampBox(b, cw) {
+  const w = Math.max(DASH_MIN_W, Math.min(cw, Math.round(b.w)));
+  const h = Math.max(DASH_MIN_H, Math.round(b.h));
+  const keep = Math.min(160, w * 0.6);
+  const x = Math.max(-(w - keep), Math.min(Math.round(b.x), cw - keep));
+  const y = Math.max(0, Math.round(b.y));
+  return { x, y, w, h };
+}
+
+function dashBox(id, cw = dashCanvasW || 1100) {
+  const def = freeDefaults(cw)[id] || { x: 0, y: 0, w: 400, h: 220 };
+  return clampBox(dashFree[id] || def, cw);
 }
 
 function paintArchiveBadge() {
@@ -371,8 +389,7 @@ function paintArchiveBadge() {
 }
 
 function saveDashState() {
-  saveDashOrder();
-  localStorage.setItem(DASH_LS.layout, JSON.stringify(dashLayout));
+  localStorage.setItem(DASH_LS.free, JSON.stringify(dashFree));
   localStorage.setItem(DASH_LS.hidden, JSON.stringify(dashHidden));
   paintArchiveBadge();
 }
@@ -451,8 +468,7 @@ const dwTools = () => `<div class="dw-tools">
 </div>`;
 
 function dwShell(id, inner, { cls = 'card', dragAll = false } = {}) {
-  const { w, h } = dashSize(id);
-  return `<section class="dash-widget ${cls}" data-widget="${id}"${dragAll ? ' data-drag="all"' : ''} style="--dw-w:${w};--dw-h:${h}">
+  return `<section class="dash-widget ${cls}" data-widget="${id}"${dragAll ? ' data-drag="all"' : ''}>
     ${inner}<span class="dw-resize" title="អូសដើម្បីពង្រីក"></span></section>`;
 }
 
@@ -501,7 +517,11 @@ function hideDashWidget(id) {
   const el = $(`.dash-widget[data-widget="${id}"]`);
   if (el) {
     el.classList.add('dw-removing');
-    setTimeout(() => { el.remove(); ensureDashEmptyState(); }, 220);
+    setTimeout(() => {
+      el.remove();
+      applyCanvasHeight();
+      ensureDashEmptyState();
+    }, 220);
   }
   toast(`បានផ្លាស់ “${dashMeta[id]?.name || id}” ទៅថត Widget ដែលលាក់`, 'ok');
 }
@@ -521,157 +541,91 @@ async function restoreDashWidget(id) {
 }
 
 function resetDashLayout() {
-  confirmAction('កំណត់ទម្រង់ដើមវិញ', 'ទំហំ លំដាប់ និង widget ទាំងអស់ដែលបានលាក់ នឹងត្រឡប់ទៅដើមវិញ។', () => {
-    dashLayout = {}; dashOrder = []; dashHidden = [];
+  confirmAction('កំណត់ទម្រង់ដើមវិញ', 'ទីតាំង ទំហំ និង widget ទាំងអស់ដែលបានលាក់ នឹងត្រឡប់ទៅដើមវិញ។', () => {
+    dashFree = {}; dashHidden = [];
+    localStorage.removeItem(DASH_LS.free);
     localStorage.removeItem(DASH_LS.layout);
     localStorage.removeItem(DASH_LS.order);
     localStorage.removeItem(DASH_LS.hidden);
+    freeDefaultsCache = { w: 0, map: null };
     paintArchiveBadge();
     toast('បានកំណត់ទម្រង់ដើមវិញ', 'ok');
     render();
   });
 }
 
-/* ---------- drag / resize engine ---------- */
+/* ---------- free-placement engine (absolute px, no grid) ---------- */
 const dashIsMobile = () => window.matchMedia('(max-width: 820px)').matches;
 let dashDragging = false;
+let dashZTop = 20;
 
-/* FLIP helpers use offsetLeft/offsetTop (layout position) so in-flight
-   transforms of other widgets don't pollute the measurements. */
-function captureRects(grid, skip) {
-  const map = new Map();
-  $$('.dash-widget', grid).forEach((el) => {
-    if (el !== skip) map.set(el, { left: el.offsetLeft, top: el.offsetTop });
+function setWidgetBox(widget, box) {
+  widget.style.left = box.x + 'px';
+  widget.style.top = box.y + 'px';
+  widget.style.width = box.w + 'px';
+  widget.style.height = box.h + 'px';
+}
+
+function applyCanvasHeight(canvas = $('#dashGrid')) {
+  if (!canvas || dashIsMobile()) return;
+  let bottom = 0;
+  $$('.dash-widget', canvas).forEach((el) => {
+    bottom = Math.max(bottom, el.offsetTop + el.offsetHeight);
   });
-  return map;
+  canvas.style.height = Math.max(240, Math.round(bottom) + 4) + 'px';
 }
 
-function playFlip(grid, prev) {
-  if (!prev || !prev.size) return;
-  $$('.dash-widget', grid).forEach((el) => {
-    const before = prev.get(el);
-    if (!before) return;
-    const dx = before.left - el.offsetLeft;
-    const dy = before.top - el.offsetTop;
-    if (!dx && !dy) return;
-    el.style.transition = 'none';
-    el.style.transform = `translate3d(${dx}px,${dy}px,0)`;
-    void el.offsetWidth;
-    el.style.transition = 'transform .24s cubic-bezier(.22,.85,.25,1)';
-    el.style.transform = '';
-    const clear = (ev) => {
-      if (ev && ev.propertyName !== 'transform') return;
-      el.style.transition = '';
-      el.style.transform = '';
-      el.removeEventListener('transitionend', clear);
-    };
-    el.addEventListener('transitionend', clear);
-  });
+/* paint every widget at its stored pixel box */
+function applyFreeLayout() {
+  const canvas = $('#dashGrid');
+  if (!canvas) return;
+  if (dashIsMobile()) {
+    canvas.style.height = '';
+    $$('.dash-widget', canvas).forEach((el) => {
+      el.style.left = ''; el.style.top = ''; el.style.width = ''; el.style.height = '';
+    });
+    return;
+  }
+  const cw = Math.round(canvas.clientWidth) || dashCanvasW || 1100;
+  dashCanvasW = cw;
+  $$('.dash-widget', canvas).forEach((el) => setWidgetBox(el, dashBox(el.dataset.widget, cw)));
+  applyCanvasHeight(canvas);
 }
 
-function showDashGuides(grid) {
-  $$('.dw-guides', grid).forEach((g) => g.remove());
-  const g = document.createElement('div');
-  g.className = 'dw-guides';
-  for (let i = 0; i < DASH_COLS; i++) g.appendChild(document.createElement('i'));
-  grid.appendChild(g);
-  requestAnimationFrame(() => g.classList.add('on'));
-  return g;
-}
-
-function hideDashGuides(grid) {
-  if (!grid) return;
-  $$('.dw-guides', grid).forEach((g) => {
-    g.classList.remove('on');
-    setTimeout(() => g.remove(), 200);
-  });
-}
-
-function startDashDrag(e, grid, widget) {
-  if (dashDragging) return;
+function startDashDrag(e, canvas, widget) {
+  if (dashDragging || dashIsMobile()) return;
   dashDragging = true;
 
   const id = widget.dataset.widget;
-  const size = dashSize(id);
-  const sx = e.clientX, sy = e.clientY;
-  let lx = sx, ly = sy;
+  const cw = dashCanvasW || Math.round(canvas.clientWidth) || 1100;
+  const box = dashBox(id, cw);
   const rect0 = widget.getBoundingClientRect();
+  const sx = e.clientX, sy = e.clientY;
   const grabX = sx - rect0.left;
   const grabY = sy - rect0.top;
-  // index the dragged widget occupied among its siblings (for Escape)
-  const originSlot = $$('.dash-widget', grid).indexOf(widget);
-
-  let ph = null;
-  let active = false;
-  let moved = false;
-  let raf = 0;
-  let dir = 0;
+  let lx = sx, ly = sy, raf = 0, dir = 0;
+  let active = false, moved = false;
+  const cur = { ...box };
 
   const begin = () => {
     if (active) return;
     active = true;
-    widget.style.setProperty('--dw-w', size.w);
-    widget.style.setProperty('--dw-h', size.h);
-    widget.classList.add('dw-lifted');
-    widget.style.position = 'fixed';
-    widget.style.left = rect0.left + 'px';
-    widget.style.top = rect0.top + 'px';
-    widget.style.width = rect0.width + 'px';
-    widget.style.height = rect0.height + 'px';
-    widget.style.zIndex = '95';
-    widget.style.margin = '0';
-    widget.style.pointerEvents = 'none';
-    widget.style.transform = 'translate3d(0,0,0) scale(1.02) rotate(.35deg)';
-
-    ph = document.createElement('div');
-    ph.className = 'dw-placeholder';
-    ph.style.setProperty('--dw-w', size.w);
-    ph.style.setProperty('--dw-h', size.h);
-    if (dashIsMobile()) ph.style.height = rect0.height + 'px';
-    ph.innerHTML = '<span class="dw-ph-inner"><span class="dw-ph-dot"></span>ដាក់ទីនេះ</span>';
-    grid.insertBefore(ph, widget);
-
-    showDashGuides(grid);
+    widget.classList.add('dw-moving');
+    widget.style.zIndex = String(++dashZTop);
     document.body.classList.add('dw-busy');
   };
 
-  const place = () => {
-    if (!ph) return;
-    const own = ph.getBoundingClientRect();
-    if (lx >= own.left && lx <= own.right && ly >= own.top && ly <= own.bottom) return;
-    const stack = document.elementsFromPoint(lx, ly) || [];
-    let target = null;
-    for (const node of stack) {
-      if (!node.closest) continue;
-      const w = node.closest('.dash-widget');
-      if (w && w !== widget && w.parentElement === grid) { target = w; break; }
-    }
-    const kids = $$('.dash-widget', grid).filter((el) => el !== widget);
-    if (!target && kids.length) {
-      let best = Infinity;
-      for (const w of kids) {
-        const r = w.getBoundingClientRect();
-        const d = Math.hypot(lx - (r.left + r.width / 2), ly - (r.top + r.height / 2));
-        if (d < best) { best = d; target = w; }
-      }
-    }
-    if (!target) {
-      if (!kids.length) grid.appendChild(ph);
-      return;
-    }
-    const r = target.getBoundingClientRect();
-    const after = ly > r.top + r.height / 2
-      || (ly > r.top + r.height * 0.25 && lx > r.left + r.width * 0.6);
-    const tIdx = kids.indexOf(target);
-    const ref = kids[Math.max(0, Math.min(kids.length, tIdx + (after ? 1 : 0)))] || null;
-
-    let next = ph.nextElementSibling;
-    while (next && !next.classList.contains('dash-widget')) next = next.nextElementSibling;
-    if (next === ref) return;
-
-    const prev = captureRects(grid, widget);
-    grid.insertBefore(ph, ref);
-    playFlip(grid, prev);
+  /* the widget body follows the pointer 1:1 in canvas coordinates */
+  const applyPos = () => {
+    raf = 0;
+    if (!active) return;
+    const cr = canvas.getBoundingClientRect();
+    const b = clampBox({ x: lx - cr.left - grabX, y: ly - cr.top - grabY, w: cur.w, h: cur.h }, cw);
+    cur.x = b.x;
+    cur.y = b.y;
+    widget.style.left = b.x + 'px';
+    widget.style.top = b.y + 'px';
+    applyCanvasHeight(canvas);
   };
 
   const loop = () => {
@@ -682,8 +636,7 @@ function startDashDrag(e, grid, widget) {
       const k = Math.max(0, Math.min(1, 1 - dist / 150));
       window.scrollBy(0, dir * Math.round(4 + k * 20));
     }
-    widget.style.transform = `translate3d(${lx - grabX - rect0.left}px,${ly - grabY - rect0.top}px,0) scale(1.02) rotate(.35deg)`;
-    place();
+    applyPos();
     if (dir) raf = requestAnimationFrame(loop);
   };
   const schedule = () => { if (!raf) raf = requestAnimationFrame(loop); };
@@ -700,6 +653,7 @@ function startDashDrag(e, grid, widget) {
     dir = ly > window.innerHeight - edge ? 1 : ly < edge ? -1 : 0;
     schedule();
   };
+  const onScroll = () => { if (active) schedule(); };
 
   const finish = (commit) => {
     if (!dashDragging) return;
@@ -708,41 +662,30 @@ function startDashDrag(e, grid, widget) {
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onCancel);
     window.removeEventListener('keydown', onKey);
+    window.removeEventListener('scroll', onScroll);
     if (raf) { cancelAnimationFrame(raf); raf = 0; }
     document.body.classList.remove('dw-busy');
-
     if (!active) return;
     active = false;
-    hideDashGuides(grid);
+    widget.classList.remove('dw-moving');
+    widget.style.zIndex = '';
 
-    if (!commit && ph) {
-      const kids = $$('.dash-widget', grid).filter((el) => el !== widget);
-      const ref = kids[originSlot] || null;
-      if (ref !== ph) grid.insertBefore(ph, ref);
-    }
-
-    const target = ph ? ph.getBoundingClientRect() : null;
-    widget.classList.add('dw-dropping');
-    widget.style.transition = 'transform .22s cubic-bezier(.2,.85,.25,1)';
-    if (target) {
-      widget.style.transform = `translate3d(${target.left - rect0.left}px,${target.top - rect0.top}px,0) scale(1) rotate(0deg)`;
-    }
-    const commitNow = () => {
-      if (ph) {
-        widget.style.transition = '';
-        ['position', 'left', 'top', 'width', 'height', 'zIndex', 'margin', 'pointerEvents', 'transform'].forEach((p) => {
-          widget.style[p] = '';
-        });
-        grid.insertBefore(widget, ph);
-        ph.remove();
-      }
-      widget.classList.remove('dw-lifted', 'dw-dropping');
+    if (commit && moved) {
+      dashFree[id] = { x: cur.x, y: cur.y, w: cur.w, h: cur.h };
+      saveDashState();
       widget.classList.add('dw-settled');
-      setTimeout(() => widget.classList.remove('dw-settled'), 320);
-      if (commit && moved) saveDashOrder();
-      redrawDashChart();
-    };
-    setTimeout(commitNow, 230);
+      setTimeout(() => widget.classList.remove('dw-settled'), 340);
+    } else if (moved) {
+      /* Escape / cancel: glide back to the original box */
+      cur.x = box.x;
+      cur.y = box.y;
+      widget.style.transition = 'left .2s cubic-bezier(.2,.85,.25,1), top .2s cubic-bezier(.2,.85,.25,1)';
+      widget.style.left = box.x + 'px';
+      widget.style.top = box.y + 'px';
+      setTimeout(() => { widget.style.transition = ''; }, 220);
+    }
+    applyCanvasHeight(canvas);
+    redrawDashChart();
   };
 
   const onUp = () => finish(true);
@@ -753,28 +696,25 @@ function startDashDrag(e, grid, widget) {
   window.addEventListener('pointerup', onUp);
   window.addEventListener('pointercancel', onCancel);
   window.addEventListener('keydown', onKey);
+  window.addEventListener('scroll', onScroll, { passive: true });
 }
 
-function startDashResize(e, grid, widget) {
-  if (dashDragging) return;
+function startDashResize(e, canvas, widget) {
+  if (dashDragging || dashIsMobile()) return;
   e.preventDefault();
   e.stopPropagation();
   dashDragging = true;
 
   const id = widget.dataset.widget;
+  const cw = dashCanvasW || Math.round(canvas.clientWidth) || 1100;
+  const box = dashBox(id, cw);
   const sx = e.clientX, sy = e.clientY;
-  const size0 = dashSize(id);
-  const w0 = Number(widget.style.getPropertyValue('--dw-w')) || size0.w;
-  const h0 = Number(widget.style.getPropertyValue('--dw-h')) || size0.h;
-  const cs = getComputedStyle(grid);
-  const gap = parseFloat(cs.columnGap) || 16;
-  const colW = (grid.clientWidth - gap * (DASH_COLS - 1)) / DASH_COLS;
-  const rowUnit = (parseFloat(cs.gridAutoRows) || 40) + (parseFloat(cs.rowGap) || gap);
-  let w = w0, h = h0, raf = 0, lx = sx, ly = sy;
+  const maxW = Math.max(DASH_MIN_W, cw - Math.max(0, box.x));
+  let w = box.w, h = box.h, lx = sx, ly = sy, raf = 0;
 
   widget.classList.add('dw-resizing');
+  widget.style.zIndex = String(++dashZTop);
   document.body.classList.add('dw-busy');
-  showDashGuides(grid);
 
   const badge = document.createElement('div');
   badge.className = 'dw-size-badge';
@@ -784,16 +724,17 @@ function startDashResize(e, grid, widget) {
 
   const apply = () => {
     raf = 0;
-    if (Number(widget.style.getPropertyValue('--dw-w')) !== w) widget.style.setProperty('--dw-w', w);
-    if (Number(widget.style.getPropertyValue('--dw-h')) !== h) widget.style.setProperty('--dw-h', h);
-    badge.textContent = `${w} × ${h}`;
+    widget.style.width = w + 'px';
+    widget.style.height = h + 'px';
+    badge.textContent = `${Math.round(w)} × ${Math.round(h)}`;
     badge.style.transform = `translate3d(${lx + 16}px,${ly + 16}px,0)`;
+    applyCanvasHeight(canvas);
   };
   const onMove = (ev) => {
     lx = ev.clientX;
     ly = ev.clientY;
-    w = Math.min(DASH_COLS, Math.max(2, w0 + Math.round((lx - sx) / (colW + gap))));
-    h = Math.min(14, Math.max(2, h0 + Math.round((ly - sy) / rowUnit)));
+    w = Math.max(DASH_MIN_W, Math.min(maxW, box.w + (lx - sx)));
+    h = Math.max(DASH_MIN_H, box.h + (ly - sy));
     if (!raf) raf = requestAnimationFrame(apply);
   };
   const done = () => {
@@ -803,11 +744,12 @@ function startDashResize(e, grid, widget) {
     window.removeEventListener('pointercancel', done);
     if (raf) cancelAnimationFrame(raf);
     badge.remove();
-    hideDashGuides(grid);
     widget.classList.remove('dw-resizing');
+    widget.style.zIndex = '';
     document.body.classList.remove('dw-busy');
-    dashLayout[id] = { w, h };
-    localStorage.setItem(DASH_LS.layout, JSON.stringify(dashLayout));
+    dashFree[id] = { x: box.x, y: box.y, w: Math.round(w), h: Math.round(h) };
+    saveDashState();
+    applyCanvasHeight(canvas);
     redrawDashChart();
   };
   window.addEventListener('pointermove', onMove);
@@ -816,14 +758,14 @@ function startDashResize(e, grid, widget) {
 }
 
 function dashPointerDown(e) {
+  if (dashIsMobile()) return;
   if (e.pointerType === 'mouse' && e.button !== 0) return;
-  const grid = e.currentTarget;
+  const canvas = e.currentTarget;
   const widget = e.target.closest('.dash-widget');
-  if (!widget || !grid.contains(widget)) return;
+  if (!widget || !canvas.contains(widget)) return;
 
   if (e.target.closest('.dw-resize')) {
-    if (dashIsMobile()) return;
-    startDashResize(e, grid, widget);
+    startDashResize(e, canvas, widget);
     return;
   }
   // never start a drag from a real control / scrollable area
@@ -833,36 +775,35 @@ function dashPointerDown(e) {
   const grip = e.target.closest('.dw-drag');
   const anywhere = widget.dataset.drag === 'all' && e.pointerType === 'mouse';
   if (!head && !grip && !anywhere) return;
-  startDashDrag(e, grid, widget);
+  startDashDrag(e, canvas, widget);
 }
 
-function initDashGrid() {
-  const grid = $('#dashGrid');
-  if (!grid) return;
-  grid.addEventListener('click', (e) => {
+function initDashCanvas() {
+  const canvas = $('#dashGrid');
+  if (!canvas) return;
+  canvas.addEventListener('click', (e) => {
     const btn = e.target.closest('.dw-hide');
     if (!btn) return;
     e.preventDefault();
     e.stopPropagation();
     hideDashWidget(btn.closest('.dash-widget')?.dataset.widget);
   });
-  grid.addEventListener('pointerdown', dashPointerDown);
-  grid.addEventListener('dblclick', (e) => {
+  canvas.addEventListener('pointerdown', dashPointerDown);
+  canvas.addEventListener('dblclick', (e) => {
     if (e.target.closest('button, a, input')) return;
-    const head = e.target.closest('.dw-head');
-    const widget = head && head.closest('.dash-widget');
+    const widget = e.target.closest('.dash-widget');
     if (!widget) return;
+    const head = e.target.closest('.dw-head');
+    if (!head && widget.dataset.drag !== 'all') return;
     const id = widget.dataset.widget;
-    const d = dashMeta[id];
-    if (!d) return;
-    delete dashLayout[id];
-    localStorage.setItem(DASH_LS.layout, JSON.stringify(dashLayout));
-    widget.style.setProperty('--dw-w', d.w);
-    widget.style.setProperty('--dw-h', d.h);
+    if (!dashMeta[id]) return;
+    delete dashFree[id];
+    applyFreeLayout();
+    saveDashState();
     redrawDashChart();
-    toast(`បានកំណត់ទំហំ “${d.name}” ដើមវិញ`, 'ok');
+    toast(`បានកំណត់ទីតាំង និងទំហំ “${dashMeta[id].name}” ដើមវិញ`, 'ok');
   });
-  const box = grid.querySelector('.chart-box');
+  const box = canvas.querySelector('.chart-box');
   if (dashChartRO) { dashChartRO.disconnect(); dashChartRO = null; }
   if (box && window.ResizeObserver) {
     dashChartRO = new ResizeObserver(() => redrawDashChart());
@@ -874,8 +815,8 @@ async function renderArchive() {
   const hidden = DASH_DEFS.filter((d) => dashHidden.includes(d.id));
   const active = DASH_DEFS.filter((d) => !dashHidden.includes(d.id));
   const sizeLabel = (d) => {
-    const s = dashSize(d.id);
-    return `ទទឹង ${s.w}/12 · កម្ពស់ ${s.h} ជួរ`;
+    const b = dashBox(d.id);
+    return `ទទឹង ${Math.round(b.w)}px · កម្ពស់ ${Math.round(b.h)}px`;
   };
   $('#content').innerHTML = `
     <div class="card">
@@ -1002,10 +943,11 @@ async function renderDashboard() {
     ], s.topUsers), '<span>ចុចឈ្មោះដើម្បីកែ ឬគ្រប់គ្រង</span>'),
   };
 
-  const visible = dashWidgetsInOrder().filter((id) => !dashHidden.includes(id));
+  const visible = DASH_DEFS.map((d) => d.id).filter((id) => !dashHidden.includes(id));
   $('#content').innerHTML = visible.length
-    ? `<div class="dash-grid" id="dashGrid">${visible.map((id) => parts[id]).join('')}</div>`
+    ? `<div class="dash-canvas" id="dashGrid">${visible.map((id) => parts[id]).join('')}</div>`
     : dashAllHiddenHtml();
+  applyFreeLayout();
 
   dashChartDays = s.daily.map((d) => ({
     label: new Date(d.day).toLocaleDateString('km-KH', { day: 'numeric', month: 'numeric' }),
@@ -1034,7 +976,7 @@ async function renderDashboard() {
   on('#qaApprovals', () => goPage('approvals'));
   on('#qaUsers', () => goPage('users'));
   on('#dashLiveAll', openLiveUsers);
-  if (!visible.length) bindDashEmpty(); else initDashGrid();
+  if (!visible.length) bindDashEmpty(); else initDashCanvas();
 }
 
 async function renderUsers() {
@@ -4409,12 +4351,18 @@ function setSidebarCollapsed(on) {
     b.title = on && label ? label.textContent.trim() : '';
   });
   $('#sbArchive')?.classList.remove('flyout');
-  setTimeout(redrawDashChart, 300);
+  setTimeout(() => { applyFreeLayout(); redrawDashChart(); }, 300);
 }
 
 $('#sidebarToggle').onclick = () => setSidebarCollapsed(!$('#app').classList.contains('sb-collapsed'));
 setSidebarCollapsed(localStorage.getItem(DASH_LS.sidebar) === '1');
 paintArchiveBadge();
 initSidebarArchive();
+
+let dashResizeTimer = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(dashResizeTimer);
+  dashResizeTimer = setTimeout(() => { applyFreeLayout(); redrawDashChart(); }, 120);
+});
 
 boot();
