@@ -39,6 +39,41 @@ app.use((req, res, next) => {
   next();
 });
 
+// ---------- SERVER TELEMETRY (សម្រាប់ System Health Check) ----------
+// ប្រមូលស្ថិតិស្រាលៗលើគ្រប់ request — លើកលែង /admin/api/health ខ្លួនឯង
+// ដើម្បីកុំឱ្យការវាស់ latency បង្ខូចលទ្ធផលខ្លួនឯង។
+const healthStats = {
+  startedAt: Date.now(),
+  requests: 0,
+  errors5xx: 0,
+  durations: [],      // ring 200 សំណើចុងក្រោយ (ms)
+  recentErrors: [],   // 20 error ចុងក្រោយ
+  lastRequestAt: null,
+};
+app.use((req, res, next) => {
+  if (req.path.startsWith('/admin/api/health')) return next();
+  const t0 = process.hrtime.bigint();
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    healthStats.requests++;
+    healthStats.lastRequestAt = new Date().toISOString();
+    healthStats.durations.push(ms);
+    if (healthStats.durations.length > 200) healthStats.durations.shift();
+    if (res.statusCode >= 500) {
+      healthStats.errors5xx++;
+      healthStats.recentErrors.push({
+        at: new Date().toISOString(),
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        message: res.locals.healthError || null,
+      });
+      if (healthStats.recentErrors.length > 20) healthStats.recentErrors.shift();
+    }
+  });
+  next();
+});
+
 // ---------- HEALTH ----------
 app.get('/health', (_req, res) => {
   res.json({ ok: true, commit: String(process.env.RENDER_GIT_COMMIT || '').slice(0, 7) });
@@ -2553,6 +2588,7 @@ app.get('/regions', async (req, res) => {
 const createAdminRouter = require('./admin');
 app.use('/admin/api', createAdminRouter({
   db, ok, fail, ApiError, handle, SECRET, sendPushNotification, notifyUser, seedNewUser,
+  healthStats,
 }));
 app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
 
@@ -2565,6 +2601,7 @@ app.use((err, req, res, next) => {
   if (err.type === 'entity.too.large')
     return fail(res, 'រូបភាពធំពេក (អតិបរមា 200 KB)', 413, 'AVATAR_TOO_LARGE');
   console.error('❌ Unhandled:', err);
+  res.locals.healthError = String(err.message || err).slice(0, 160);
   fail(res, 'Server error', 500, 'SERVER_ERROR');
 });
 

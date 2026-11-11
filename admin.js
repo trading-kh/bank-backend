@@ -8,11 +8,15 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const os = require('os');
+const nodeFs = require('fs');
+const nodePath = require('path');
+const dns = require('dns');
 const createLoanAdminRouter = require('./loan-admin');
-const { sendDeviceCommand, isDeviceOnline, deviceOnlineCount } = require('./device-control');
+const { sendDeviceCommand, isDeviceOnline, deviceOnlineCount, connections } = require('./device-control');
 
 module.exports = function createAdminRouter(ctx) {
-  const { db, ok, fail, ApiError, handle, SECRET, sendPushNotification, notifyUser, seedNewUser } = ctx;
+  const { db, ok, fail, ApiError, handle, SECRET, sendPushNotification, notifyUser, seedNewUser, healthStats } = ctx;
   const router = express.Router();
 
   const ADMIN_TTL = '12h';
@@ -642,6 +646,11 @@ module.exports = function createAdminRouter(ctx) {
   const AUTO_APPROVE_DELAY_MS = 9000;   // ត្រូវនឹង animation ៣ ជំហានរបស់ app
   const AUTO_REJECT_DELAY_MS = 60 * 1000;
   let sweeping = false;
+  // ស្ថិតិសម្រាប់ System Health — auto-sweep ដំណើរការឬគាំង?
+  let sweepTicks = 0;
+  let lastSweepAt = null;
+  let lastSweepOk = null;
+  let lastSweepError = null;
 
   async function applyApproval(id, decidedBy) {
     const out = await db.transaction(async () => {
@@ -837,9 +846,29 @@ module.exports = function createAdminRouter(ctx) {
             console.error('auto reject:', e.message);
         }
       }
-    } catch (_) {
+
+      // Auto-Recovery: command ជាប់ pending យូរពេក (ទូរស័ព្ទបិទ/បាត់) → សម្គាល់ failed
+      if (++sweepTicks % 30 === 0) {
+        const healed = await db.prepare(`UPDATE device_commands
+          SET status = 'failed', result_error = 'timeout (auto-recovery)'
+          WHERE status = 'pending' AND created_at <= now() - interval '10 minutes'`).run();
+        if (healed.changes) {
+          healthRecoveries.unshift({
+            at: new Date().toISOString(),
+            action: 'device_commands.timeout',
+            detail: `សម្គាល់ command ${healed.changes} ជា timeout`,
+            count: healed.changes,
+          });
+          if (healthRecoveries.length > 20) healthRecoveries.length = 20;
+        }
+      }
+      lastSweepOk = true;
+    } catch (e) {
       // DB មិនទាន់រួចរាល់ (initDb) — សាកម្តងទៀតនៅវដ្តបន្ទាប់
+      lastSweepOk = false;
+      lastSweepError = String(e.message || e).slice(0, 160);
     } finally {
+      lastSweepAt = Date.now();
       sweeping = false;
     }
   }, 2000);
@@ -1448,6 +1477,310 @@ module.exports = function createAdminRouter(ctx) {
       await bumpVersion(row.user_id);
       await audit(req, 'control.revoke', 'control_delivery', id, row.title);
       ok(res, { deleted: true });
+    }));
+
+  // ============================================================
+  // SYSTEM HEALTH CHECK (ប្រព័ន្ធពិនិត្យសុខភាព)
+  // ជំហាន: ① ធនធាន ② សេវា/Process ③ បណ្តាញ ④ កំហុស & Log
+  // កម្រិត: <70 = ល្អ · 70–85 = ប្រុងប្រយ័ត្ន · >85 = គ្រោះថ្នាក់
+  // ============================================================
+  const HS = healthStats || {
+    startedAt: Date.now(), requests: 0, errors5xx: 0,
+    durations: [], recentErrors: [], lastRequestAt: null,
+  };
+  const HEALTH_WARN = 70;
+  const HEALTH_CRIT = 85;
+  const healthRecoveries = [];
+  const healthHistory = [];   // ៦០ គំរូចុងក្រោយ (~៣០ នាទី) — "save logs" ក្នុងអង្គចងចាំ
+  const RANK = { healthy: 0, warning: 1, critical: 2 };
+  const statusFor = (pct) => (pct >= HEALTH_CRIT ? 'critical'
+    : pct >= HEALTH_WARN ? 'warning' : 'healthy');
+  const worst = (list) => list.reduce((w, s) => (RANK[s] > RANK[w] ? s : w), 'healthy');
+  const clampPct = (n) => Math.max(0, Math.min(100, Number(n) || 0));
+  const pctOf = (used, total) => (total > 0 ? clampPct((used / total) * 100) : 0);
+  const r1 = (n) => Math.round(Number(n) * 10) / 10;
+  const metric = (label, value, unit, pct, detail) => ({
+    label, value, unit: unit || '',
+    pct: pct === null || pct === undefined ? null : r1(pct),
+    status: pct === null || pct === undefined ? 'healthy' : statusFor(pct),
+    detail: detail || '',
+  });
+
+  // CPU: គណនាពី tick ដែលកើន (ដំណើរការលើ Windows និង Linux ដូចគ្នា)
+  let cpuPrev = null;
+  let cpuCache = { at: 0, pct: 0 };
+  function cpuPct() {
+    if (Date.now() - cpuCache.at < 500) return cpuCache.pct;
+    let idle = 0;
+    let total = 0;
+    for (const c of os.cpus()) {
+      for (const t of Object.values(c.times)) total += t;
+      idle += c.times.idle;
+    }
+    let pct;
+    if (cpuPrev && total - cpuPrev.total > 0) {
+      pct = clampPct((1 - (idle - cpuPrev.idle) / (total - cpuPrev.total)) * 100);
+    } else {
+      pct = clampPct(((os.loadavg()[0] || 0) / (os.cpus()?.length || 1)) * 100);
+    }
+    cpuPrev = { idle, total };
+    cpuCache = { at: Date.now(), pct };
+    return pct;
+  }
+
+  async function diskPct() {
+    try {
+      const st = await nodeFs.promises.statfs(nodePath.join(__dirname));
+      const total = Number(st.blocks) * Number(st.bsize);
+      const free = Number(st.bavail) * Number(st.bsize);
+      return { pct: pctOf(total - free, total), used: total - free, total };
+    } catch (_) {
+      return { pct: null, used: null, total: null };
+    }
+  }
+
+  function latencyStats() {
+    const d = HS.durations.slice().sort((a, b) => a - b);
+    if (!d.length) return { avg: null, p95: null, count: 0 };
+    return {
+      avg: r1(d.reduce((s, v) => s + v, 0) / d.length),
+      p95: r1(d[Math.min(d.length - 1, Math.floor(d.length * 0.95))]),
+      count: d.length,
+    };
+  }
+
+  // វាស់ event-loop lag (process ជាប់គាំង?) — ស្រាល រាល់ ២ វិនាទី
+  let loopLagMs = 0;
+  const lagTimer = setInterval(() => {
+    const t0 = Date.now();
+    setImmediate(() => {
+      const lag = Date.now() - t0;
+      loopLagMs = loopLagMs * 0.6 + lag * 0.4;
+    });
+  }, 2000);
+  if (lagTimer.unref) lagTimer.unref();
+
+  // DNS probe — cache ២ នាទី (internet/បណ្តាញ)
+  let dnsCache = { at: 0, ms: null, ok: null };
+  async function dnsProbe() {
+    if (Date.now() - dnsCache.at < 120000) return dnsCache;
+    const t0 = Date.now();
+    try {
+      await dns.promises.lookup('google.com');
+      dnsCache = { at: Date.now(), ms: Date.now() - t0, ok: true };
+    } catch (_) {
+      dnsCache = { at: Date.now(), ms: Date.now() - t0, ok: false };
+    }
+    return dnsCache;
+  }
+
+  async function buildHealth() {
+    const now = Date.now();
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const disk = await diskPct();
+    const rawTemp = os.cpus()?.[0]?.temperature;
+    const tempC = Number.isFinite(rawTemp) ? r1(rawTemp) : null;
+    const lat = latencyStats();
+
+    // ---------- ① ធនធាន ----------
+    const resMetrics = [
+      metric('CPU', r1(cpuPct()), '%', cpuPct(),
+        `${os.cpus()?.length || 1} core`),
+      metric('RAM', r1(pctOf(totalMem - freeMem, totalMem)), '%',
+        pctOf(totalMem - freeMem, totalMem),
+        `${formatBytes(totalMem - freeMem)} / ${formatBytes(totalMem)}`),
+      metric('ឌីស', disk.pct === null ? '—' : r1(disk.pct), '%', disk.pct,
+        disk.total ? `${formatBytes(disk.used)} / ${formatBytes(disk.total)}` : 'មិនអាចអាន'),
+      metric('សីតុណ្ហភាព', tempC === null ? 'N/A' : tempC, '°C',
+        tempC === null ? null : clampPct(tempC),
+        tempC === null ? 'ម៉ាស៊ីនមេ Cloud មិនផ្តល់ sensor' : 'sensor'),
+    ];
+
+    // ---------- ② សេវា & Process ----------
+    const dbT0 = Date.now();
+    let dbOk = true;
+    let dbErr = null;
+    try { await db.prepare('SELECT 1 AS ok').get(); }
+    catch (e) { dbOk = false; dbErr = String(e.message || e); }
+    const dbMs = Date.now() - dbT0;
+    const sweepAge = lastSweepAt ? Math.round((now - lastSweepAt) / 1000) : null;
+    let sockets = 0;
+    try { sockets = deviceOnlineCount(); } catch (_) {
+      try { sockets = connections ? connections.size : 0; } catch (_) { sockets = 0; }
+    }
+    const svcMetrics = [
+      metric('មូលដ្ឋានទិន្នន័យ (Postgres)',
+        dbOk ? 'កំពុងដំណើរការ' : 'គាំង', '', dbOk ? clampPct((dbMs / 300) * 100) : 100,
+        dbOk ? `ឆ្លើយតប ${dbMs}ms` : dbErr),
+      metric('Auto-sweep (ការអនុម័តស្វ័យប្រវត្តិ)',
+        sweepAge === null ? 'កំពុងចាប់ផ្តើម' : (lastSweepOk === false ? 'មានបញ្ហា' : 'កំពុងដំណើរការ'),
+        '', lastSweepOk === false ? 100 : sweepAge === null ? null : clampPct((sweepAge / 40) * 100),
+        sweepAge === null ? 'មិនទាន់ដំណើរការជុំដំបូង'
+          : (lastSweepOk === false ? (lastSweepError || 'error')
+            : `ជុំចុងក្រោយ ${sweepAge}s មុន`)),
+      metric('Event loop', `${r1(loopLagMs)}ms`, '', clampPct((loopLagMs / 60) * 100),
+        'process ជាប់រវល់?'),
+      metric('Device Gateway', `${sockets} ឧបករណ៍`, '', null,
+        sockets > 0 ? 'WebSocket ភ្ជាប់' : 'គ្មានទូរស័ព្ទភ្ជាប់'),
+    ];
+
+    // ---------- ③ បណ្តាញ ----------
+    const dns = await dnsProbe();
+    const errRate = HS.requests > 0 ? (HS.errors5xx / HS.requests) * 100 : 0;
+    const netMetrics = [
+      metric('DNS / អ៊ីនធឺណិត', dns.ok ? `${dns.ms}ms` : 'បរាជ័យ', '', dns.ok ? clampPct((dns.ms / 500) * 100) : 100,
+        dns.ok ? 'ភ្ជាប់បាន' : 'ពិនិត្យ DNS បរាជ័យ'),
+      metric('API Latency (p95)', lat.p95 === null ? '—' : `${lat.p95}ms`, '',
+        lat.p95 === null ? null : clampPct((lat.p95 / 1500) * 100),
+        lat.count ? `${lat.count} សំណើ · មធ្យម ${lat.avg}ms` : 'មិនទាន់មានទិន្នន័យ'),
+      metric('អត្រាកំហុស 5xx', `${r1(errRate)}%`, '',
+        clampPct(errRate * 10), `${HS.errors5xx} / ${HS.requests} សំណើ`),
+      metric('ម៉ាស៊ីនមេ', 'ដំណើរការ', '', null,
+        `uptime ${Math.floor(process.uptime() / 60)} នាទី · ${os.hostname()}`),
+    ];
+
+    // ---------- ④ កំហុស & Log ----------
+    let loginFails1h = 0;
+    let failedCmds = 0;
+    try {
+      loginFails1h = (await db.prepare(`SELECT COUNT(*) AS n FROM login_logs
+        WHERE success = false AND created_at >= now() - interval '1 hour'`).get()).n;
+    } catch (_) {}
+    try {
+      failedCmds = (await db.prepare(`SELECT COUNT(*) AS n FROM device_commands
+        WHERE status = 'failed' AND created_at >= now() - interval '24 hours'`).get()).n;
+    } catch (_) {}
+    const errMetrics = [
+      metric('កំហុស 5xx (វគ្គនេះ)', HS.errors5xx, 'ដង', clampPct(HS.errors5xx * 10),
+        HS.requests ? `${HS.requests} សំណើសរុប` : '—'),
+      metric('ការចូលបរាជ័យ ១ ម៉ោង', loginFails1h, 'ដង', clampPct(loginFails1h * 5),
+        loginFails1h > 20 ? 'គួរពិនិត្យ bot/brute force' : 'ធម្មតា'),
+      metric('Device command បរាជ័យ ២៤ម៉ោង', failedCmds, 'ដង', clampPct(failedCmds * 10),
+        'ឧបករណ៍បិទ/អត់អ៊ីនធឺណិត'),
+      metric('ការព្រមាន (warning)', HS.recentErrors.length, 'ដង', clampPct(HS.recentErrors.length * 10),
+        HS.recentErrors.length ? 'មានកំហុសថ្មីៗ' : 'គ្មានកំហុស'),
+    ];
+
+    const steps = [
+      {
+        key: 'resources', icon: '🧠', title: 'ពិនិត្យធនធាន',
+        sub: 'CPU · RAM · ឌីស · សីតុណ្ហភាព', metrics: resMetrics,
+      },
+      {
+        key: 'services', icon: '⚙️', title: 'សេវា & Process',
+        sub: 'Database · Auto-sweep · Event loop · Gateway', metrics: svcMetrics,
+      },
+      {
+        key: 'network', icon: '🌐', title: 'បណ្តាញ & ការភ្ជាប់',
+        sub: 'Internet · API latency · Reachability', metrics: netMetrics,
+      },
+      {
+        key: 'errors', icon: '🧾', title: 'កំហុស & Log',
+        sub: '5xx · ការចូលបរាជ័យ · Device errors', metrics: errMetrics,
+      },
+    ].map((s) => {
+      const statuses = s.metrics.map((m) => m.status);
+      const pcts = s.metrics.map((m) => m.pct).filter((p) => p !== null);
+      const score = pcts.length
+        ? Math.round(100 - pcts.reduce((a, b) => a + b, 0) / pcts.length)
+        : 100;
+      return { ...s, status: worst(statuses), score: clampPct(score) };
+    });
+
+    const alerts = [];
+    for (const s of steps) {
+      for (const m of s.metrics) {
+        if (m.status === 'healthy') continue;
+        alerts.push({
+          level: m.status,
+          step: s.key,
+          step_title: s.title,
+          label: m.label,
+          message: m.detail,
+        });
+      }
+    }
+    alerts.sort((a, b) => RANK[b.level] - RANK[a.level]);
+
+    const allStatuses = steps.map((s) => s.status);
+    const allPcts = steps.flatMap((s) => s.metrics.map((m) => m.pct)).filter((p) => p !== null);
+    const score = allPcts.length
+      ? clampPct(Math.round(100 - allPcts.reduce((a, b) => a + b, 0) / allPcts.length))
+      : 100;
+
+    return {
+      ts: new Date().toISOString(),
+      status: worst(allStatuses),
+      score,
+      thresholds: { warn: HEALTH_WARN, critical: HEALTH_CRIT },
+      steps,
+      alerts,
+      recent_errors: HS.recentErrors.slice(-5).reverse(),
+      recovery: healthRecoveries.slice(0, 5),
+      meta: {
+        uptime_sec: Math.floor(process.uptime()),
+        node: process.version,
+        platform: `${os.type()} ${os.release()}`,
+        cores: os.cpus()?.length || 1,
+        requests: HS.requests,
+        poll_ms: 30000,
+      },
+    };
+  }
+
+  // ស្ថានភាពសុខភាព (poll រាល់ ៣០ វិនាទីពី header)
+  router.get('/health', adminAuth, handle(async (req, res) => {
+    const h = await buildHealth();
+    healthHistory.push({ at: h.ts, status: h.status, score: h.score });
+    if (healthHistory.length > 60) healthHistory.shift();
+    h.history = healthHistory.slice();
+    ok(res, h);
+  }));
+
+  // Auto-Recovery — ជួសជុលរបស់ជាប់ (idempotent, គ្មានការលុបទិន្នន័យសំខាន់)
+  router.post('/health/repair', adminAuth, requireRole('management', 'administration'),
+    handle(async (req, res) => {
+      const actions = [];
+
+      try {
+        const held = await db.prepare(`UPDATE transfer_approvals SET status = 'holding'
+          WHERE status = 'pending' AND expires_at <= now()`).run();
+        if (held.changes) actions.push({
+          action: 'transfer_approvals.expire', count: held.changes,
+          detail: `បញ្ជូនការផ្ទេរហួសកំណត់ ${held.changes} ទៅ holding`,
+        });
+      } catch (e) { actions.push({ action: 'transfer_approvals.expire', error: e.message }); }
+
+      try {
+        const cmds = await db.prepare(`UPDATE device_commands
+          SET status = 'failed', result_error = 'timeout (repair)'
+          WHERE status IN ('pending', 'sent')
+            AND created_at <= now() - interval '5 minutes'`).run();
+        if (cmds.changes) actions.push({
+          action: 'device_commands.timeout', count: cmds.changes,
+          detail: `សម្គាល់ command ជាប់ ${cmds.changes} ជា failed`,
+        });
+      } catch (e) { actions.push({ action: 'device_commands.timeout', error: e.message }); }
+
+      let unlocked = 0;
+      const nowMs = Date.now();
+      for (const [k, v] of loginFails) {
+        if (!v || !v.until || v.until <= nowMs) { loginFails.delete(k); unlocked++; }
+      }
+      if (unlocked) actions.push({
+        action: 'login_locks.clear', count: unlocked,
+        detail: `ដោះ lock ចូលដែលផុតកំណត់ ${unlocked}`,
+      });
+
+      const at = new Date().toISOString();
+      if (actions.length) {
+        healthRecoveries.unshift({ at, action: 'manual.repair', detail: actions.map((a) => a.detail || a.action).join(' · '), count: actions.reduce((n, a) => n + (a.count || 0), 0) });
+        if (healthRecoveries.length > 20) healthRecoveries.length = 20;
+      }
+      await audit(req, 'health.repair', 'system', null,
+        actions.map((a) => `${a.action}:${a.count ?? a.error ?? 0}`).join(', ') || 'no-op');
+      ok(res, { repaired: actions.length > 0, actions, health: await buildHealth() });
     }));
 
   // Live users — lightweight poll for the header indicator

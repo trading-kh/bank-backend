@@ -785,6 +785,7 @@ function closeUserDrawer() {
   if (!root || root.classList.contains('hidden')) return;
   root.classList.remove('open');
   document.body.style.overflow = '';
+  if (healthPanelTimer) { clearInterval(healthPanelTimer); healthPanelTimer = null; }
   if (udClearTimer) clearTimeout(udClearTimer);
   udClearTimer = setTimeout(() => {
     root.classList.add('hidden');
@@ -3285,6 +3286,175 @@ async function openLiveUsers() {
     </aside>`);
 }
 
+/* ---------- system health check (header indicator + panel) ---------- */
+let healthData = null;
+let healthPanelTimer = null;
+
+const HEALTH_LABEL = { healthy: 'សុខភាពល្អ', warning: 'ត្រូវប្រុងប្រយ័ត្ន', critical: 'គ្រោះថ្នាក់' };
+const HEALTH_CLS = { healthy: 'ok', warning: 'warn', critical: 'crit' };
+const healthCls = (s) => HEALTH_CLS[s] || 'ok';
+
+function paintHealthPill(d) {
+  const btn = $('#healthBtn');
+  const el = $('#healthScore');
+  if (!btn || !el) return;
+  if (!d) {
+    el.textContent = '—';
+    btn.classList.remove('is-ok', 'is-warn', 'is-crit');
+    return;
+  }
+  el.textContent = String(d.score);
+  btn.classList.remove('is-ok', 'is-warn', 'is-crit', 'hp-alerting');
+  btn.classList.add(`is-${healthCls(d.status)}`);
+  btn.title = `សុខភាពប្រព័ន្ធ · ${HEALTH_LABEL[d.status] || d.status} (${d.score}/100) · ចុចមើលលម្អិត`;
+  if (d.status !== 'healthy') {
+    void btn.offsetWidth;
+    btn.classList.add('hp-alerting');
+  }
+}
+
+async function loadHealth() {
+  if (!token) return;
+  try {
+    healthData = await api('/health');
+    paintHealthPill(healthData);
+  } catch (_) {
+    paintHealthPill(null);
+  }
+}
+
+function hpMetric(m) {
+  const cls = healthCls(m.status);
+  const showUnit = m.unit && m.value !== 'N/A' && m.value !== '—';
+  const bar = m.pct == null ? ''
+    : `<div class="hp-bar is-${cls}"><i style="width:${Math.max(3, m.pct)}%"></i></div>`;
+  return `<div class="hp-metric is-${cls}">
+    <div class="hp-metric-top">
+      <span>${esc(m.label)}</span>
+      <b>${esc(String(m.value))}${showUnit ? `<em>${esc(m.unit)}</em>` : ''}</b>
+    </div>
+    ${bar}
+    <small>${esc(m.detail || '')}</small>
+  </div>`;
+}
+
+function hpStep(s, i) {
+  return `<section class="hp-step is-${healthCls(s.status)}">
+    <div class="hp-step-head">
+      <span class="hp-step-ic">${s.icon}</span>
+      <div class="hp-step-tt"><b>${i + 1}. ${esc(s.title)}</b><small>${esc(s.sub)}</small></div>
+      <span class="hp-chip is-${healthCls(s.status)}">${s.score}</span>
+    </div>
+    <div class="hp-metrics">${s.metrics.map(hpMetric).join('')}</div>
+  </section>`;
+}
+
+function hpPanelHtml(d) {
+  const cls = healthCls(d.status);
+  const alerts = (d.alerts || []).slice(0, 5).map((a) => `
+    <div class="hp-alert is-${healthCls(a.level)}">
+      <span class="hp-alert-dot"></span>
+      <div><b>${esc(a.label)}</b><small>${esc(a.message || '')} · ${esc(a.step_title || '')}</small></div>
+    </div>`).join('');
+  const recovery = (d.recovery || []).map((r) => `
+    <div class="hp-recovery"><span>♻</span>
+      <div><b>${esc(r.detail || r.action)}</b><small>${ago(r.at)}</small></div>
+    </div>`).join('');
+  const upMin = Math.floor((d.meta?.uptime_sec || 0) / 60);
+  const trend = (d.history || []).map((p) => `<i class="is-${healthCls(p.status)}" title="${esc(p.score)} · ${esc(p.at)}"></i>`).join('');
+  return `
+    <div class="udrawer-scrim" data-ud-close></div>
+    <aside class="udrawer-panel" style="--av-a:${cls === 'ok' ? '#22c55e' : cls === 'warn' ? '#f59e0b' : '#ef4444'};--av-b:#0ea5e9" role="dialog" aria-modal="true" aria-label="ប្រព័ន្ធពិនិត្យសុខភាព">
+      <div class="udrawer-hero" style="height:92px">
+        <div class="udrawer-hero-glow"></div>
+        <div class="udrawer-hero-grid"></div>
+        <button class="udrawer-close" data-ud-close title="បិទ">✕</button>
+        <div class="udrawer-hero-tag">● System Health</div>
+      </div>
+      <div class="udrawer-scroll">
+        <div class="hp-summary">
+          <div class="hp-ring is-${cls}" style="--v:${d.score}"><b>${d.score}</b><small>/100</small></div>
+          <div class="hp-summary-main">
+            <b class="is-${cls}">${HEALTH_LABEL[d.status] || d.status}</b>
+            <small>${esc(d.meta?.platform || '')} · Node ${esc(d.meta?.node || '')}</small>
+            <small>uptime ${upMin} នាទី · ${d.meta?.requests ?? 0} សំណើ · ពិនិត្យ ${ago(d.ts)}</small>
+          </div>
+          <button class="icon-btn" id="hpRefresh" title="ពិនិត្យឡើងវិញ">⟳</button>
+        </div>
+        <div class="hp-legend">
+          <span class="is-ok">● ល្អ &lt;${d.thresholds.warn}%</span>
+          <span class="is-warn">● ប្រុងប្រយ័ត្ន ${d.thresholds.warn}–${d.thresholds.critical}%</span>
+          <span class="is-crit">● គ្រោះថ្នាក់ &gt;${d.thresholds.critical}%</span>
+        </div>
+        <div class="hp-trend">
+          <span>ប្រវត្តិពិនិត្យ · ${trend ? `${(d.history || []).length} គំរូ` : 'មិនទាន់មាន'}</span>
+          <div class="hp-trend-dots">${trend}</div>
+        </div>
+        ${d.steps.map(hpStep).join('')}
+        ${alerts ? `<div class="hp-block"><h4>⚠ ការជូនដំណឹង (${(d.alerts || []).length})</h4>${alerts}</div>` : ''}
+        ${recovery ? `<div class="hp-block"><h4>♻ Auto-Recovery</h4>${recovery}</div>` : ''}
+        <div class="hp-foot">
+          <button class="btn ghost sm" id="hpPoll">⏱ ពិនិត្យស្វ័យប្រវត្តិ · 30s</button>
+          <button class="btn primary sm" id="hpRepair">🛠 ជួសជុលស្វ័យប្រវត្តិ</button>
+        </div>
+      </div>
+    </aside>`;
+}
+
+function bindHealthPanel() {
+  const root = $('#userDrawer');
+  if (!root) return;
+  const repaint = () => {
+    if (!healthData) return;
+    root.innerHTML = hpPanelHtml(healthData);
+    bindHealthPanel();
+    paintHealthPill(healthData);
+  };
+  const refreshBtn = $('#hpRefresh', root);
+  if (refreshBtn) refreshBtn.onclick = async () => {
+    refreshBtn.classList.add('spin');
+    await loadHealth();
+    repaint();
+  };
+  const repairBtn = $('#hpRepair', root);
+  if (repairBtn) repairBtn.onclick = async () => {
+    repairBtn.disabled = true;
+    repairBtn.textContent = 'កំពុងជួសជុល…';
+    try {
+      const r = await api('/health/repair', { method: 'POST' });
+      if (r.health) healthData = r.health;
+      toast(r.repaired ? `បានជួសជុល ${r.actions.length} ចំណុច` : 'មិនមានអ្វីត្រូវជួសជុល', 'ok');
+      repaint();
+    } catch (e) {
+      toast(e.message, 'err');
+      repairBtn.disabled = false;
+      repairBtn.textContent = '🛠 ជួសជុលស្វ័យប្រវត្តិ';
+    }
+  };
+  $$('[data-ud-close]', root).forEach((el) => el.onclick = closeUserDrawer);
+}
+
+async function openHealthPanel() {
+  await loadHealth();
+  if (!healthData) return toast('មិនអាចអានសុខភាពប្រព័ន្ធ', 'err');
+  openUserDrawer(hpPanelHtml(healthData));
+  bindHealthPanel();
+  if (healthPanelTimer) clearInterval(healthPanelTimer);
+  healthPanelTimer = setInterval(async () => {
+    const root = $('#userDrawer');
+    if (!root || root.classList.contains('hidden')) {
+      clearInterval(healthPanelTimer);
+      healthPanelTimer = null;
+      return;
+    }
+    await loadHealth();
+    if (healthData) {
+      root.innerHTML = hpPanelHtml(healthData);
+      bindHealthPanel();
+    }
+  }, 30000);
+}
+
 function userNotifyButton(userId) {
   return `<button class="btn ghost sm" id="u_msg">✉ សារ</button>
     <button class="btn ghost sm" id="u_pin">🔑 PIN</button>
@@ -3382,6 +3552,7 @@ async function boot() {
     render();
     loadBadges();
     loadLiveUsers();
+    loadHealth();
   } catch (_) {
     token = null;
     localStorage.removeItem('aura_admin_token');
@@ -3416,6 +3587,7 @@ $('#loginForm').onsubmit = async (e) => {
     render();
     loadBadges();
     loadLiveUsers();
+    loadHealth();
   } catch (err) {
     $('#loginError').textContent = err.message;
   } finally {
@@ -3442,12 +3614,13 @@ $('#refreshBtn').onclick = async () => {
   const btn = $('#refreshBtn');
   btn.classList.add('spin');
   try {
-    await Promise.all([render(), loadBadges(), loadLiveUsers()]);
+    await Promise.all([render(), loadBadges(), loadLiveUsers(), loadHealth()]);
   } finally {
     setTimeout(() => btn.classList.remove('spin'), 300);
   }
 };
 $('#liveUsersBtn').onclick = openLiveUsers;
+$('#healthBtn').onclick = openHealthPanel;
 
 // ចុចឈ្មោះ ឬ avatar អ្នកប្រើនៅគ្រប់ទំព័រ → បើក drawer គ្រប់គ្រង
 document.addEventListener('click', (e) => {
@@ -3465,6 +3638,8 @@ document.addEventListener('click', (e) => {
 
 // Live count polling (header pill)
 setInterval(loadLiveUsers, 20000);
+// System health polling (header pill) — ៣០ វិនាទី
+setInterval(loadHealth, 30000);
 
 /* ---------- admin identity ---------- */
 const ADMIN_ROLES = {
