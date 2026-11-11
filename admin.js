@@ -1539,6 +1539,60 @@ module.exports = function createAdminRouter(ctx) {
     }
   }
 
+  // សីតុណ្ហភាព: ① អាន sensor ពិតពី Linux sysfs (thermal_zone / hwmon)
+  // ② បើ container មិនបើក sensor → ប៉ាន់ស្មានពី CPU load (សម្គាល់ថា "ប៉ាន់ស្មាន")
+  let tempCache = { at: 0, c: null, source: null, cpu: null };
+  const sensorCache = { at: 0, c: null };
+  const TEMP_IDLE_C = 40;
+  const TEMP_FULL_C = 78;
+  async function readTempC() {
+    // ស្កេន sensor ពិត៖ រាល់ ៦០ វិនាទី បើឃើញ · រាល់ ៥ នាទី បើគ្មាន
+    const stale = sensorCache.c !== null ? 60000 : 300000;
+    if (Date.now() - sensorCache.at > stale) {
+      let maxC = null;
+      const consider = (raw) => {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) return;
+        const c = n > 1000 ? n / 1000 : n; // millidegree → °C
+        if (c > 0 && c < 150 && (maxC === null || c > maxC)) maxC = c;
+      };
+      const readNum = async (p) => {
+        try { return Number((await nodeFs.promises.readFile(p, 'utf8')).trim()); }
+        catch (_) { return NaN; }
+      };
+      try {
+        const zones = (await nodeFs.promises.readdir('/sys/class/thermal'))
+          .filter((n) => n.startsWith('thermal_zone'));
+        for (const z of zones.slice(0, 8)) {
+          consider(await readNum(`/sys/class/thermal/${z}/temp`));
+        }
+      } catch (_) {}
+      try {
+        const chips = await nodeFs.promises.readdir('/sys/class/hwmon');
+        for (const h of chips.slice(0, 8)) {
+          for (let i = 1; i <= 4; i++) {
+            consider(await readNum(`/sys/class/hwmon/${h}/temp${i}_input`));
+          }
+        }
+      } catch (_) {}
+      sensorCache.at = Date.now();
+      sensorCache.c = maxC;
+    }
+
+    if (sensorCache.c !== null) {
+      tempCache = { at: Date.now(), c: r1(sensorCache.c), source: 'sensor', cpu: null };
+      return tempCache;
+    }
+
+    // គ្មាន sensor — គំរូកំដៅ: idle 40°C, full load 78°C, រលូនតាមពេល
+    const cpu = cpuPct();
+    const target = TEMP_IDLE_C + (TEMP_FULL_C - TEMP_IDLE_C) * (cpu / 100);
+    const prev = tempCache.source === 'estimated' ? tempCache.c : null;
+    const est = prev === null ? target : prev * 0.7 + target * 0.3;
+    tempCache = { at: Date.now(), c: r1(est), source: 'estimated', cpu: r1(cpu) };
+    return tempCache;
+  }
+
   function latencyStats() {
     const d = HS.durations.slice().sort((a, b) => a - b);
     if (!d.length) return { avg: null, p95: null, count: 0 };
@@ -1579,11 +1633,12 @@ module.exports = function createAdminRouter(ctx) {
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
     const disk = await diskPct();
-    const rawTemp = os.cpus()?.[0]?.temperature;
-    const tempC = Number.isFinite(rawTemp) ? r1(rawTemp) : null;
+    const temp = await readTempC();
     const lat = latencyStats();
 
     // ---------- ① ធនធាន ----------
+    // សីតុណ្ហភាព: 30°C → 0% · 90°C → 100% (70% ≈ 72°C, 85% ≈ 81°C)
+    const tempPct = clampPct(((temp.c - 30) / 60) * 100);
     const resMetrics = [
       metric('CPU', r1(cpuPct()), '%', cpuPct(),
         `${os.cpus()?.length || 1} core`),
@@ -1592,9 +1647,11 @@ module.exports = function createAdminRouter(ctx) {
         `${formatBytes(totalMem - freeMem)} / ${formatBytes(totalMem)}`),
       metric('ឌីស', disk.pct === null ? '—' : r1(disk.pct), '%', disk.pct,
         disk.total ? `${formatBytes(disk.used)} / ${formatBytes(disk.total)}` : 'មិនអាចអាន'),
-      metric('សីតុណ្ហភាព', tempC === null ? 'N/A' : tempC, '°C',
-        tempC === null ? null : clampPct(tempC),
-        tempC === null ? 'ម៉ាស៊ីនមេ Cloud មិនផ្តល់ sensor' : 'sensor'),
+      metric(temp.source === 'estimated' ? 'សីតុណ្ហភាព (ប៉ាន់ស្មាន)' : 'សីតុណ្ហភាព',
+        temp.source === 'estimated' ? `≈${r1(temp.c)}` : r1(temp.c), '°C', tempPct,
+        temp.source === 'estimated'
+          ? `ប៉ាន់ស្មានពី CPU ${temp.cpu}% · VM គ្មាន sensor`
+          : 'អានពី sensor ពិត (sysfs)'),
     ];
 
     // ---------- ② សេវា & Process ----------
