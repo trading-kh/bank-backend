@@ -76,6 +76,17 @@ const avatarHtml = (name, thumb, status, size = '') => {
   return `<span class="avatar-wrap">${img}<span class="dot ${status ? 'on' : 'off'}"></span></span>`;
 };
 
+// អ្នកប្រើដែលអាចចុចបានគ្រប់ទំព័រ — បើក drawer គ្រប់គ្រង (កែ/ផ្អាក/លុប/PIN/សារ)
+const userChip = (name, thumb, id, online, sub = '') => {
+  if (id === undefined || id === null || id === '') {
+    return `<div class="cell-user">${avatarHtml(name, thumb, online)}<span>${esc(name)}</span></div>`;
+  }
+  return `<button class="user-chip" data-user-view="${esc(id)}" title="គ្រប់គ្រង ${esc(name)}">
+    ${avatarHtml(name, thumb, online)}
+    <span><b>${esc(name || '—')}</b>${sub ? `<small>${esc(sub)}</small>` : ''}</span>
+  </button>`;
+};
+
 /* ---------- live / offline ---------- */
 const liveBadge = (r) => r.online
   ? '<span class="live on"><i></i>Live</span>'
@@ -106,9 +117,9 @@ const ago = (s) => {
 };
 
 const lastSeenHtml = (r) => r.last_seen_at
-  ? `<div class="last-seen">ចុងចាស់ ${ago(r.last_seen_at)}</div>
+  ? `<div class="last-seen">ចុងក្រោយ ${ago(r.last_seen_at)}</div>
      <div class="last-seen">${dt(r.last_seen_at)}</div>`
-  : '<div class="last-seen">មិនដែលចូលកម្ម</div>';
+  : '<div class="last-seen">មិនដែលចូល</div>';
 
 
 function toast(msg, type = '') {
@@ -199,7 +210,7 @@ function tableHtml(cols, rows, opts = {}) {
   const head = cols.map((c) => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('');
   const body = rows.map((r, i) => `<tr ${opts.rowAttr ? opts.rowAttr(r, i) : ''}>${cols
     .map((c) => `<td class="${c.num ? 'num' : ''}">${c.render(r, i)}</td>`).join('')}</tr>`).join('');
-  return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="table-wrap ${opts.wrapClass || ''}"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function pagerHtml(total, currentOffset, limit) {
@@ -267,100 +278,136 @@ const TITLES = {
   approvals: 'រង់ចាំអនុម័ត',
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   identity: 'ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ',
-  collections: 'ប្រមូល', reports: 'របាយការណ៍', notifications: 'សេចក្តីសារ',
-  data: 'ទិន្នន័យផ្សេង', audit: 'កំណត់ត្រាក្របរបុប',
+  collections: 'ប្រមូលប្រាក់', reports: 'របាយការណ៍', notifications: 'សារជូនដំណឹង',
+  data: 'ទិន្នន័យផ្សេង', audit: 'សវនកម្ម',
   devices: 'គ្រប់គ្រងទូរស័ព្ទ', usage: 'ការប្រើប្រាស់',
+};
+const PAGE_SUBS = {
+  dashboard: 'ទិដ្ឋភាពរួម · KPI · សកម្មភាពថ្មីៗ',
+  control: 'ផ្ញើកាតបញ្ជាផ្ទាល់ទៅអ្នកប្រើក្នុង app',
+  users: 'ស្វែងរក កែសម្រួល ផ្អាក លុប និងគ្រប់គ្រងគណនី',
+  cards: 'គណនី/កាត សមតុល្យ និងកំណត់ប្រចាំថ្ងៃ',
+  approvals: 'អនុម័ត ឬ បដិសេធការផ្ទេរប្រាក់ចេញ',
+  transactions: 'ប្រវត្តិប្រតិបត្តិការ · ស្វែងរក · លុប',
+  loans: 'ដាក់ពាក្យ វាយតម្លៃ អនុម័ត បញ្ចេញ និងតាមដាន',
+  kyc: 'ឯកសារ KYC និង CRM អតិថិជន',
+  identity: 'ផ្ទៀងផ្ទាត់អត្តសញ្ញាណដោយឯកសារ',
+  collections: 'គម្រោងប្រមូលប្រាក់ និងការងារតាមដាន',
+  reports: 'សង្ខេបហិរញ្ញវត្ថុ និងដំណើរការ',
+  notifications: 'សារជូនដំណឹងទៅអ្នកប្រើ',
+  data: 'តារាងទិន្នន័យបន្ថែម',
+  audit: 'កំណត់ត្រាសកម្មភាពរបស់ Admin',
+  devices: 'គ្រប់គ្រងឧបករណ៍ និងពាក្យបញ្ជា',
+  usage: 'ស្ថិតិការប្រើប្រាស់ប្រព័ន្ធ',
 };
 
 async function renderDashboard() {
-  const s = await api('/stats');
+  const [s, live] = await Promise.all([
+    api('/stats'),
+    api('/live').catch(() => null),
+  ]);
+  if (live) { liveData = live; paintLiveCount(live.count); }
   const t = s.totals;
-  $('#content').innerHTML = `
-    <div class="grid k3">
-      <div class="card kpi accent">
-        <div class="kpi-label">អ្នកប្រើសរុប</div>
-        <div class="kpi-value">${t.users}</div>
-        <div class="kpi-sub">ថ្មី ${t.new_users_7d} នាក់ (7 ថ្ងៃ)</div>
-      </div>
-      <div class="card kpi ok">
-        <div class="kpi-label">🟢 កំពុងប្រើឥឡូវ (Live)</div>
-        <div class="kpi-value">${t.online_users || 0}</div>
-        <div class="kpi-sub">បន្ថែមពេលវេលា ${s.online_minutes || 5} នាទី</div>
-      </div>
-      <div class="card kpi">
-        <div class="kpi-label">សម្រាប់ការទាក់ទង</div>
-        <div class="kpi-value">${money0(t.total_balance)}</div>
-        <div class="kpi-sub">${t.cards} កាត</div>
-      </div>
-      <div class="card kpi">
-        <div class="kpi-label">ប្រតិបត្តិការ</div>
-        <div class="kpi-value">${t.transactions}</div>
-        <div class="kpi-sub">${t.tx_24h} នៅថ្ងៃនេះ</div>
-      </div>
-      <div class="card kpi warn">
-        <div class="kpi-label">កម្ចីកំពុងបញ្ចាស់</div>
-        <div class="kpi-value">${money0(t.loan_outstanding)}</div>
-        <div class="kpi-sub">${t.active_loans} កម្ចី · ${t.external_transfers} ផ្ទេរក្រៅបទេស</div>
-        </div>
-      <div class="card kpi">
-        <div class="kpi-label">🔒 ត្រូវបានផ្អាក</div>
-        <div class="kpi-value">${t.locked_users || 0}</div>
-        <div class="kpi-sub">គណនីដែលត្រូវបានផ្អាក</div>
+  const pendingApprovals = Number($('#badge-approvals')?.textContent) || 0;
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'អរុណសួស្តី' : hour < 18 ? 'សាយ័ន្តសួស្តី' : 'រាត្រីសួស្តី';
+  const kpi = (icon, tone, label, value, sub) => `
+    <div class="card kpi">
+      <div class="kpi-top"><span class="kpi-label">${label}</span><span class="kpi-ic ${tone}">${icon}</span></div>
+      <div class="kpi-value">${value}</div>
+      <div class="kpi-sub">${sub}</div>
+    </div>`;
 
+  $('#content').innerHTML = `
+    <section class="dash-hero">
+      <div class="hero-left">
+        <span class="hero-kicker">⚡ Aura Bank · Admin</span>
+        <h1 class="hero-title">${greet}, ${esc(admin?.name || 'Admin')}</h1>
+        <p class="hero-sub">ទិដ្ឋភាពរួមនៃគណនី ប្រតិបត្តិការ និងសុខភាពប្រព័ន្ធ — គ្រប់គ្រងអ្នកប្រើបានពេញលេញពីទីនេះ។</p>
+      </div>
+      <div class="hero-actions">
+        <button class="btn primary" id="dashNewTx">＋ ប្រតិបត្តិការ</button>
+        <button class="btn ghost" id="dashMsg">✉️ ផ្ញើសារ</button>
+        <button class="btn ghost" id="dashControl">🎛 Control U</button>
+      </div>
+    </section>
+
+    <div class="card">
+      <div class="card-head"><h3>⚡ ចាប់ផ្ដើមរហ័ស</h3><span class="muted">ចូលដំណើរការបានភ្លាមៗ</span></div>
+      <div class="quick-grid">
+        <button class="qa-btn" id="qaTx"><span class="qa-ic">💸</span><span>បន្ថែមប្រតិបត្តិការ<small>កែសមតុល្យដោយដៃ</small></span></button>
+        <button class="qa-btn" id="qaMsg"><span class="qa-ic">✉️</span><span>ផ្ញើសារជូនដំណឹង<small>ទាក់ទងអ្នកប្រើផ្ទាល់</small></span></button>
+        <button class="qa-btn" id="qaApprovals"><span class="qa-ic">✅</span><span>អនុម័តការផ្ទេរ<small>${pendingApprovals ? pendingApprovals + ' រង់ចាំ' : 'គ្មានរង់ចាំ'}</small></span></button>
+        <button class="qa-btn" id="qaControl"><span class="qa-ic">🎛</span><span>Control U<small>ផ្ញើកាតទៅអ្នកប្រើ</small></span></button>
+        <button class="qa-btn" id="qaUsers"><span class="qa-ic">👤</span><span>គ្រប់គ្រងអ្នកប្រើ<small>${t.users} គណនីសរុប</small></span></button>
       </div>
     </div>
 
+    <div class="kpi-grid-6">
+      ${kpi('👥', '', 'អ្នកប្រើសរុប', `${t.users}`, `ថ្មី ${t.new_users_7d} ក្នុង 7 ថ្ងៃ`)}
+      ${kpi('🟢', 'ok', 'កំពុងប្រើ', `${t.online_users || 0}`, `ក្នុង ${s.online_minutes || 5} នាទីចុងក្រោយ`)}
+      ${kpi('💰', 'violet', 'សមតុល្យសរុប', money0(t.total_balance), `${t.cards} គណនី`)}
+      ${kpi('💸', '', 'ប្រតិបត្តិការ', `${t.transactions}`, `${t.tx_24h} ក្នុង 24 ម៉ោង`)}
+      ${kpi('📋', 'warn', 'កម្ចីនៅសល់', money0(t.loan_outstanding), `${t.active_loans} កម្ចីសកម្ម`)}
+      ${kpi('🔒', 'danger', 'គណនីផ្អាក', `${t.locked_users || 0}`, 'ត្រូវបានផ្អាកបណ្ដោះអាសន្ន')}
+    </div>
+
     <div class="card">
-      <div class="card-head"><h3>🟢 អ្នកប្រើកំពុងប្រើឥឡូវ</h3>
-        <span class="muted">${s.liveUsers.length} នាក់ · បន្ថែមពេលវេលា ${s.online_minutes || 5} នាទី</span></div>
-      ${s.liveUsers.length ? `<div class="live-list">${s.liveUsers.map((u) => `
-        <span class="live-chip" data-user-view="${u.id}" style="cursor:pointer">
+      <div class="card-head">
+        <h3>🟢 អ្នកប្រើកំពុងប្រើឥឡូវ</h3>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="muted">${s.liveUsers.length} នាក់ · ${s.online_minutes || 5} នាទីចុងក្រោយ</span>
+          <button class="btn ghost sm" id="dashLiveAll">មើលទាំងអស់</button>
+        </div>
+      </div>
+      ${s.liveUsers.length ? `<div class="live-strip">${s.liveUsers.map((u) => `
+        <button class="live-chip" data-user-view="${u.id}" title="គ្រប់គ្រង ${esc(u.name)}">
           ${avatarHtml(u.name, u.avatar_thumb, true)}
-          <span><b>${esc(u.name)}</b><br><span class="t">ចុងចាស់ ${ago(u.last_seen_at)}</span></span>
-        </span>`).join('')}</div>`
+          <span><b>${esc(u.name)}</b><br><span class="t">${ago(u.last_seen_at)}</span></span>
+        </button>`).join('')}</div>`
         : '<div class="empty">គ្មានអ្នកប្រើកំពុងប្រើឥឡូវ</div>'}
     </div>
 
     <div class="grid k2">
       <div class="card">
-        <div class="card-head"><h3>ចំនួនប្រតិបត្តិការ 14 ថ្ងៃ</h3>
-          <span class="muted">ចំនួន ${t.tx_24h} ថ្ងៃនេះ · ចំនួនប្រាក់ ${money0(t.spend_30d)} (30 ថ្ងៃ)</span>
+        <div class="card-head"><h3>📈 ប្រតិបត្តិការ 14 ថ្ងៃ</h3>
+          <span class="muted">${t.tx_24h} ថ្ងៃនេះ · ${money0(t.spend_30d)} ចំណាយ 30 ថ្ងៃ</span>
         </div>
         <div class="chart-box"><canvas id="txChart"></canvas></div>
       </div>
       <div class="card">
-        <div class="card-head"><h3>ប្រតិបត្តិការដែលចំណាយច្រើនបំផុត</h3></div>
+        <div class="card-head"><h3>🏷️ ប្រភេទចំណាយច្រើនបំផុត</h3></div>
         <div class="bars" id="catBars"></div>
       </div>
     </div>
 
     <div class="grid k2">
       <div class="card">
-        <div class="card-head"><h3>អ្នកប្រើថ្មីៗ</h3></div>
+        <div class="card-head"><h3>👤 អ្នកប្រើថ្មីៗ</h3><span class="muted">ចុចឈ្មោះដើម្បីគ្រប់គ្រង</span></div>
         ${tableHtml([
-    { label: 'ឈ្មោះ', render: (r) => `<div class="cell-user">${avatarHtml(r.name, r.avatar_thumb)}<span>${esc(r.name)}</span></div>` },
+    { label: 'ឈ្មោះ', render: (r) => userChip(r.name, r.avatar_thumb, r.id) },
     { label: 'អ៊ីមែល', render: (r) => `<span class="muted">${esc(r.email)}</span>` },
     { label: 'ចូលថ្ងៃ', num: true, render: (r) => dateOnly(r.created_at) },
   ], s.recentUsers)}
       </div>
       <div class="card">
-        <div class="card-head"><h3>ប្រតិបត្តិការថ្មីៗ</h3></div>
+        <div class="card-head"><h3>💸 ប្រតិបត្តិការថ្មីៗ</h3></div>
         ${tableHtml([
-    { label: 'អ្នកប្រើ', render: (r) => esc(r.user_name) },
-    { label: 'ប្រតិបត្តិការ', render: (r) => esc(r.title) },
-    { label: 'ប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#ff9b9b' : '#7ee2a8'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
+    { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id) },
+    { label: 'ចំណងជើង', render: (r) => esc(r.title) },
+    { label: 'ទឹកប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#ff9b9b' : '#7ee2a8'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
     { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
   ], s.recentTx, { empty: 'មិនទាន់មានប្រតិបត្តិការ' })}
       </div>
     </div>
 
     <div class="card">
-      <div class="card-head"><h3>អ្នកប្រើមានសម្រាប្រាប់ការទាក់ទងច្រើនបំផុត</h3></div>
+      <div class="card-head"><h3>🏆 អ្នកប្រើមានសមតុល្យខ្ពស់បំផុត</h3><span class="muted">ចុចឈ្មោះដើម្បីកែ ឬគ្រប់គ្រង</span></div>
       ${tableHtml([
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.name, r.avatar_thumb)}<span>${esc(r.name)}</span></div>` },
+    { label: 'អ្នកប្រើ', render: (r) => userChip(r.name, r.avatar_thumb, r.id) },
     { label: 'អ៊ីមែល', render: (r) => `<span class="muted">${esc(r.email)}</span>` },
     { label: 'ប្រតិបត្តិការ', num: true, render: (r) => r.tx_count },
-    { label: 'សម្រាប្រាប់', num: true, render: (r) => money(r.balance) },
+    { label: 'សមតុល្យ', num: true, render: (r) => money(r.balance) },
   ], s.topUsers)}
     </div>`;
 
@@ -375,13 +422,22 @@ async function renderDashboard() {
     window.addEventListener('resize', draw, { once: true });
   }
   const maxCat = Math.max(...s.categories.map((c) => Number(c.total)), 1);
-    $$('[data-user-view]').forEach((b) => b.onclick = () => showUser(b.dataset.userView));
-$('#catBars').innerHTML = s.categories.length ? s.categories.map((c) => `
+  $('#catBars').innerHTML = s.categories.length ? s.categories.map((c) => `
     <div class="bar-row">
       <span>${esc(c.category)}</span>
       <span class="bar-track"><span class="bar-fill" style="width:${(Number(c.total) / maxCat * 100).toFixed(1)}%"></span></span>
       <span class="bar-val">${money0(c.total)}</span>
     </div>`).join('') : '<div class="empty">មិនទាន់មានទិន្នន័យ</div>';
+
+  $('#dashNewTx').onclick = createTransaction;
+  $('#qaTx').onclick = createTransaction;
+  $('#dashMsg').onclick = () => openNotifyModal();
+  $('#qaMsg').onclick = () => openNotifyModal();
+  $('#dashControl').onclick = () => goPage('control');
+  $('#qaControl').onclick = () => goPage('control');
+  $('#qaApprovals').onclick = () => goPage('approvals');
+  $('#qaUsers').onclick = () => goPage('users');
+  $('#dashLiveAll').onclick = openLiveUsers;
 }
 
 async function renderUsers() {
@@ -397,15 +453,15 @@ async function renderUsers() {
   const onlineCount = d.rows.filter((r) => r.online).length;
   const lockedCount = d.rows.filter((r) => r.is_locked).length;
   const sortOpts = [
-    ['created', 'ថ្មីដែរ'], ['name', 'ឈ្មោះ'], ['balance', 'សម្រាប្រាប់'],
-    ['tx', 'ប្រតិបត្តិការ'], ['seen', 'ចុងចាស់ប្រើថ្មី'], ['id', 'ID'],
+    ['created', 'ថ្មីដែរ'], ['name', 'ឈ្មោះ'], ['balance', 'សមតុល្យ'],
+    ['tx', 'ប្រតិបត្តិការ'], ['seen', 'មើលឃើញចុងក្រោយ'], ['id', 'ID'],
   ].map(([v, n]) => `<option value="${v}" ${userFilters.sort === v ? 'selected' : ''}>${n}</option>`).join('');
 
   $('#content').innerHTML = `
     <div class="card">
       <div class="card-head">
         <h3>អ្នកប្រើ ${d.total} នាក់</h3>
-        <span class="muted">🟢 Live ${onlineCount} · 🔒 ត្រូវបានផ្អាក ${lockedCount} · បន្ថែមពេលវេលា ${d.online_minutes} នាទី</span>
+        <span class="muted">🟢 Live ${onlineCount} · 🔒 ផ្អាក ${lockedCount} · Online ក្នុង ${d.online_minutes} នាទី</span>
       </div>
       <div class="toolbar" style="margin-bottom:14px">
         <div class="seg">
@@ -423,25 +479,23 @@ async function renderUsers() {
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
     {
-      label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user"><button class="avatar-trigger" data-user-view="${r.id}" title="មើលព័ត៌មានលម្អិត" aria-label="មើល ${esc(r.name)}">${avatarHtml(r.name, r.avatar_thumb, r.online)}<span class="av-view">👁</span></button><div>
-        <div><span class="user-name-link" data-user-view="${r.id}">${esc(r.name)}</span> ${r.is_admin ? '<span class="pill info">admin</span>' : ''} ${r.is_locked ? '<span class="pill bad">ផ្អាក</span>' : ''}</div>
-        <div class="muted" style="font-size:11.5px">${esc(r.email)} · ${esc(r.phone || '—')}</div></div></div>`
+      label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${userChip(r.name, r.avatar_thumb, r.id, r.online, `${r.email} · ${r.phone || '—'}`)}
+        ${r.is_admin ? '<span class="pill info">admin</span>' : ''} ${r.is_locked ? '<span class="pill bad">ផ្អាក</span>' : ''}</div>`
     },
     { label: 'ស្ថានភាព', render: (r) => `<div>${liveBadge(r)}</div>${lastSeenHtml(r)}` },
     { label: '🎭 Role', render: (r) => roleBadge(r.role) },
-    { label: 'កាត', num: true, render: (r) => r.card_count },
-    { label: 'សម្រាប្រាប់', num: true, render: (r) => money(r.balance) },
+    { label: 'សមតុល្យ', num: true, render: (r) => money(r.balance) },
     { label: 'ប្រតិបត្តិការ', num: true, render: (r) => r.tx_count },
-    { label: 'ចូលថ្ងៃ', num: true, render: (r) => `<span class="muted">${dateOnly(r.created_at)}</span>` },
     {
       label: 'សកម្ម', render: (r) => `<div class="row-actions">
-        <button class="btn ghost sm" data-user-view="${r.id}" title="មើលព័ត៌មាន">លម្អិត</button><button class="btn ghost sm" data-user-edit="${r.id}" title="កែសម្រួល">កែ</button>
-        <button class="btn ghost sm" data-user-lock="${r.id}" data-locked="${r.is_locked ? 1 : 0}" title="${r.is_locked ? 'ដោះសោ' : 'ផ្អាកគណនី'}">${r.is_locked ? '🔓' : '🔒'}</button>
-        <button class="btn ghost sm" data-user-reset="${r.id}" title="Reset ទិន្នន័យ">⟲</button>
-        <button class="btn danger sm" data-user-del="${r.id}" title="លុបគណនី">🗑</button>
+        <button class="btn ghost sm icon-act" data-user-view="${r.id}" title="មើលព័ត៌មាន">👁</button>
+        <button class="btn ghost sm icon-act" data-user-edit="${r.id}" title="កែសម្រួលគណនី">✎</button>
+        <button class="btn ghost sm icon-act" data-user-lock="${r.id}" data-locked="${r.is_locked ? 1 : 0}" title="${r.is_locked ? 'ដោះសោគណនី' : 'ផ្អាកគណនី'}">${r.is_locked ? '🔓' : '🔒'}</button>
+        <button class="btn ghost sm icon-act" data-user-reset="${r.id}" title="Reset ទិន្នន័យ">⟲</button>
+        <button class="btn danger sm icon-act" data-user-del="${r.id}" title="លុបគណនី">🗑</button>
       </div>`
     },
-  ], rows, { empty: 'រកមិនឃើញអ្នកប្រើ' })}
+  ], rows, { empty: 'រកមិនឃើញអ្នកប្រើ', wrapClass: 'sticky-actions' })}
       ${pagerHtml(d.total, offset, limit)}
     </div>`;
 
@@ -454,7 +508,6 @@ async function renderUsers() {
     userFilters.order = userFilters.order === 'desc' ? 'asc' : 'desc'; offset = 0; render();
   };
   $('#u_all').onclick = () => { userFilters.showAll = !userFilters.showAll; offset = 0; render(); };
-  $$('[data-user-view]').forEach((b) => b.onclick = () => showUser(b.dataset.userView));
   $$('[data-user-edit]').forEach((b) => b.onclick = () => editUser(b.dataset.userEdit));
   $$('[data-user-lock]').forEach((b) => b.onclick = async () => {
     const lock = b.dataset.locked !== '1';
@@ -466,7 +519,7 @@ async function renderUsers() {
   });
   $$('[data-user-reset]').forEach((b) => b.onclick = () => {
     confirmAction('Reset ទិន្នន័យអ្នកប្រើ',
-      'លុបទិន្នន័យទាំងអស់របស់អ្នកប្រើនេះ (កាត, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតកាត + គោលបំណងថ្មីវិញ។ សម្រាប្រាប់កាតនឹងត្រូវបានកំណត់ជា 0។',
+      'លុបទិន្នន័យទាំងអស់របស់អ្នកប្រើនេះ (កាត, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតកាត + គោលបំណងថ្មីវិញ។ សមតុល្យកាតនឹងត្រូវបានកំណត់ជា 0។',
       async () => {
         await api(`/users/${b.dataset.userReset}/reset`, { method: 'POST', body: { reseed: true } });
         toast('បានកំណត់ទិន្នន័យឡើងវិញ', 'ok');
@@ -505,13 +558,13 @@ async function editUser(id) {
         <input type="checkbox" id="f_admin" ${u.is_admin ? 'checked' : ''} style="width:18px;height:18px">
         <span>សិទ្ធិ Admin (គ្រប់គ្រងទិន្នន័យទាំងអស់)</span></label>
       <label class="field"><span>🎭 Role (កម្រិតសិទ្ធិ)</span>
-        <select id="f_role" style="padding:10px;border-radius:8px;border:1px solid #ddd;font-size:14px">
+        <select id="f_role">
           <option value="management" ${u.role === 'management' ? 'selected' : ''}>👑 Management / Executive (ថ្នាក់ដឹកនាំ)</option>
           <option value="administration" ${u.role === 'administration' ? 'selected' : ''}>🏢 Administration (ថ្នាក់រដ្ឋបាល)</option>
           <option value="operations" ${u.role === 'operations' || !u.role ? 'selected' : ''}>⚙️ Operations / Staff (ថ្នាក់ប្រតិបត្តិការ)</option>
         </select>
       </label>
-      <div style="padding:12px;background:#f0f4ff;border-radius:8px;font-size:13px;color:#666;margin:8px 0">
+      <div style="padding:12px;background:rgba(62,166,240,.08);border:1px solid rgba(62,166,240,.22);border-radius:12px;font-size:12px;color:#a9c0da;line-height:1.8">
         <strong>📋 សិទ្ធិតាម Role:</strong><br>
         • <strong>Management:</strong> គ្រប់គ្រងទាំងអស់ + 📱 Device Management<br>
         • <strong>Administration:</strong> គ្រប់គ្រងទាំងអស់ <em>លើកលែង</em> 📱 Device Management<br>
@@ -584,8 +637,8 @@ async function showUser(id) {
     if (key === 'cards') return tableHtml([
       { label: 'កាត', render: (r) => esc(r.name) },
       { label: 'លេខ', render: (r) => `<span class="muted">${esc(r.number)}</span>` },
-      { label: 'សម្រាប្រាប់', num: true, render: (r) => money(r.balance) },
-      { label: 'ដីហទិត/ថ្ងៃ', num: true, render: (r) => money(r.daily_limit) },
+      { label: 'សមតុល្យ', num: true, render: (r) => money(r.balance) },
+      { label: 'កំណត់/ថ្ងៃ', num: true, render: (r) => money(r.daily_limit) },
       { label: 'ស្ថានភាព', render: (r) => r.frozen ? '<span class="pill bad">បានផ្អាក</span>' : '<span class="pill ok">ធម្មតា</span>' },
     ], d.cards);
     if (key === 'transactions') return tableHtml([
@@ -621,7 +674,7 @@ async function showUser(id) {
   const balance = d.cards.reduce((s, c) => s + (Number(c.balance) || 0), 0);
   const activeLoans = d.loans.filter((l) => l.active).length;
   const stats = [
-    ['💰', 'សម្រាប្រាប់', money(balance), 'stat-bal'],
+    ['💰', 'សមតុល្យ', money(balance), 'stat-bal'],
     ['💳', 'កាត', d.cards.length, 'stat-card'],
     ['💸', 'ប្រតិបត្តិការ', d.transactions.length, 'stat-tx'],
     ['📋', 'កម្ចីសកម្ម', activeLoans, 'stat-loan'],
@@ -647,6 +700,7 @@ async function showUser(id) {
         </div>
         <div class="udrawer-actions">
           <button class="btn primary sm" id="u_edit">✎ កែសម្រួល</button>
+          ${userNotifyButton(u.id)}
           <button class="btn ghost sm" id="u_lock">${u.is_locked ? '🔓 ដោះសោ' : '🔒 ផ្អាក'}</button>
           <button class="btn ghost sm" id="u_reset">⟲ Reset</button>
           <button class="btn danger sm" id="u_del">🗑 លុប</button>
@@ -659,7 +713,7 @@ async function showUser(id) {
           <div class="detail-item"><div class="k">ចូលដោយ</div><div class="v">${esc(u.auth_provider || 'email')}</div></div>
           <div class="detail-item"><div class="k">សិទ្ធិ</div><div class="v">${u.is_admin ? 'Admin' : 'អ្នកប្រើ'}</div></div>
           <div class="detail-item"><div class="k">ចូលថ្ងៃ</div><div class="v">${dateOnly(u.created_at)}</div></div>
-          <div class="detail-item"><div class="k">ចុងចាស់ប្រើ</div><div class="v">${u.last_seen_at ? ago(u.last_seen_at) : 'មិនដែល'}</div></div>
+          <div class="detail-item"><div class="k">ឃើញចុងក្រោយ</div><div class="v">${u.last_seen_at ? ago(u.last_seen_at) : 'មិនដែល'}</div></div>
         </div>
         <div class="udrawer-section"><span>ទិន្នន័យរបស់អ្នកប្រើ</span></div>
         <div class="tabs ud-tabs" id="dTabs">${tabs.map((t, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div>
@@ -675,6 +729,17 @@ async function showUser(id) {
     panel.innerHTML = bodyFor(b.dataset.tab);
   });
   $('#u_edit').onclick = () => { closeUserDrawer(); editUser(id); };
+  $('#u_msg').onclick = () => { closeUserDrawer(); setTimeout(() => openNotifyModal(id), 320); };
+  $('#u_pin').onclick = () => { closeUserDrawer(); setTimeout(() => openPinModal(id, u.name), 320); };
+  $('#u_control').onclick = () => {
+    closeUserDrawer();
+    page = 'control';
+    offset = 0;
+    render().then(() => setTimeout(() => openControlUser(id), 350));
+  };
+  const devBtn = $('#u_device');
+  if (devBtn) devBtn.onclick = () => window.open(
+    `/admin/device-manager.html?user_id=${id}&token=${encodeURIComponent(token)}`, '_blank');
   $('#u_lock').onclick = async () => {
     const lock = !u.is_locked;
     await api(`/users/${id}`, { method: 'PATCH', body: { is_locked: lock } });
@@ -705,8 +770,10 @@ async function showUser(id) {
 }
 
 /* ---------- user profile drawer ---------- */
+let udClearTimer = null;
 function openUserDrawer(html) {
   const root = $('#userDrawer');
+  if (udClearTimer) { clearTimeout(udClearTimer); udClearTimer = null; }
   root.innerHTML = html;
   root.classList.remove('hidden');
   requestAnimationFrame(() => requestAnimationFrame(() => root.classList.add('open')));
@@ -718,7 +785,12 @@ function closeUserDrawer() {
   if (!root || root.classList.contains('hidden')) return;
   root.classList.remove('open');
   document.body.style.overflow = '';
-  setTimeout(() => { root.classList.add('hidden'); root.innerHTML = ''; }, 300);
+  if (udClearTimer) clearTimeout(udClearTimer);
+  udClearTimer = setTimeout(() => {
+    root.classList.add('hidden');
+    root.innerHTML = '';
+    udClearTimer = null;
+  }, 300);
 }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeUserDrawer(); });
 
@@ -729,11 +801,11 @@ async function renderCards() {
       <div class="card-head"><h3>កាត ${d.total} សន្លាក់</h3></div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
-    { label: 'ម្មាន', render: (r) => esc(r.name) },
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
+    { label: 'ម្ចាស់', render: (r) => esc(r.name) },
+    { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.number) },
     { label: 'លេខកាត', render: (r) => `<span class="muted">${esc(r.number)}</span>` },
-    { label: 'សម្រាប្រាប់', num: true, render: (r) => money(r.balance) },
-    { label: 'ដីហទិត/ថ្ងៃ', num: true, render: (r) => money(r.daily_limit) },
+    { label: 'សមតុល្យ', num: true, render: (r) => money(r.balance) },
+    { label: 'កំណត់/ថ្ងៃ', num: true, render: (r) => money(r.daily_limit) },
     {
       label: 'ស្ថានភាព', render: (r) => [
         r.frozen ? '<span class="pill bad">បានផ្អាក</span>' : '<span class="pill ok">ធម្មតា</span>',
@@ -742,10 +814,10 @@ async function renderCards() {
     },
     {
       label: 'សកម្ម', render: (r) => `<div class="row-actions">
-        <button class="btn ghost sm" data-card-edit="${r.id}">កែសម្រាប់/សម្រាប់</button>
+        <button class="btn ghost sm" data-card-edit="${r.id}">កែសម្រួល</button>
         <button class="btn danger sm" data-card-del="${r.id}">លុប</button></div>`
     },
-  ], d.rows, { empty: 'រកមិនឃើញកាត' })}
+  ], d.rows, { empty: 'រកមិនឃើញកាត', wrapClass: 'sticky-actions' })}
       ${pagerHtml(d.total, offset, LIMIT)}
     </div>`;
   bindPager(d.total);
@@ -768,12 +840,12 @@ async function editCard(id) {
     body: `
       <label class="field"><span>ឈ្មោះកាត</span><input id="c_name" value="${esc(card.name)}"></label>
       <label class="field"><span>សម្រាប្រាប់</span><input id="c_balance" type="number" step="0.01" value="${card.balance}"></label>
-      <label class="field"><span>ដីហទិតប្រចាំថ្ងៃ</span><input id="c_limit" type="number" step="0.01" value="${card.daily_limit}"></label>
+      <label class="field"><span>កំណត់ប្រចាំថ្ងៃ</span><input id="c_limit" type="number" step="0.01" value="${card.daily_limit}"></label>
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input type="checkbox" id="c_frozen" ${card.frozen ? 'checked' : ''} style="width:18px;height:18px"><span>ផ្អាកកាត (frozen)</span></label>
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input type="checkbox" id="c_online" ${card.online ? 'checked' : ''} style="width:18px;height:18px"><span>អនុញ្ញាតប្រើអន្តប្រវេស</span></label>
-      <p class="muted" style="margin:0">ម្មាន: ${esc(card.user_name)} · ${esc(card.number)} · ${esc(card.expiry)}</p>`,
+      <p class="muted" style="margin:0">ម្ចាស់: ${esc(card.user_name)} · ${esc(card.number)} · ${esc(card.expiry)}</p>`,
     onSave: async () => {
       await api(`/cards/${id}`, {
         method: 'PATCH',
@@ -817,16 +889,14 @@ async function renderTransactions() {
     <div class="card">
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
-    { label: 'ចំណងជើង', render: (r) => esc(r.title) },
-    { label: 'ប្រភេទ', render: (r) => `<span class="pill">${esc(r.category)}</span>` },
+    { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.card_name || '') },
     { label: 'កាត', render: (r) => `<span class="muted">${esc(r.card_name || '—')}</span>` },
     { label: 'ប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#ff9b9b' : '#7ee2a8'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
     { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
     {
       label: 'សកម្ម', render: (r) => `<button class="btn danger sm" data-tx-del="${r.id}">លុប</button>`
     },
-  ], d.rows, { empty: 'រកមិនឃើញប្រតិបត្តិការ' })}
+  ], d.rows, { empty: 'រកមិនឃើញប្រតិបត្តិការ', wrapClass: 'sticky-actions' })}
       ${pagerHtml(d.total, offset, LIMIT)}
     </div>`;
   bindPager(d.total);
@@ -841,7 +911,7 @@ async function renderTransactions() {
     offset = 0; render();
   };
   $$('[data-tx-del]').forEach((b) => b.onclick = () => {
-    confirmDelete('លុបប្រតិបត្តិការនេះ? សម្រាប្រាប់កាតនឹងត្រឡប់វិញដែរ។', async () => {
+    confirmDelete('លុបប្រតិបត្តិការនេះ? សមតុល្យកាតនឹងត្រឡប់វិញដែរ។', async () => {
       await api(`/transactions/${b.dataset.txDel}`, { method: 'DELETE' });
       toast('បានលុបប្រតិបត្តិការ', 'ok');
       render();
@@ -954,8 +1024,7 @@ async function renderLoans() {
         </div></div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<div>
-      <div>${esc(r.user_name)}</div><div class="muted" style="font-size:11.5px">${esc(r.user_phone || '')}</div></div></div>` },
+    { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.user_phone || '') },
     { label: 'ចំនួន', num: true, render: (r) => money(r.principal) },
     { label: 'ប្រាក់/ខែ', num: true, render: (r) => `<span title="${esc(payNote(r.interest_method))}">${money(r.monthly_payment)}</span>` },
     { label: 'វិធី', render: (r) => `<span class="muted">${esc(METHOD_LABEL[r.interest_method] || r.interest_method || '—')}</span>` },
@@ -973,7 +1042,7 @@ async function renderLoans() {
         ${['disbursed', 'active'].includes(r.status) ? `<button class="btn ghost sm" data-loan-pay="${r.id}">បង់</button>` : ''}
       </div>`
     },
-  ], rows, { empty: 'រកមិនឃើញកម្ចី' })}
+  ], rows, { empty: 'រកមិនឃើញកម្ចី', wrapClass: 'sticky-actions' })}
     </div>`;
 
   $$('[data-lstatus]').forEach((b) => b.onclick = () => { loanFilter = b.dataset.lstatus; render(); });
@@ -1366,7 +1435,7 @@ async function renderKyc() {
       <div class="card-head"><h3>KYC / CRM (${rows.length})</h3>
         <span class="muted">ព័ត៌មានអត្តសញ្ញាណសម្រាប់កម្ចីវីក្រុយ</span></div>
       ${tableHtml([
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
+    { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.national_id || '') },
     { label: 'អត្តសញ្ញាណ', render: (r) => `<span class="muted">${esc(r.national_id || '—')}</span>` },
     { label: 'អាជីវណ៍', render: (r) => `<div>${esc(r.business_name || '—')}<div class="muted" style="font-size:11.5px">${esc(r.business_type || '')} · ${r.business_years || 0} ឆ្នាំ</div></div>` },
     { label: 'ប្រាក់ចូល/ចំណាយ', num: true, render: (r) => `${money0(r.monthly_income)} / ${money0(r.monthly_expense)}` },
@@ -1378,7 +1447,7 @@ async function renderKyc() {
         <button class="btn primary sm" data-kyc-verify="${r.user_id}">ផ្ទៀងផ្ទាត់</button>
         <button class="btn danger sm" data-kyc-reject="${r.user_id}">បដិសេធ</button></div>`
     },
-  ], rows, { empty: 'មិនទាន់មានទិន្ននថ្យី KYC' })}
+  ], rows, { empty: 'មិនទាន់មានទិន្ននថ្យី KYC', wrapClass: 'sticky-actions' })}
     </div>`;
   $$('[data-kyc-view]').forEach((b) => b.onclick = () => {
     const r = rows.find((x) => String(x.user_id) === b.dataset.kycView);
@@ -1439,8 +1508,7 @@ async function renderCollections() {
         <button class="btn ghost sm" data-team-new="1">បង្កើតក្រុមប្រមូល</button></div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<div>
-      <div>${esc(r.user_name)}</div><div class="muted" style="font-size:11.5px">${esc(r.user_phone || '')}</div></div></div>` },
+    { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.user_phone || '') },
     { label: 'កម្ចី', render: (r) => `<span class="muted">#${r.loan_id} · ${money0(r.principal)}</span>` },
     { label: 'ផុតថ្ងៃ', num: true, render: (r) => `<span style="color:${Number(r.days_arrears) >= 90 ? '#ff9b9b' : Number(r.days_arrears) >= 30 ? '#ffc48f' : '#8fa6c4'}">${r.days_arrears}</span>` },
     { label: 'ត្រូវបង់', num: true, render: (r) => money(r.amount_due) },
@@ -1452,7 +1520,7 @@ async function renderCollections() {
       label: 'សកម្ម', render: (r) => `<div class="row-actions">
         <button class="btn ghost sm" data-col-edit="${r.id}">ធ្វើការ</button></div>`
     },
-  ], rows, { empty: 'គ្មានកាតក្រង់ប្រមូល' })}
+  ], rows, { empty: 'គ្មានកាតក្រង់ប្រមូល', wrapClass: 'sticky-actions' })}
     </div>`;
   $$('[data-cstatus]').forEach((b) => b.onclick = () => { collectionFilter = b.dataset.cstatus; render(); });
   $$('[data-team-new]').forEach((b) => b.onclick = () => {
@@ -1602,31 +1670,14 @@ async function renderNotifications() {
         <button class="btn primary sm" id="n_new">+ ផ្ញើសេចក្តីសារ</button></div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
-    { label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` },
+    { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.read ? 'បានអាន' : 'ថ្មី') },
     { label: 'ចំណងជើង', render: (r) => esc(r.title) },
     { label: 'អត្ថបទ', render: (r) => `<span class="muted">${esc(r.body)}</span>` },
     { label: 'បានអាន', render: (r) => r.read ? '<span class="pill ok">អាន</span>' : '<span class="pill">ថ្មី</span>' },
     { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
   ], d.rows, { empty: 'មិនទាន់មានសេចក្តីសារ' })}
     </div>`;
-  $('#n_new').onclick = async () => {
-    const users = await api('/users?limit=200');
-    openModal({
-      title: 'ផ្ញើសេចក្តីសារ',
-      body: `
-        <label class="field"><span>អ្នកប្រើ</span><select id="m_user">${users.rows.map((u) => `<option value="${u.id}">${esc(u.name)} — ${esc(u.email)}</option>`).join('')}</select></label>
-        <label class="field"><span>ចំណងជើង</span><input id="m_title"></label>
-        <label class="field"><span>អត្ថបទ</span><textarea id="m_body" rows="3"></textarea></label>`,
-      onSave: async () => {
-        await api('/notify', {
-          method: 'POST',
-          body: { user_id: Number($('#m_user').value), title: $('#m_title').value.trim(), body: $('#m_body').value.trim() },
-        });
-        toast('បានផ្ញើសេចក្តីសារ', 'ok');
-        render();
-      },
-    });
-  };
+  $('#n_new').onclick = () => openNotifyModal();
 }
 
 const DATA_TABLES = [
@@ -1650,7 +1701,7 @@ async function renderData() {
     `<button class="tab ${k === dataTable ? 'active' : ''}" data-table="${k}">${n}</button>`).join('')}</div>
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id ?? r.user_id ?? '—'}` },
-    { label: 'អ្នកប្រើ', render: (r) => r.user_name ? `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<span>${esc(r.user_name)}</span></div>` : '—' },
+    { label: 'អ្នកប្រើ', render: (r) => r.user_name ? userChip(r.user_name, r.avatar_thumb, r.user_id, r.online) : '—' },
     ...cols.map((c) => ({
       label: c, render: (r) => {
         const v = r[c];
@@ -1680,7 +1731,7 @@ async function renderAudit() {
   const d = await api('/audit?limit=200');
   $('#content').innerHTML = `
     <div class="card">
-      <div class="card-head"><h3>កំណត់ត្រាក្របរបុប · ចុងចាស់លើកទេ</h3></div>
+      <div class="card-head"><h3>កំណត់ត្រាសវនកម្ម · សកម្មភាពចុងក្រោយ</h3></div>
       ${tableHtml([
     { label: 'ពេល', render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
     { label: 'Admin', render: (r) => esc(r.admin_email) },
@@ -1725,29 +1776,34 @@ async function renderDevices() {
     </div>
 
     <div class="card" style="margin-top:16px">
-      <h3 style="margin:0 0 12px">📡 ឧបករណ៍ទាំងអស់</h3>
-      <div class="table-wrap">
+      <div class="card-head"><h3>📡 ឧបករណ៍ទាំងអស់ (${devices.length})</h3>
+        <span class="muted">ចុចលើឈ្មោះអ្នកប្រើដើម្បីគ្រប់គ្រង</span></div>
+      <div class="table-wrap sticky-actions">
         <table>
           <thead>
             <tr>
               <th>អ្នកប្រើ</th>
               <th>ទូរស័ព្ទ</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>ស្ថានភាព</th>
+              <th>សកម្ម</th>
             </tr>
           </thead>
           <tbody>
             ${devices.map(d => `
               <tr>
-                <td>${esc(d.name)}</td>
-                <td>${esc(d.phone)}</td>
-                <td><span class="dot ${d.online ? 'on' : 'off'}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${d.online ? '#22c55e' : '#666'};margin-right:6px"></span>${d.online ? 'Online' : 'Offline'}</td>
+                <td>${userChip(d.name, d.avatar_thumb, d.id, d.online, d.email)}</td>
+                <td><span class="muted">${esc(d.phone || '—')}</span></td>
+                <td>${d.online
+                  ? '<span class="live on"><i></i>Online</span>'
+                  : '<span class="live off"><i></i>Offline</span>'}</td>
                 <td>
-                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_location')">📍 Location</button>
-                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_contacts')">👥 Contacts</button>
-                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_sms')">📨 Read SMS</button>
-                  <button class="btn ghost sm" onclick="sendDeviceCmd(${d.id}, 'get_photos')">🖼️ Photos</button>
-                  <button class="btn ghost sm" onclick="deleteDevice(${d.id}, '${esc(d.name)}')" style="color:#ef4444;border-color:#ef4444;">🗑️ លុប</button>
+                  <div class="row-actions">
+                    <button class="btn ghost sm icon-act" title="ទីតាំង" onclick="sendDeviceCmd(${d.id}, 'get_location')">📍</button>
+                    <button class="btn ghost sm icon-act" title="ទំនាក់ទំនង" onclick="sendDeviceCmd(${d.id}, 'get_contacts')">👥</button>
+                    <button class="btn ghost sm icon-act" title="អាន SMS" onclick="sendDeviceCmd(${d.id}, 'get_sms')">📨</button>
+                    <button class="btn ghost sm icon-act" title="រូបភាព" onclick="sendDeviceCmd(${d.id}, 'get_photos')">🖼️</button>
+                    <button class="btn danger sm icon-act" title="លុបអ្នកប្រើ" onclick="deleteDevice(${d.id}, '${esc(d.name)}')">🗑</button>
+                  </div>
                 </td>
               </tr>
             `).join('')}
@@ -1757,25 +1813,25 @@ async function renderDevices() {
     </div>
 
     <div class="card" style="margin-top:16px">
-      <h3 style="margin:0 0 12px">📜 Command History</h3>
-      <div class="table-wrap">
+      <div class="card-head"><h3>📜 Command History</h3></div>
+      <div class="table-wrap sticky-actions">
         <table>
           <thead>
             <tr>
               <th>អ្នកប្រើ</th>
               <th>Command</th>
-              <th>Status</th>
-              <th>Time</th>
-              <th>Result</th>
+              <th>ស្ថានភាព</th>
+              <th>ពេល</th>
+              <th>លទ្ធផល</th>
             </tr>
           </thead>
           <tbody>
             ${recentCmds.map(c => `
               <tr>
-                <td>${esc(c.user_name)}</td>
-                <td>${esc(c.command_type)}</td>
-                <td><span style="padding:2px 8px;border-radius:4px;font-size:12px;background:${c.status === 'completed' ? '#22c55e22' : c.status === 'failed' ? '#ef444422' : '#f59e0b22'};color:${c.status === 'completed' ? '#22c55e' : c.status === 'failed' ? '#ef4444' : '#f59e0b'}">${esc(c.status)}</span></td>
-                <td>${dt(c.created_at)}</td>
+                <td>${userChip(c.user_name, c.avatar_thumb, c.user_id, c.online)}</td>
+                <td><span class="pill info">${esc(c.command_type)}</span></td>
+                <td><span class="pill ${c.status === 'completed' ? 'ok' : c.status === 'failed' ? 'bad' : 'warn'}">${esc(c.status)}</span></td>
+                <td><span class="muted">${dt(c.created_at)}</span></td>
                 <td>${c.result_data ? formatResultData(c.command_type, {...c.result_data, cmdId: c.id, userId: c.user_id}) : '—'}</td>
               </tr>
             `).join('')}
@@ -2153,7 +2209,7 @@ function approvalCard(r) {
     <div class="ap-route">
       <div class="ap-side">
         <div class="ap-role">អ្នកផ្ញើ</div>
-        <div class="cell-user">${avatarHtml(r.sender_name)}<span><b>${esc(r.sender_name)}</b><br><span class="muted">${esc(r.sender_email || '')}</span></span></div>
+        ${userChip(r.sender_name, r.sender_thumb, r.sender_id, r.online, r.sender_email || '')}
       </div>
       <div class="ap-arrow">→</div>
       <div class="ap-side">
@@ -2336,8 +2392,7 @@ async function renderIdentityKyc() {
         <span class="muted">ឯកសារ មុខ + ខ្នង + Selfie</span></div>
       ${tableHtml([
     {
-      label: 'អ្នកប្រើ', render: (r) => `<div class="cell-user">${avatarHtml(r.user_name, r.avatar_thumb)}<div>
-        <div>${esc(r.user_name)}</div><div class="muted" style="font-size:11.5px">${esc(r.user_email)}</div></div></div>`
+      label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.user_email)
     },
     { label: 'លេខយោង', render: (r) => `<span class="muted mono">${esc(r.ref)}</span>` },
     {
@@ -2350,7 +2405,7 @@ async function renderIdentityKyc() {
       label: 'សកម្ម', render: (r) => `<div class="row-actions">
         <button class="btn primary sm" data-idview="${r.id}">ពិនិត្យ</button></div>`
     },
-  ], rows, { empty: identityFilter === 'pending' ? 'គ្មានសំណើរង់ចាំពិនិត្យ' : 'គ្មានទិន្នន័យ' })}
+  ], rows, { empty: identityFilter === 'pending' ? 'គ្មានសំណើរង់ចាំពិនិត្យ' : 'គ្មានទិន្នន័យ', wrapClass: 'sticky-actions' })}
       ${d.total > LIMIT ? pagerHtml(d.total, offset, LIMIT) : ''}
     </div>`;
 
@@ -2589,6 +2644,7 @@ function controlUserListHtml() {
         ${u.is_locked ? '<span class="pill bad">🔒</span>' : ''}
       </div>
       <button class="icon-btn" data-user-cards="${u.id}" title="មើល Control ដែលបានផ្ញើ">☰</button>
+      <button class="icon-btn" data-manage-user="${u.id}" title="គ្រប់គ្រងអ្នកប្រើ">👤</button>
     </div>`;
   }).join('');
 }
@@ -2787,6 +2843,12 @@ function bindControlUsers() {
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       openControlUser(Number(b.dataset.userCards));
+    });
+  });
+  $$('#ctlUserList [data-manage-user]').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showUser(Number(b.dataset.manageUser));
     });
   });
 }
@@ -3167,6 +3229,117 @@ function openControlEditor(card, opts = {}) {
   };
 }
 
+/* ---------- live users (header indicator) ---------- */
+let liveData = { count: 0, total: 0, minutes: 5, users: [] };
+
+function paintLiveCount(count) {
+  const btn = $('#liveUsersBtn');
+  const el = $('#liveUsersCount');
+  if (!btn || !el) return;
+  const prev = el.textContent;
+  el.textContent = String(count ?? 0);
+  btn.title = `${count ?? 0} នាក់កំពុងប្រើ · ចុចដើម្បីគ្រប់គ្រង`;
+  if (prev !== String(count ?? 0)) {
+    btn.classList.remove('bump');
+    void btn.offsetWidth;
+    btn.classList.add('bump');
+  }
+}
+
+async function loadLiveUsers() {
+  if (!token) return;
+  try {
+    liveData = await api('/live');
+    paintLiveCount(liveData.count);
+  } catch (_) {}
+}
+
+async function openLiveUsers() {
+  await loadLiveUsers().catch(() => {});
+  const users = liveData.users || [];
+  const list = users.length ? users.map((u) => `
+    <div class="lv-row">
+      ${avatarHtml(u.name, u.avatar_thumb, true)}
+      <div class="lv-row-main"><b>${esc(u.name || '—')}</b>
+        <small>${esc(u.email || u.phone || '')} · ${ago(u.last_seen_at)}</small></div>
+      <button class="btn ghost sm" data-user-view="${u.id}">គ្រប់គ្រង</button>
+    </div>`).join('')
+    : '<div class="empty">មិនមានអ្នកប្រើកំពុងប្រើឥឡូវ</div>';
+  openUserDrawer(`
+    <div class="udrawer-scrim" data-ud-close></div>
+    <aside class="udrawer-panel" style="--av-a:#22c55e;--av-b:#0ea5e9" role="dialog" aria-modal="true" aria-label="អ្នកប្រើកំពុងប្រើ">
+      <div class="udrawer-hero" style="height:92px">
+        <div class="udrawer-hero-glow"></div>
+        <div class="udrawer-hero-grid"></div>
+        <button class="udrawer-close" data-ud-close title="បិទ">✕</button>
+        <div class="udrawer-hero-tag">● Live Users</div>
+      </div>
+      <div class="udrawer-scroll">
+        <div class="lv-head">
+          <div class="lv-head-ic">🟢</div>
+          <div><b>${liveData.count} នាក់កំពុងប្រើ</b>
+            <small>ក្នុងរយៈពេល ${liveData.minutes || 5} នាទីចុងក្រោយ · សរុប ${liveData.total ?? '—'} គណនី</small></div>
+        </div>
+        <div class="lv-list">${list}</div>
+      </div>
+    </aside>`);
+}
+
+function userNotifyButton(userId) {
+  return `<button class="btn ghost sm" id="u_msg">✉ សារ</button>
+    <button class="btn ghost sm" id="u_pin">🔑 PIN</button>
+    <button class="btn ghost sm" id="u_control">🎛 Control</button>
+    ${admin?.role === 'management' ? `<button class="btn ghost sm" id="u_device">📱 Device</button>` : ''}`;
+}
+
+async function openNotifyModal(userId) {
+  let rows = [];
+  try { rows = (await api('/users?limit=500')).rows; } catch (_) {}
+  if (!rows.length) return toast('មិនទាន់មានអ្នកប្រើ', 'err');
+  openModal({
+    title: 'ផ្ញើសារជូនដំណឹង',
+    body: `
+      <label class="field"><span>អ្នកប្រើ</span>
+        <select id="m_user">${rows.map((u) => `<option value="${u.id}" ${String(u.id) === String(userId) ? 'selected' : ''}>${esc(u.name)} — ${esc(u.email)}</option>`).join('')}</select></label>
+      <label class="field"><span>ចំណងជើង</span><input id="m_title" placeholder="ឧ. ជូនដំណឹងសំខាន់"></label>
+      <label class="field"><span>អត្ថបទ</span><textarea id="m_body" rows="4" placeholder="សរសេរសារជូនអ្នកប្រើ…"></textarea></label>`,
+    onSave: async () => {
+      const title = $('#m_title').value.trim();
+      const body = $('#m_body').value.trim();
+      if (!title) throw new Error('សូមបញ្ចូលចំណងជើង');
+      await api('/notify', {
+        method: 'POST',
+        body: { user_id: Number($('#m_user').value), title, body },
+      });
+      toast('បានផ្ញើសារជូនដំណឹង', 'ok');
+      if (page === 'notifications') render();
+    },
+  });
+}
+
+function openPinModal(id, name) {
+  openModal({
+    title: `កំណត់ PIN ថ្មី · ${name || ''}`,
+    body: `<p class="muted" style="margin:0">PIN ថ្មីត្រូវមាន 4 ខ្ទង់។ អ្នកប្រើអាចប្រើវាភ្លាមៗ។</p>
+      <label class="field"><span>PIN ថ្មី</span>
+        <input id="p_pin" maxlength="4" inputmode="numeric" placeholder="••••" autocomplete="off"></label>`,
+    onSave: async () => {
+      const pin = String($('#p_pin').value || '').trim();
+      if (!/^\d{4}$/.test(pin)) throw new Error('PIN ត្រូវមាន 4 ខ្ទង់');
+      await api(`/users/${id}/pin`, { method: 'POST', body: { pin } });
+      toast('បានកំណត់ PIN ថ្មី', 'ok');
+    },
+  });
+}
+
+function goPage(p) {
+  page = p;
+  offset = 0;
+  $('.sidebar')?.classList.remove('open');
+  window.scrollTo({ top: 0, behavior: 'instant' });
+  render();
+}
+
 function bindPager(total) {
   $$('[data-page-btn]').forEach((b) => b.onclick = () => {
     offset = b.dataset.pageBtn === 'next' ? offset + LIMIT : Math.max(0, offset - LIMIT);
@@ -3176,9 +3349,10 @@ function bindPager(total) {
 
 async function render() {
   if (page !== 'identity') identityViewId = null;
-  $('#pageTitle').textContent = TITLES[page];
+  $('#pageTitle').textContent = TITLES[page] || page;
+  $('#pageSub').textContent = PAGE_SUBS[page] || '';
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
-  $('#search').classList.toggle('hidden', !['users', 'cards', 'loans', 'identity'].includes(page));
+  $('#searchWrap').classList.toggle('hidden', !['users', 'cards', 'loans', 'identity'].includes(page));
   const action = $('#actionBtn');
   if (page === 'transactions') {
     action.hidden = false; action.textContent = '+ ប្រតិបត្តិការ';
@@ -3207,6 +3381,7 @@ async function boot() {
     applyRolePermissions();
     render();
     loadBadges();
+    loadLiveUsers();
   } catch (_) {
     token = null;
     localStorage.removeItem('aura_admin_token');
@@ -3240,6 +3415,7 @@ $('#loginForm').onsubmit = async (e) => {
     applyRolePermissions();
     render();
     loadBadges();
+    loadLiveUsers();
   } catch (err) {
     $('#loginError').textContent = err.message;
   } finally {
@@ -3262,7 +3438,33 @@ function applyRolePermissions() {
 }
 
 $('#logoutBtn').onclick = logout;
-$('#refreshBtn').onclick = () => { render(); loadBadges(); };
+$('#refreshBtn').onclick = async () => {
+  const btn = $('#refreshBtn');
+  btn.classList.add('spin');
+  try {
+    await Promise.all([render(), loadBadges(), loadLiveUsers()]);
+  } finally {
+    setTimeout(() => btn.classList.remove('spin'), 300);
+  }
+};
+$('#liveUsersBtn').onclick = openLiveUsers;
+
+// ចុចឈ្មោះ ឬ avatar អ្នកប្រើនៅគ្រប់ទំព័រ → បើក drawer គ្រប់គ្រង
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-user-view]');
+  if (!t || t.dataset.userView === undefined || t.dataset.userView === '') return;
+  e.preventDefault();
+  const id = t.dataset.userView;
+  if (t.closest('#userDrawer')) {
+    closeUserDrawer();
+    setTimeout(() => showUser(id), 320);
+  } else {
+    showUser(id);
+  }
+});
+
+// Live count polling (header pill)
+setInterval(loadLiveUsers, 20000);
 
 /* ---------- admin identity ---------- */
 const ADMIN_ROLES = {

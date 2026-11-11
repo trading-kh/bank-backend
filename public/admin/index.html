@@ -33,25 +33,45 @@
 <!-- ============ APP ============ -->
 <div id="app" class="app hidden">
   <aside class="sidebar">
-    <div class="brand"><span class="brand-mark">A</span><span>Aura Bank<br><small>ផ្ទាំងគ្រប់គ្រង</small></span></div>
+    <div class="brand">
+      <span class="brand-mark">A</span>
+      <span class="brand-text">Aura Bank<br><small>ផ្ទាំងគ្រប់គ្រង</small></span>
+    </div>
+
     <nav id="nav">
-      <button class="nav-item active" data-page="dashboard"><span class="ico">▤</span>ផ្ទាំងដើម</button>
-      <button class="nav-item" data-page="control"><span class="ico">🎛</span>Control U<span class="nav-badge" id="badge-control"></span></button>
-      <button class="nav-item" data-page="users"><span class="ico">👤</span>អ្នកប្រើ<span class="nav-badge" id="badge-users"></span></button>
-      <button class="nav-item" data-page="cards"><span class="ico">💳</span>កាត<span class="nav-badge" id="badge-cards"></span></button>
-      <button class="nav-item" data-page="approvals"><span class="ico">✅</span>រង់ចាំអនុម័ត<span class="nav-badge" id="badge-approvals"></span></button>
-      <button class="nav-item" data-page="transactions"><span class="ico">💸</span>ប្រតិបត្តិការ<span class="nav-badge" id="badge-transactions"></span></button>
-      <button class="nav-item" data-page="loans"><span class="ico">📋</span>កម្ចី<span class="nav-badge" id="badge-loans"></span></button>
-      <button class="nav-item" data-page="kyc"><span class="ico">🪪</span>KYC / CRM<span class="nav-badge" id="badge-kyc"></span></button>
-      <button class="nav-item" data-page="identity"><span class="ico">🆔</span>ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ<span class="nav-badge" id="badge-identity"></span></button>
-      <button class="nav-item" data-page="collections"><span class="ico">🧭</span>ប្រមូល<span class="nav-badge" id="badge-collections"></span></button>
-      <button class="nav-item" data-page="reports"><span class="ico">📈</span>របាយការណ៍<span class="nav-badge" id="badge-reports"></span></button>
-      <button class="nav-item" data-page="notifications"><span class="ico">🔔</span>សេចក្តីសារ<span class="nav-badge" id="badge-notifications"></span></button>
-      <button class="nav-item" data-page="data"><span class="ico">🗂</span>ទិន្នន័យផ្សេង<span class="nav-badge" id="badge-data"></span></button>
-      <button class="nav-item" data-page="audit"><span class="ico">🕓</span>កំណត់ត្រា<span class="nav-badge" id="badge-audit"></span></button>
-      <button class="nav-item" data-page="devices"><span class="ico">📱</span>គ្រប់គ្រងទូរស័ព្ទ<span class="nav-badge" id="badge-devices"></span></button>
-      <button class="nav-item" data-page="usage"><span class="ico">📊</span>ការប្រើប្រាស់<span class="nav-badge" id="badge-usage"></span></button>
+      <div class="nav-group">
+        <span class="nav-group-label">ទូទៅ</span>
+        <button class="nav-item active" data-page="dashboard"><span class="nav-ic">▤</span><span class="nav-tx">ផ្ទាំងដើម</span><span class="nav-badge" id="badge-dashboard"></span></button>
+        <button class="nav-item" data-page="control"><span class="nav-ic">🎛</span><span class="nav-tx">Control U</span><span class="nav-badge" id="badge-control"></span></button>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-group-label">អ្នកប្រើប្រាស់</span>
+        <button class="nav-item" data-page="users"><span class="nav-ic">👤</span><span class="nav-tx">អ្នកប្រើ</span><span class="nav-badge" id="badge-users"></span></button>
+        <button class="nav-item" data-page="identity"><span class="nav-ic">🆔</span><span class="nav-tx">ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ</span><span class="nav-badge" id="badge-identity"></span></button>
+        <button class="nav-item" data-page="kyc"><span class="nav-ic">🪪</span><span class="nav-tx">KYC / CRM</span><span class="nav-badge" id="badge-kyc"></span></button>
+        <button class="nav-item" data-page="devices"><span class="nav-ic">📱</span><span class="nav-tx">គ្រប់គ្រងទូរស័ព្ទ</span><span class="nav-badge" id="badge-devices"></span></button>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-group-label">ហិរញ្ញវត្ថុ</span>
+        <button class="nav-item" data-page="approvals"><span class="nav-ic">✅</span><span class="nav-tx">រង់ចាំអនុម័ត</span><span class="nav-badge" id="badge-approvals"></span></button>
+        <button class="nav-item" data-page="transactions"><span class="nav-ic">💸</span><span class="nav-tx">ប្រតិបត្តិការ</span><span class="nav-badge" id="badge-transactions"></span></button>
+        <button class="nav-item" data-page="loans"><span class="nav-ic">📋</span><span class="nav-tx">កម្ចី</span><span class="nav-badge" id="badge-loans"></span></button>
+        <button class="nav-item" data-page="collections"><span class="nav-ic">🧭</span><span class="nav-tx">ប្រមូលប្រាក់</span><span class="nav-badge" id="badge-collections"></span></button>
+        <button class="nav-item" data-page="cards"><span class="nav-ic">💳</span><span class="nav-tx">កាត</span><span class="nav-badge" id="badge-cards"></span></button>
+      </div>
+
+      <div class="nav-group">
+        <span class="nav-group-label">របាយការណ៍ & ប្រព័ន្ធ</span>
+        <button class="nav-item" data-page="reports"><span class="nav-ic">📈</span><span class="nav-tx">របាយការណ៍</span><span class="nav-badge" id="badge-reports"></span></button>
+        <button class="nav-item" data-page="notifications"><span class="nav-ic">🔔</span><span class="nav-tx">សារជូនដំណឹង</span><span class="nav-badge" id="badge-notifications"></span></button>
+        <button class="nav-item" data-page="audit"><span class="nav-ic">🕓</span><span class="nav-tx">សវនកម្ម</span><span class="nav-badge" id="badge-audit"></span></button>
+        <button class="nav-item" data-page="usage"><span class="nav-ic">📊</span><span class="nav-tx">ការប្រើប្រាស់</span><span class="nav-badge" id="badge-usage"></span></button>
+        <button class="nav-item" data-page="data"><span class="nav-ic">🗂</span><span class="nav-tx">ទិន្នន័យផ្សេង</span><span class="nav-badge" id="badge-data"></span></button>
+      </div>
     </nav>
+
     <div class="sidebar-foot">
       <div class="sidebar-foot-icons">
         <button class="foot-icon-btn" id="adminProfileBtn" title="គណនី Admin">
@@ -83,12 +103,35 @@
 
   <main class="main">
     <header class="topbar">
-      <h2 id="pageTitle">ផ្ទាំងដើម</h2>
+      <div class="topbar-left">
+        <button class="icon-btn menu-btn only-mobile" id="menuBtn" aria-label="ម៉ឺនុយ">☰</button>
+        <div class="page-id">
+          <h2 id="pageTitle">ផ្ទាំងដើម</h2>
+          <p id="pageSub" class="page-sub">ទិដ្ឋភាពរួមនៃធនាគារ</p>
+        </div>
+      </div>
       <div class="topbar-right">
-        <input type="search" id="search" placeholder="ស្វែងរក…" class="hidden">
-        <button class="btn ghost sm" id="refreshBtn" title="ផ្អាសទិន្នន័យ">⟳</button>
+        <div class="search-wrap hidden" id="searchWrap">
+          <span class="search-ic">⌕</span>
+          <input type="search" id="search" placeholder="ស្វែងរកអ្នកប្រើ កាត កម្ចី…">
+        </div>
+        <button class="live-pill" id="liveUsersBtn" title="អ្នកប្រើកំពុងប្រើឥឡូវ">
+          <span class="live-pill-ring"></span>
+          <svg class="live-pill-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          <span class="live-pill-count" id="liveUsersCount">0</span>
+        </button>
+        <button class="icon-btn refresh-btn" id="refreshBtn" title="ផ្ទុកទិន្នន័យឡើងវិញ" aria-label="ផ្ទុកទិន្នន័យឡើងវិញ">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+            <path d="M21 3v6h-6"/>
+          </svg>
+        </button>
         <button class="btn primary sm" id="actionBtn" hidden>+ បង្កើត</button>
-        <button class="btn ghost sm only-mobile" id="menuBtn">☰</button>
       </div>
     </header>
     <section id="content" class="content"></section>

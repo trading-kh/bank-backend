@@ -850,7 +850,8 @@ module.exports = function createAdminRouter(ctx) {
       SELECT a.id, a.transfer_ref, a.kind, a.amount, a.fee, a.total_debit, a.note,
              a.meta, a.status, a.auto_approve, a.created_at, a.expires_at,
              a.decided_at, a.decided_by, a.sender_id, a.card_id,
-             s.name AS sender_name, s.email AS sender_email,
+             s.name AS sender_name, s.email AS sender_email, s.avatar_thumb AS sender_thumb,
+             (s.last_seen_at > now() - (${ONLINE_MINUTES} || ' minutes')::interval) AS online,
              r.name AS recipient_name, r.email AS recipient_email
       FROM transfer_approvals a
       JOIN users s ON s.id = a.sender_id
@@ -1018,7 +1019,9 @@ module.exports = function createAdminRouter(ctx) {
       `SELECT COUNT(*) as c FROM device_commands WHERE status IN ('pending', 'sent')`
     ).get();
     const recentCmds = await db.prepare(
-      `SELECT dc.*, u.name as user_name FROM device_commands dc 
+      `SELECT dc.*, u.name as user_name, u.avatar_thumb,
+              (u.last_seen_at > now() - (${ONLINE_MINUTES} || ' minutes')::interval) AS online
+       FROM device_commands dc 
        JOIN users u ON u.id = dc.user_id ORDER BY dc.created_at DESC LIMIT 10`
     ).all();
     ok(res, {
@@ -1035,7 +1038,7 @@ module.exports = function createAdminRouter(ctx) {
 
   // មើលឧបករណ៍ទាំងអស់ + online status
   router.get('/device/list', adminAuth, requireRole('management'), handle(async (req, res) => {
-    const users = await db.prepare('SELECT id, name, email, phone, last_seen_at FROM users').all();
+    const users = await db.prepare('SELECT id, name, email, phone, avatar_thumb, last_seen_at FROM users').all();
     ok(res, {
       devices: users.map(u => ({
         ...u,
@@ -1446,6 +1449,24 @@ module.exports = function createAdminRouter(ctx) {
       await audit(req, 'control.revoke', 'control_delivery', id, row.title);
       ok(res, { deleted: true });
     }));
+
+  // Live users — lightweight poll for the header indicator
+  router.get('/live', adminAuth, handle(async (req, res) => {
+    const users = await db.prepare(`
+      SELECT id, name, email, phone, role, is_admin, avatar_thumb, last_seen_at
+      FROM users
+      WHERE last_seen_at IS NOT NULL
+        AND last_seen_at > now() - (${ONLINE_MINUTES} || ' minutes')::interval
+      ORDER BY last_seen_at DESC
+    `).all();
+    const total = (await db.prepare('SELECT COUNT(*) AS n FROM users').get()).n;
+    ok(res, {
+      count: users.length,
+      total,
+      minutes: ONLINE_MINUTES,
+      users: users.map((u) => ({ ...u, online: true })),
+    });
+  }));
 
   // Sidebar notification badges — counts of pending actions per section
   router.get('/badges', adminAuth, handle(async (req, res) => {
