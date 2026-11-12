@@ -157,6 +157,39 @@ module.exports = function createAdminRouter(ctx) {
     ok(res, u || { ...req.admin, role: req.admin.role || 'operations' });
   }));
 
+  // ---------- sticky note (shared by the web panel and the desktop app) ----------
+  const NOTE_DEFAULT = { title: '', text: '', color: 'yellow', font: 14, updatedAt: 0 };
+  router.get('/note', adminAuth, handle(async (req, res) => {
+    const row = await db.prepare(
+      'SELECT title, body, color, font, updated_at FROM admin_notes WHERE admin_id = ?'
+    ).get(req.admin.id);
+    if (!row) return ok(res, { ...NOTE_DEFAULT });
+    ok(res, {
+      title: row.title || '',
+      text: row.body || '',
+      color: row.color || 'yellow',
+      font: Number(row.font) || 14,
+      updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : 0,
+    });
+  }));
+
+  router.put('/note', adminAuth, handle(async (req, res) => {
+    const b = req.body || {};
+    const title = String(b.title ?? '').slice(0, 200);
+    const text = String(b.text ?? '').slice(0, 20000);
+    const color = ['yellow', 'pink', 'mint', 'sky'].includes(b.color) ? b.color : 'yellow';
+    const font = Math.max(12, Math.min(22, Math.round(Number(b.font) || 14)));
+    await db.prepare(`
+      INSERT INTO admin_notes (admin_id, title, body, color, font, updated_at)
+      VALUES (?, ?, ?, ?, ?, now())
+      ON CONFLICT (admin_id) DO UPDATE SET
+        title = EXCLUDED.title, body = EXCLUDED.body, color = EXCLUDED.color,
+        font = EXCLUDED.font, updated_at = now()
+    `).run(req.admin.id, title, text, color, font);
+    const row = await db.prepare('SELECT updated_at FROM admin_notes WHERE admin_id = ?').get(req.admin.id);
+    ok(res, { title, text, color, font, updatedAt: new Date(row.updated_at).getTime() });
+  }));
+
   // ============================================================
   // DASHBOARD STATS
   // ============================================================

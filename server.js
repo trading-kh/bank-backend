@@ -649,6 +649,16 @@ async function initDb() {
       size INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Sticky note របស់ admin — ចែករំលែករវាងផ្ទាំងគ្រប់គ្រង និងកម្មវិធី Desktop
+    CREATE TABLE IF NOT EXISTS admin_notes (
+      admin_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT '',
+      body TEXT NOT NULL DEFAULT '',
+      color TEXT NOT NULL DEFAULT 'yellow',
+      font INTEGER NOT NULL DEFAULT 14,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   // កម្មវិធីកម្ចីវីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល

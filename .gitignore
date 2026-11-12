@@ -1,4 +1,5 @@
 node_modules/
+desktop-note/dist/
 bank.db*
 *.log
 .dev.pid

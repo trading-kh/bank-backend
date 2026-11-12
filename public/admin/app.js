@@ -4516,6 +4516,7 @@ async function boot() {
     loadBadges();
     loadLiveUsers();
     loadHealth();
+    setTimeout(initNoteSync, 400);
   } catch (_) {
     token = null;
     localStorage.removeItem('aura_admin_token');
@@ -4551,6 +4552,7 @@ $('#loginForm').onsubmit = async (e) => {
     loadBadges();
     loadLiveUsers();
     loadHealth();
+    setTimeout(initNoteSync, 400);
   } catch (err) {
     $('#loginError').textContent = err.message;
   } finally {
@@ -4864,12 +4866,76 @@ function flashNoteSaved() {
   el.classList.add('show');
 }
 
+let noteSyncAt = 0;
+let notePushTimer = 0;
+
+async function noteRequest(method, body) {
+  if (!token) return null;
+  try {
+    const res = await fetch('/admin/api/note', {
+      method,
+      headers: {
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        Authorization: 'Bearer ' + token,
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return j && j.data ? j.data : null;
+  } catch { return null; }
+}
+
+function noteIsTyping() {
+  const main = document.activeElement;
+  const popped = notePoppedDoc && notePoppedDoc.activeElement;
+  return [main, popped].some((a) => a && a.closest && a.closest('#stickyNote'));
+}
+
+function adoptServerNote(n) {
+  noteState.title = n.title || '';
+  noteState.text = n.text || '';
+  noteState.color = n.color || 'yellow';
+  noteState.font = Number(n.font) || 14;
+  noteSyncAt = Number(n.updatedAt) || 0;
+  paintNoteContent();
+  saveNoteState();
+}
+
+async function pullNote() {
+  if (!token || document.hidden) return;
+  const n = await noteRequest('GET');
+  if (!n || !n.updatedAt || n.updatedAt <= noteSyncAt) return;
+  // keep the poll cursor untouched while typing so the next poll retries
+  if (noteIsTyping()) return;
+  adoptServerNote(n);
+}
+
+function pushNote() {
+  if (!token) return;
+  clearTimeout(notePushTimer);
+  notePushTimer = setTimeout(async () => {
+    const n = await noteRequest('PUT', {
+      title: noteState.title, text: noteState.text, color: noteState.color, font: noteState.font,
+    });
+    if (n) noteSyncAt = Number(n.updatedAt) || noteSyncAt;
+  }, 700);
+}
+
+async function initNoteSync() {
+  const n = await noteRequest('GET');
+  if (!n) return;
+  if (n.updatedAt && n.updatedAt > noteSyncAt) adoptServerNote(n);
+  else if ((noteState.title || noteState.text) && !n.updatedAt) pushNote();
+}
+
 function queueNoteSave() {
   clearTimeout(noteSaveTimer);
   noteSaveTimer = setTimeout(() => {
     saveNoteState();
     flashNoteSaved();
     paintNoteDot();
+    pushNote();
   }, 320);
 }
 
@@ -4899,6 +4965,7 @@ function setNoteColor(color) {
   el.dataset.noteColor = color;
   $$('.note-sw', el).forEach((b) => b.classList.toggle('on', b.dataset.noteColor === color));
   saveNoteState();
+  pushNote();
 }
 
 function setNoteFont(delta) {
@@ -4907,6 +4974,7 @@ function setNoteFont(delta) {
   noteState.font = Math.max(12, Math.min(22, (Number(noteState.font) || 14) + delta));
   el.style.setProperty('--note-font', noteState.font + 'px');
   saveNoteState();
+  pushNote();
 }
 
 function startNoteDrag(e) {
@@ -5072,6 +5140,9 @@ function initStickyNote() {
   loadNoteState();
   paintNoteContent();
   paintNoteBox();
+  setTimeout(initNoteSync, 900);
+  setInterval(pullNote, 20000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) pullNote(); });
 
   $('#noteBtn').onclick = () => {
     if (notePoppedWin) {
@@ -5089,6 +5160,7 @@ function initStickyNote() {
     clearTimeout(noteSaveTimer);
     saveNoteState();
     paintNoteDot();
+    pushNote();
   }));
 
   $$('.note-sw', el).forEach((b) => b.addEventListener('click', () => setNoteColor(b.dataset.noteColor)));
@@ -5105,6 +5177,7 @@ function initStickyNote() {
       $('#noteText').value = '';
       saveNoteState();
       paintNoteDot();
+      pushNote();
       toast('បានសម្អាតចំណាំ', 'ok');
     });
   };

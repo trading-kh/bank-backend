@@ -1,0 +1,43 @@
+{
+  "name": "aura-sticky-note",
+  "productName": "Aura Sticky Note",
+  "version": "1.0.0",
+  "description": "Always-on-top sticky note for the Aura Bank admin, synced with the web panel",
+  "main": "main.js",
+  "author": "Aura Bank",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable --x64",
+    "dist:installer": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.aura.bank.stickynote",
+    "productName": "Aura Sticky Note",
+    "electronDist": "node_modules/electron/dist",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "portable": {
+      "artifactName": "AuraStickyNote-${version}.exe"
+    }
+  }
+}
