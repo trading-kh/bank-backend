@@ -187,7 +187,9 @@ module.exports = function createAdminRouter(ctx) {
         font = EXCLUDED.font, updated_at = now()
     `).run(req.admin.id, title, text, color, font);
     const row = await db.prepare('SELECT updated_at FROM admin_notes WHERE admin_id = ?').get(req.admin.id);
-    ok(res, { title, text, color, font, updatedAt: new Date(row.updated_at).getTime() });
+    const updatedAt = new Date(row.updated_at).getTime();
+    require('./note-sync').broadcast(req.admin.id, { title, text, color, font, updatedAt });
+    ok(res, { title, text, color, font, updatedAt });
   }));
 
   // ============================================================

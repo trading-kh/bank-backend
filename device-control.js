@@ -9,7 +9,16 @@ const { WebSocketServer } = require('ws');
 const connections = new Map();
 
 function setupWebSocket(server, db, ok, fail, ApiError, handle) {
-  const wss = new WebSocketServer({ server, path: '/device-ws' });
+  // noServer: other upgrades (e.g. /note-ws) share this HTTP server, so a
+  // path-filtered server would abort them before their owner sees them
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (req, socket, head) => {
+    let pathname = '';
+    try { pathname = new URL(req.url, 'http://localhost').pathname; } catch (_) { return; }
+    if (pathname !== '/device-ws') return;
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  });
 
   wss.on('connection', (ws, req) => {
     let userId = null;

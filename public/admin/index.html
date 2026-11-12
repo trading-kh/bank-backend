@@ -43,11 +43,25 @@
         <span class="nav-group-label">ទូទៅ</span>
         <button class="nav-item active" data-page="dashboard"><span class="nav-ic">▤</span><span class="nav-tx">ផ្ទាំងដើម</span><span class="nav-badge" id="badge-dashboard"></span></button>
         <div class="nav-folder-wrap" id="navFolderWrap">
-          <button class="nav-item nav-folder" data-page="archive"><span class="nav-ic">🗄</span><span class="nav-tx">Widget</span><span class="nav-badge" id="badge-archive"></span></button>
-          <button type="button" class="nav-caret" id="navArchiveToggle" title="បើក/បិទបញ្ជី widget" aria-label="បើក ឬបិទបញ្ជី widget" aria-expanded="false">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          <button class="nav-item nav-folder" type="button" id="navWidgetFolder" aria-haspopup="dialog" aria-expanded="false" aria-controls="sbArchive" title="ថត Widget">
+            <span class="nav-ic nav-folder-ic">
+              <svg viewBox="0 0 32 32" aria-hidden="true">
+                <defs>
+                  <linearGradient id="wfBack" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9fd0ff"/><stop offset="1" stop-color="#4a8ce0"/></linearGradient>
+                  <linearGradient id="wfFront" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dceeff"/><stop offset="1" stop-color="#82baf6"/></linearGradient>
+                </defs>
+                <path d="M2.6 9.4A3.4 3.4 0 0 1 6 6h5.2c.9 0 1.7.33 2.35.93l1.25 1.14c.32.3.75.47 1.2.47h7.9A3.4 3.4 0 0 1 27.4 11.9v11.5a3.4 3.4 0 0 1-3.4 3.4H6a3.4 3.4 0 0 1-3.4-3.4z" fill="url(#wfBack)"/>
+                <path d="M2.6 13.2h24.8v10.2a3.4 3.4 0 0 1-3.4 3.4H6a3.4 3.4 0 0 1-3.4-3.4z" fill="url(#wfFront)" opacity=".62"/>
+                <rect x="7.2" y="16" width="6.2" height="6.2" rx="1.7" fill="#fff" opacity=".92"/>
+                <rect x="15.6" y="16" width="3.4" height="3" rx="1" fill="#fff" opacity=".78"/>
+                <rect x="20.2" y="16" width="4" height="3" rx="1" fill="#fff" opacity=".52"/>
+                <rect x="15.6" y="19.6" width="8.6" height="2.6" rx="1" fill="#fff" opacity=".52"/>
+              </svg>
+            </span>
+            <span class="nav-tx">Widget</span>
+            <span class="nav-badge" id="badge-archive"></span>
           </button>
-          <div class="nav-archive" id="sbArchive" hidden></div>
+          <div class="sb-widget-pop" id="sbArchive" role="dialog" aria-label="ថត Widget" hidden></div>
         </div>
         <button class="nav-item" data-page="control"><span class="nav-ic">🎛</span><span class="nav-tx">Control U</span><span class="nav-badge" id="badge-control"></span></button>
       </div>

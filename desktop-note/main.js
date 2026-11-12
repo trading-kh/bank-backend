@@ -4,6 +4,7 @@ const {
 } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const WebSocket = require('ws');
 
 const DEFAULT_SERVER = 'https://bank-backend-f6ay.onrender.com';
 const MIN_W = 280;
@@ -120,6 +121,50 @@ function startPolling() {
       }
     } catch { /* offline — keep working locally */ }
   }, 20000);
+  connectNoteStream();
+}
+
+/* live channel — the web panel saves the note and it lands here at once */
+let noteWs = null;
+let noteWsTimer = 0;
+let noteWsTry = 0;
+
+function connectNoteStream() {
+  if (!state.token || noteWs) return;
+  const base = apiUrl('').replace(/^http/, 'ws');
+  let ws;
+  try {
+    ws = new WebSocket(`${base}/note-ws?token=${encodeURIComponent(state.token)}`);
+  } catch { return; }
+  noteWs = ws;
+  ws.on('open', () => { noteWsTry = 0; });
+  ws.on('message', (raw) => {
+    let m;
+    try { m = JSON.parse(raw.toString()); } catch { return; }
+    if (m.type === 'ready') { pullNow(); return; }
+    if (m.type !== 'note' || !m.note) return;
+    const n = normalizeNote(m.note);
+    if (!(n.updatedAt > state.note.updatedAt)) return;
+    state.note = n;
+    queueState();
+    pushNote(n);
+  });
+  const retry = () => {
+    if (noteWs !== ws) return;
+    noteWs = null;
+    clearTimeout(noteWsTimer);
+    noteWsTry = Math.min(noteWsTry + 1, 5);
+    noteWsTimer = setTimeout(connectNoteStream, 1000 * 2 ** (noteWsTry - 1));
+  };
+  ws.on('close', retry);
+  ws.on('error', () => { try { ws.close(); } catch (_) {} });
+}
+
+function closeNoteStream() {
+  clearTimeout(noteWsTimer);
+  const ws = noteWs;
+  noteWs = null;
+  if (ws) { ws.removeAllListeners(); try { ws.close(); } catch (_) {} }
 }
 
 function createWindow() {
@@ -262,6 +307,7 @@ function registerIpc() {
     state.token = '';
     queueState();
     clearInterval(pollTimer);
+    closeNoteStream();
     return { ok: true };
   });
 

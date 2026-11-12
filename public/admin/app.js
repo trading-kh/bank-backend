@@ -282,7 +282,7 @@ function drawLine(canvas, points, opts = {}) {
    ============================================================ */
 const TITLES = {
   dashboard: 'ផ្ទាំងដើម', control: 'Control U', users: 'អ្នកប្រើ', cards: 'កាត',
-  approvals: 'រង់ចាំអនុម័ត', archive: 'Widget',
+  approvals: 'រង់ចាំអនុម័ត',
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   identity: 'ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ',
   collections: 'ប្រមូលប្រាក់', reports: 'របាយការណ៍', notifications: 'សារជូនដំណឹង',
@@ -291,7 +291,6 @@ const TITLES = {
 };
 const PAGE_SUBS = {
   dashboard: 'ទិដ្ឋភាពរួម · KPI · សកម្មភាពថ្មីៗ',
-  archive: 'ថត Widget — អូសចូលផ្ទាំងដើម ឬស្តារវិញបានគ្រប់ពេល',
   control: 'ផ្ញើកាតបញ្ជាផ្ទាល់ទៅអ្នកប្រើក្នុង app',
   users: 'ស្វែងរក កែសម្រួល ផ្អាក លុប និងគ្រប់គ្រងគណនី',
   cards: 'គណនី/កាត សមតុល្យ និងកំណត់ប្រចាំថ្ងៃ',
@@ -319,7 +318,6 @@ const DASH_LS = {
   hidden: 'aura_dash_hidden_v1',
   theme: 'aura_dash_theme_v1',
   sidebar: 'aura_admin_sb_collapsed',
-  archiveOpen: 'aura_admin_sb_archive_open',
 };
 const DASH_COLS = 12;
 const DASH_DEFS = [
@@ -417,83 +415,108 @@ function saveDashState() {
 }
 
 /* ---------- sidebar widget folder ---------- */
-function setSidebarArchiveOpen(open, persist = true) {
-  const box = $('#sbArchive');
-  if (!box) return;
-  box.hidden = !open;
-  const btn = $('#navArchiveToggle');
-  if (btn) {
-    btn.classList.toggle('is-open', !!open);
-    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-  }
-  if (persist) localStorage.setItem(DASH_LS.archiveOpen, open ? '1' : '0');
+function widgetFolderOpen() {
+  const pop = $('#sbArchive');
+  return !!pop && !pop.hidden;
 }
 
-function archiveItemHtml(d) {
+function placeWidgetFolder() {
+  const pop = $('#sbArchive');
+  const btn = $('#navWidgetFolder');
+  if (!pop || !btn || pop.hidden) return;
+  const r = btn.getBoundingClientRect();
+  const w = Math.min(264, Math.max(228, window.innerWidth - 28));
+  let left = r.right + 12;
+  if (left + w > window.innerWidth - 12) left = r.left - w - 12;
+  left = Math.max(12, Math.min(left, window.innerWidth - w - 12));
+  pop.style.width = w + 'px';
+  pop.style.left = Math.round(left) + 'px';
+  const top = Math.max(12, Math.min(r.top - 8, window.innerHeight - pop.offsetHeight - 12));
+  pop.style.top = Math.round(top) + 'px';
+}
+
+function setSidebarArchiveOpen(open) {
+  const pop = $('#sbArchive');
+  const btn = $('#navWidgetFolder');
+  if (!pop) return;
+  const on = !!open;
+  pop.hidden = !on;
+  if (on) placeWidgetFolder();
+  if (btn) {
+    btn.classList.toggle('is-open', on);
+    btn.setAttribute('aria-expanded', on ? 'true' : 'false');
+  }
+}
+
+function toggleWidgetFolder() {
+  setSidebarArchiveOpen(!widgetFolderOpen());
+}
+
+function widgetChipHtml(d) {
   const off = dashHidden.includes(d.id);
-  return `<div class="nav-archive-item ${off ? 'is-off' : 'is-on'}" data-sb-widget="${d.id}" data-sb-hidden="${off ? 1 : 0}" title="${esc(d.name)} — អូសចូលផ្ទាំងដើម">
-    <span class="nav-archive-ic">${d.icon}</span>
-    <span class="nav-archive-name">${esc(d.name)}</span>
+  return `<button type="button" class="sbw-chip ${off ? 'is-off' : 'is-on'}" data-sb-widget="${d.id}" data-sb-hidden="${off ? 1 : 0}" title="${esc(d.name)} — អូសចូលផ្ទាំងដើម">
+    <span class="sbw-ic">${d.icon}</span>
+    <span class="sbw-name">${esc(d.name)}</span>
     ${off
-      ? `<button type="button" class="nav-archive-act nav-archive-restore" data-sb-restore="${d.id}" title="ស្តារ ${esc(d.name)}">↩</button>`
-      : `<span class="nav-archive-state" aria-hidden="true"></span>`}
-  </div>`;
+      ? `<span class="sbw-act" role="button" tabindex="-1" data-sb-restore="${d.id}" title="ស្តារ ${esc(d.name)}">↩</span>`
+      : `<span class="sbw-dot" aria-hidden="true"></span>`}
+  </button>`;
 }
 
 function renderSidebarArchive() {
-  const box = $('#sbArchive');
-  if (!box) return;
+  const pop = $('#sbArchive');
+  if (!pop) return;
   const hidden = DASH_DEFS.filter((d) => dashHidden.includes(d.id));
   const active = DASH_DEFS.filter((d) => !dashHidden.includes(d.id));
-  box.innerHTML = `<div class="nav-archive-head">
-      <span>${hidden.length ? `${hidden.length} លាក់ · ` : ''}${active.length} សកម្ម</span>
-      <button type="button" class="nav-archive-act" id="sbArchReset" title="កំណត់ទម្រង់ដើមវិញ">⟲</button>
+  pop.innerHTML = `<div class="sbw-head">
+      <span class="sbw-title"><b>ថត Widget</b><small>${active.length} សកម្ម${hidden.length ? ` · ${hidden.length} លាក់` : ''}</small></span>
+      <button type="button" class="sbw-reset" id="sbArchReset" title="កំណត់ទម្រង់ដើមវិញ">⟲</button>
     </div>
-    <div class="nav-archive-hint">អូសចូលផ្ទាំងដើម ដើម្បីដាក់ widget</div>
-    ${hidden.map(archiveItemHtml).join('')}${active.map(archiveItemHtml).join('')}`;
-
-  box.querySelectorAll('[data-sb-restore]').forEach((b) => {
-    b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
-    b.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      restoreDashWidget(b.dataset.sbRestore);
-    });
-  });
-  const r = $('#sbArchReset');
-  if (r) r.addEventListener('click', (ev) => { ev.stopPropagation(); resetDashLayout(); });
-
-  /* a plain click: restore a hidden widget, or fly to it on the canvas */
-  box.querySelectorAll('[data-sb-widget]').forEach((rowEl) => {
-    rowEl.addEventListener('click', (ev) => {
-      if (ev.target.closest('.nav-archive-act')) return;
-      if (performance.now() - sbPullSilence < 350) return;
-      const id = rowEl.dataset.sbWidget;
-      if (rowEl.dataset.sbHidden === '1') restoreDashWidget(id);
-      else focusDashWidget(id);
-    });
-  });
-
-  /* folded until the user opens it — never force it open */
-  setSidebarArchiveOpen(localStorage.getItem(DASH_LS.archiveOpen) === '1', false);
+    <div class="sbw-grid">${hidden.map(widgetChipHtml).join('')}${active.map(widgetChipHtml).join('')}</div>
+    <div class="sbw-hint">អូស chip ចូលផ្ទាំងដើម · ចុចដើម្បីទៅកាន់</div>`;
+  if (!pop.hidden) placeWidgetFolder();
 }
 
 function initSidebarArchive() {
-  const toggle = $('#navArchiveToggle');
-  if (toggle) {
-    toggle.addEventListener('click', (e) => {
+  const btn = $('#navWidgetFolder');
+  if (btn) {
+    btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      setSidebarArchiveOpen($('#sbArchive')?.hidden === true);
+      toggleWidgetFolder();
     });
   }
-  const box = $('#sbArchive');
-  if (box) {
-    box.addEventListener('pointerdown', (e) => {
-      const row = e.target.closest('[data-sb-widget]');
-      if (!row || e.target.closest('.nav-archive-act')) return;
-      beginWidgetPull(e, row);
-    });
-  }
+  const pop = $('#sbArchive');
+  if (!pop) return;
+  document.body.appendChild(pop);   // fixed overlay: escapes the sticky sidebar's clipping
+
+  pop.addEventListener('pointerdown', (e) => {
+    const row = e.target.closest('[data-sb-widget]');
+    if (!row || e.target.closest('[data-sb-restore], .sbw-reset')) return;
+    beginWidgetPull(e, row);
+  });
+
+  pop.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-sb-restore]');
+    if (act) { restoreDashWidget(act.dataset.sbRestore); return; }
+    if (e.target.closest('.sbw-reset')) { resetDashLayout(); return; }
+    const row = e.target.closest('[data-sb-widget]');
+    if (!row) return;
+    if (performance.now() - sbPullSilence < 350) return;
+    const id = row.dataset.sbWidget;
+    if (row.dataset.sbHidden === '1') restoreDashWidget(id);
+    else { setSidebarArchiveOpen(false); focusDashWidget(id); }
+  });
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!widgetFolderOpen()) return;
+    if (e.target.closest('#sbArchive, #navWidgetFolder')) return;
+    setSidebarArchiveOpen(false);
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && widgetFolderOpen()) setSidebarArchiveOpen(false);
+  });
+  window.addEventListener('resize', () => { if (widgetFolderOpen()) placeWidgetFolder(); });
 }
 
 /* keep a widget (or its folder row) visible without re-rendering the page */
@@ -571,6 +594,7 @@ function beginWidgetPull(e, row) {
     if (!active) {
       if (Math.hypot(lx - startX, ly - startY) < 6) return;
       active = true;
+      setSidebarArchiveOpen(false);
       document.body.classList.add('dw-busy', 'sb-pulling');
       document.addEventListener('selectstart', blockSel);
       makeGhost();
@@ -710,7 +734,7 @@ function dashAllHiddenHtml() {
   return `<div class="card dash-all-hidden">
     <div class="dash-all-hidden-ic">🗄</div>
     <h3>Widget ទាំងអស់ត្រូវបានលាក់</h3>
-    <p class="muted">អ្នកអាចស្តារពួកវាឡើងវិញពីថត “Widget ដែលលាក់” នៅរបារចំហៀង។</p>
+    <p class="muted">អ្នកអាចស្តារពួកវាឡើងវិញពីថត “Widget” នៅរបារចំហៀង។</p>
     <div class="toolbar" style="justify-content:center">
       <button class="btn ghost" id="dashShowArchive">🗄 បើកថត Widget</button>
       <button class="btn primary" id="dashRestoreAll">↩ ស្តារទាំងអស់</button>
@@ -721,7 +745,7 @@ function dashAllHiddenHtml() {
 function bindDashEmpty() {
   const a = $('#dashShowArchive');
   const r = $('#dashRestoreAll');
-  if (a) a.onclick = () => goPage('archive');
+  if (a) a.onclick = () => setSidebarArchiveOpen(true);
   if (r) r.onclick = () => { dashHidden = []; saveDashState(); render(); };
 }
 
@@ -1231,54 +1255,6 @@ function initDashCanvas() {
     dashChartRO = new ResizeObserver(() => redrawDashChart());
     dashChartRO.observe(box);
   }
-}
-
-async function renderArchive() {
-  const hidden = DASH_DEFS.filter((d) => dashHidden.includes(d.id));
-  const active = DASH_DEFS.filter((d) => !dashHidden.includes(d.id));
-  const sizeLabel = (d) => {
-    const b = dashBox(d.id);
-    return `ទទឹង ${Math.round(b.w)}px · កម្ពស់ ${Math.round(b.h)}px`;
-  };
-  $('#content').innerHTML = `
-    <div class="card">
-      <div class="card-head">
-        <h3>🗄 Widget ដែលលាក់ · ${hidden.length}</h3>
-        <div class="toolbar">
-          <button class="btn ghost sm" id="archRestoreAll" ${hidden.length ? '' : 'disabled'}>↩ ស្តារទាំងអស់</button>
-          <button class="btn ghost sm" id="archReset">⟲ កំណត់ទម្រង់ដើម</button>
-        </div>
-      </div>
-      ${hidden.length ? `<div class="archive-list">${hidden.map((d) => `
-        <div class="archive-item">
-          <span class="archive-ic">${d.icon}</span>
-          <div class="archive-tt">
-            <b>${esc(d.name)}</b>
-            <small>${esc(d.desc)}</small>
-            <span class="archive-size">${sizeLabel(d)}</span>
-          </div>
-          <button class="btn ok sm arch-restore" data-restore="${d.id}">↩ ស្តារ</button>
-        </div>`).join('')}</div>`
-      : `<div class="empty">គ្មាន widget ដែលលាក់ទេ — ចុច (✕) លើ widget ណាមួយនៅផ្ទាំងដើម ដើម្បីផ្លាស់វាមកទីនេះ។
-          <br><button class="btn ghost sm" id="archGoDash" style="margin-top:12px">→ ត្រឡប់ទៅផ្ទាំងដើម</button></div>`}
-    </div>
-    <div class="card">
-      <div class="card-head"><h3>🧩 Widget សកម្ម</h3><span class="muted">${active.length} / ${DASH_DEFS.length}</span></div>
-      <div class="archive-grid">${active.map((d) => `
-        <div class="archive-mini">
-          <span>${d.icon}</span>
-          <b>${esc(d.name)}</b>
-          <small>${sizeLabel(d)}</small>
-        </div>`).join('')}</div>
-    </div>`;
-
-  $$('[data-restore]').forEach((btn) => { btn.onclick = () => restoreDashWidget(btn.dataset.restore); });
-  const all = $('#archRestoreAll');
-  if (all) all.onclick = () => { dashHidden = []; saveDashState(); toast('បានស្តារ widget ទាំងអស់', 'ok'); render(); };
-  const reset = $('#archReset');
-  if (reset) reset.onclick = resetDashLayout;
-  const back = $('#archGoDash');
-  if (back) back.onclick = () => goPage('dashboard');
 }
 
 async function renderDashboard() {
@@ -3493,7 +3469,7 @@ async function renderIdentityReview(id) {
 
 const RENDERERS = {
   dashboard: renderDashboard, control: renderControl, users: renderUsers, cards: renderCards,
-  approvals: renderApprovals, archive: renderArchive,
+  approvals: renderApprovals,
   transactions: renderTransactions, loans: renderLoans, kyc: renderKyc,
   identity: renderIdentityKyc,
   collections: renderCollections, reports: renderReports,
@@ -4527,6 +4503,7 @@ async function boot() {
 function logout() {
   token = null;
   admin = null;
+  if (typeof closeNoteStream === 'function') closeNoteStream();
   localStorage.removeItem('aura_admin_token');
   $('#app').classList.add('hidden');
   $('#login').classList.remove('hidden');
@@ -4745,7 +4722,7 @@ setInterval(loadBadges, 30000);
 
 
 $('#menuBtn').onclick = () => $('.sidebar').classList.toggle('open');
-$$('.nav-item').forEach((b) => b.onclick = () => {
+$$('.nav-item[data-page]').forEach((b) => b.onclick = () => {
   page = b.dataset.page;
   offset = 0;
   $('.sidebar').classList.remove('open');
@@ -4927,6 +4904,49 @@ async function initNoteSync() {
   if (!n) return;
   if (n.updatedAt && n.updatedAt > noteSyncAt) adoptServerNote(n);
   else if ((noteState.title || noteState.text) && !n.updatedAt) pushNote();
+  connectNoteStream();
+}
+
+/* ---------- live channel: another tab / the desktop app saved the note ---------- */
+let noteWs = null;
+let noteWsTimer = 0;
+let noteWsTry = 0;
+
+function connectNoteStream() {
+  if (!token || noteWs || !window.WebSocket) return;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  let ws;
+  try {
+    ws = new WebSocket(`${proto}//${location.host}/note-ws?token=${encodeURIComponent(token)}`);
+  } catch { return; }
+  noteWs = ws;
+  ws.onopen = () => { noteWsTry = 0; };
+  ws.onmessage = (ev) => {
+    let m;
+    try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type === 'ready') { pullNote(); return; }
+    if (m.type !== 'note' || !m.note) return;
+    const n = m.note;
+    if (!(Number(n.updatedAt) > noteSyncAt)) return;
+    // mid-typing: leave the cursor alone, the 20s poll retries once they stop
+    if (noteIsTyping()) return;
+    adoptServerNote(n);
+    flashNoteSaved();
+  };
+  ws.onclose = () => {
+    if (noteWs !== ws) return;
+    noteWs = null;
+    clearTimeout(noteWsTimer);
+    noteWsTry = Math.min(noteWsTry + 1, 5);
+    noteWsTimer = setTimeout(connectNoteStream, 1000 * 2 ** (noteWsTry - 1));
+  };
+}
+
+function closeNoteStream() {
+  clearTimeout(noteWsTimer);
+  const ws = noteWs;
+  noteWs = null;
+  if (ws) { try { ws.close(); } catch (_) {} }
 }
 
 function queueNoteSave() {

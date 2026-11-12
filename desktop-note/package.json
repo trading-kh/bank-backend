@@ -33,11 +33,19 @@
     "win": {
       "icon": "build/icon.png",
       "target": [
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "portable": {
       "artifactName": "AuraStickyNote-${version}.exe"
     }
+  },
+  "dependencies": {
+    "ws": "^8.22.2"
   }
 }

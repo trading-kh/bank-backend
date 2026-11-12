@@ -2621,7 +2621,8 @@ initDb()
   .then(() => {
     const server = http.createServer(app);
     setupWebSocket(server, db, ok, fail, ApiError, handle);
-    server.listen(PORT, () => console.log(`🚀 Backend on http://localhost:${PORT} (WebSocket: /device-ws)`));
+    require('./note-sync').attach(server, SECRET);
+    server.listen(PORT, () => console.log(`🚀 Backend on http://localhost:${PORT} (WebSocket: /device-ws, /note-ws)`));
   })
   .catch((e) => {
     console.error('❌ Database init failed:', e);
