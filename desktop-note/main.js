@@ -296,10 +296,11 @@ function registerIpc() {
     state.token = data.token || '';
     if (!state.token) throw new Error('មិនបានទទួល token');
     queueState();
-    // adopt the shared note, or upload the local one if the account has none
+    // adopt the shared note unless this machine holds a newer one (it may have
+    // been edited while the app pointed at another server or was offline)
     try {
       const n = normalizeNote(await apiFetch('/admin/api/note'));
-      if (n.updatedAt) {
+      if (n.updatedAt && n.updatedAt >= state.note.updatedAt) {
         state.note = n;
       } else if (state.note.title || state.note.text) {
         const saved = normalizeNote(await apiFetch('/admin/api/note', {

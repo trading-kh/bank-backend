@@ -425,13 +425,18 @@ function placeWidgetFolder() {
   const btn = $('#navWidgetFolder');
   if (!pop || !btn || pop.hidden) return;
   const r = btn.getBoundingClientRect();
-  const w = Math.min(264, Math.max(228, window.innerWidth - 28));
-  let left = r.right + 12;
-  if (left + w > window.innerWidth - 12) left = r.left - w - 12;
-  left = Math.max(12, Math.min(left, window.innerWidth - w - 12));
+  const pad = 12;
+  const w = Math.min(280, Math.max(232, window.innerWidth - pad * 2));
+  const left = Math.max(pad, Math.min(r.left, window.innerWidth - w - pad));
   pop.style.width = w + 'px';
+  const h = pop.offsetHeight;
+  // drop down under the folder icon; flip above only when the screen is too short
+  let top = r.bottom + 8;
+  if (top + h > window.innerHeight - pad) {
+    const above = r.top - h - 8;
+    top = above >= pad ? above : Math.max(pad, window.innerHeight - h - pad);
+  }
   pop.style.left = Math.round(left) + 'px';
-  const top = Math.max(12, Math.min(r.top - 8, window.innerHeight - pop.offsetHeight - 12));
   pop.style.top = Math.round(top) + 'px';
 }
 

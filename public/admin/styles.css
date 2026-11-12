@@ -2437,6 +2437,7 @@ body.dw-busy { user-select: none; }
   box-shadow: 0 30px 64px -30px rgba(0, 0, 0, .92), 0 1px 0 rgba(255, 255, 255, .07) inset;
   backdrop-filter: blur(20px) saturate(1.35);
   -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  transform-origin: 0 0;
   animation: sbwIn .18s cubic-bezier(.2, .8, .2, 1);
 }
 .sb-widget-pop[hidden] { display: none; }
