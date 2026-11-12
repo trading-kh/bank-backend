@@ -4791,4 +4791,350 @@ window.addEventListener('resize', () => {
   dashResizeTimer = setTimeout(() => { applyFreeLayout(); redrawDashChart(); }, 120);
 });
 
+/* ---------- sticky note: header sticker, autosaved paper, own window ---------- */
+const NOTE_LS = 'aura_admin_note_v1';
+const NOTE_DEFAULTS = { title: '', text: '', color: 'yellow', font: 14, x: null, y: null, w: 320, h: 330, open: false };
+let noteState = { ...NOTE_DEFAULTS };
+let noteSaveTimer = 0;
+let notePoppedWin = null;
+let notePoppedDoc = null;
+let noteHome = null;
+let noteEl = null;
+// cached: the node gets moved into a Picture-in-Picture document, where a plain
+// document.querySelector in this window can no longer reach it
+const notePanel = () => noteEl || (noteEl = document.getElementById('stickyNote'));
+
+function loadNoteState() {
+  try {
+    const raw = localStorage.getItem(NOTE_LS);
+    if (raw) noteState = { ...NOTE_DEFAULTS, ...JSON.parse(raw) };
+  } catch { noteState = { ...NOTE_DEFAULTS }; }
+  if (noteState.x == null || noteState.y == null) {
+    noteState.x = Math.max(16, window.innerWidth - noteState.w - 28);
+    noteState.y = 78;
+  }
+  clampNoteBox();
+}
+
+function clampNoteBox() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  noteState.w = Math.round(Math.max(240, Math.min(noteState.w, Math.min(560, vw - 24))));
+  noteState.h = Math.round(Math.max(230, Math.min(noteState.h, Math.min(660, vh - 96))));
+  noteState.x = Math.round(Math.max(8, Math.min(noteState.x, vw - noteState.w - 8)));
+  noteState.y = Math.round(Math.max(8, Math.min(noteState.y, vh - noteState.h - 8)));
+}
+
+function saveNoteState() {
+  try { localStorage.setItem(NOTE_LS, JSON.stringify(noteState)); } catch { /* storage full/blocked */ }
+}
+
+function paintNoteDot() {
+  const dot = $('#noteDot');
+  if (!dot) return;
+  const has = !!((noteState.title || '').trim() || (noteState.text || '').trim());
+  dot.hidden = !(has && !noteState.open);
+}
+
+function paintNoteBox() {
+  const el = notePanel();
+  if (!el || el.classList.contains('in-window')) return;
+  el.style.left = noteState.x + 'px';
+  el.style.top = noteState.y + 'px';
+  el.style.width = noteState.w + 'px';
+  el.style.height = noteState.h + 'px';
+}
+
+function paintNoteContent() {
+  const el = notePanel();
+  if (!el) return;
+  $('#noteTitle', el).value = noteState.title;
+  $('#noteText', el).value = noteState.text;
+  el.dataset.noteColor = noteState.color;
+  $$('.note-sw', el).forEach((b) => b.classList.toggle('on', b.dataset.noteColor === noteState.color));
+  el.style.setProperty('--note-font', noteState.font + 'px');
+  paintNoteDot();
+}
+
+function flashNoteSaved() {
+  const root = notePanel();
+  const el = root && $('#noteSaved', root);
+  if (!el) return;
+  el.classList.remove('show');
+  void el.offsetWidth;
+  el.classList.add('show');
+}
+
+function queueNoteSave() {
+  clearTimeout(noteSaveTimer);
+  noteSaveTimer = setTimeout(() => {
+    saveNoteState();
+    flashNoteSaved();
+    paintNoteDot();
+  }, 320);
+}
+
+function setNoteOpen(open, opts = {}) {
+  const el = notePanel();
+  if (!el) return;
+  if (open && $('#app').classList.contains('hidden')) return;
+  if (!open && notePoppedWin) restoreNoteFromWindow();
+  noteState.open = !!open;
+  el.classList.toggle('hidden', !open);
+  const btn = $('#noteBtn');
+  btn.classList.toggle('is-open', !!open);
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) {
+    clampNoteBox();
+    paintNoteBox();
+    if (!opts.silent) setTimeout(() => { const t = $('#noteText', el); if (t) t.focus({ preventScroll: true }); }, 60);
+  }
+  saveNoteState();
+  paintNoteDot();
+}
+
+function setNoteColor(color) {
+  const el = notePanel();
+  if (!el) return;
+  noteState.color = color;
+  el.dataset.noteColor = color;
+  $$('.note-sw', el).forEach((b) => b.classList.toggle('on', b.dataset.noteColor === color));
+  saveNoteState();
+}
+
+function setNoteFont(delta) {
+  const el = notePanel();
+  if (!el) return;
+  noteState.font = Math.max(12, Math.min(22, (Number(noteState.font) || 14) + delta));
+  el.style.setProperty('--note-font', noteState.font + 'px');
+  saveNoteState();
+}
+
+function startNoteDrag(e) {
+  const el = notePanel();
+  if (!el || el.classList.contains('in-window')) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  if (e.target.closest('input, textarea, button, .note-resize')) return;
+  e.preventDefault();
+  const sx = e.clientX, sy = e.clientY;
+  const ox = noteState.x, oy = noteState.y;
+  let moved = false;
+  el.classList.add('note-dragging');
+  const onMove = (ev) => {
+    const dx = ev.clientX - sx, dy = ev.clientY - sy;
+    if (!moved && Math.hypot(dx, dy) < 3) return;
+    moved = true;
+    noteState.x = ox + dx;
+    noteState.y = oy + dy;
+    clampNoteBox();
+    paintNoteBox();
+  };
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    el.classList.remove('note-dragging');
+    if (moved) saveNoteState();
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+}
+
+function startNoteResize(e) {
+  const el = notePanel();
+  if (!el || el.classList.contains('in-window')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const sx = e.clientX, sy = e.clientY;
+  const ow = noteState.w, oh = noteState.h;
+  const onMove = (ev) => {
+    noteState.w = ow + (ev.clientX - sx);
+    noteState.h = oh + (ev.clientY - sy);
+    clampNoteBox();
+    paintNoteBox();
+  };
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    window.removeEventListener('pointercancel', onUp);
+    saveNoteState();
+  };
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  window.addEventListener('pointercancel', onUp);
+}
+
+async function copyNoteText() {
+  const text = [noteState.title, noteState.text].filter((s) => s && s.trim()).join('\n');
+  if (!text) return toast('ចំណាំនេះនៅទំនេរ', '');
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('បានចម្លងចំណាំ', 'ok');
+  } catch {
+    const ta = $('#noteText');
+    ta.focus();
+    ta.select();
+    try { document.execCommand('copy'); toast('បានចម្លងចំណាំ', 'ok'); } catch { toast('មិនអាចចម្លងបានទេ', 'bad'); }
+  }
+}
+
+function copyNoteStyles(doc) {
+  $$('link[rel="stylesheet"]').forEach((l) => {
+    const c = doc.createElement('link');
+    c.rel = 'stylesheet';
+    c.href = l.href;
+    doc.head.appendChild(c);
+  });
+  const st = doc.createElement('style');
+  st.textContent = 'html,body{height:100%;margin:0}';
+  doc.head.appendChild(st);
+}
+
+/* move the live node into another document so typing keeps autosaving */
+function moveNoteInto(doc, win) {
+  const el = notePanel();
+  noteHome = { parent: el.parentNode, next: el.nextSibling, style: el.getAttribute('style') || '' };
+  notePoppedWin = win;
+  notePoppedDoc = doc;
+  $('#noteBtn').classList.add('is-popped');
+  el.classList.add('in-window');
+  el.removeAttribute('style');
+  el.style.setProperty('--note-font', noteState.font + 'px');
+  el.classList.remove('note-dragging');
+  const host = doc.createElement('div');
+  host.className = 'note-host';
+  doc.body.appendChild(host);
+  host.appendChild(el);
+  win.addEventListener('pagehide', restoreNoteFromWindow);
+}
+
+function restoreNoteFromWindow() {
+  const el = notePanel();
+  if (!el || !noteHome) return;
+  const win = notePoppedWin, doc = notePoppedDoc;
+  notePoppedWin = null;
+  notePoppedDoc = null;
+  const nb = $('#noteBtn');
+  if (nb) nb.classList.remove('is-popped');
+  el.classList.remove('in-window');
+  try {
+    if (noteHome.next && noteHome.next.parentNode === noteHome.parent) noteHome.parent.insertBefore(el, noteHome.next);
+    else noteHome.parent.appendChild(el);
+  } catch { document.body.appendChild(el); }
+  if (noteHome.style) el.setAttribute('style', noteHome.style);
+  noteHome = null;
+  // the saved inline style predates changes made inside the popped window
+  el.style.setProperty('--note-font', noteState.font + 'px');
+  clampNoteBox();
+  paintNoteBox();
+  if (win) { try { win.close(); } catch { /* already closing */ } }
+  if (doc) { try { doc.body.textContent = ''; } catch { /* gone */ } }
+  saveNoteState();
+}
+
+async function popNoteOut() {
+  if (notePoppedWin) {
+    try { notePoppedWin.focus(); } catch { /* cannot focus */ }
+    toast('ចំណាំកំពុងបើកនៅបង្អួចដាច់ដោយឡែក', 'ok');
+    return;
+  }
+  if (!noteState.open) setNoteOpen(true, { silent: true });
+  if ('documentPictureInPicture' in window && window.isSecureContext) {
+    try {
+      const pip = await window.documentPictureInPicture.requestWindow({
+        width: Math.max(300, Math.min(600, noteState.w + 40)),
+        height: Math.max(320, Math.min(720, noteState.h + 40)),
+      });
+      copyNoteStyles(pip.document);
+      pip.document.title = 'Sticky Note — Aura Bank';
+      pip.document.body.className = 'note-pip-body';
+      moveNoteInto(pip.document, pip);
+      toast('អូសបង្អួចចំណាំទៅ Monitor ទី២ បាន — វានៅលើគេជានិច្ច', 'ok');
+      return;
+    } catch { /* fall through to a normal popup */ }
+  }
+  const w = Math.max(320, noteState.w + 40);
+  const h = Math.max(320, noteState.h + 60);
+  const win = window.open('', 'aura_sticky_note',
+    `popup=yes,width=${w},height=${h},left=${Math.max(0, window.screenX + 80)},top=${Math.max(0, window.screenY + 80)}`);
+  if (!win) return toast('Browser បានបិទ popup — សូមអនុញ្ញាត popup សម្រាប់ផ្ទាំងនេះ', 'warn');
+  win.document.open();
+  win.document.write('<!doctype html><html lang="km"><head><meta charset="utf-8"><title>Sticky Note — Aura Bank</title></head><body class="note-pip-body"></body></html>');
+  win.document.close();
+  copyNoteStyles(win.document);
+  moveNoteInto(win.document, win);
+  toast('ចំណាំបើកក្នុងបង្អួចថ្មី — អូសវាទៅ Monitor ទី២ បាន', 'ok');
+}
+
+function initStickyNote() {
+  const el = notePanel();
+  if (!el) return;
+  loadNoteState();
+  paintNoteContent();
+  paintNoteBox();
+
+  $('#noteBtn').onclick = () => {
+    if (notePoppedWin) {
+      try { notePoppedWin.focus(); } catch { /* cannot focus */ }
+      return toast('ចំណាំកំពុងបើកនៅបង្អួចដាច់ដោយឡែក', 'ok');
+    }
+    setNoteOpen(!noteState.open);
+  };
+  el.addEventListener('pointerdown', startNoteDrag);
+  $('#noteResize').addEventListener('pointerdown', startNoteResize);
+
+  $('#noteTitle').addEventListener('input', (e) => { noteState.title = e.target.value; queueNoteSave(); });
+  $('#noteText').addEventListener('input', (e) => { noteState.text = e.target.value; queueNoteSave(); });
+  ['#noteTitle', '#noteText'].forEach((sel) => $(sel).addEventListener('blur', () => {
+    clearTimeout(noteSaveTimer);
+    saveNoteState();
+    paintNoteDot();
+  }));
+
+  $$('.note-sw', el).forEach((b) => b.addEventListener('click', () => setNoteColor(b.dataset.noteColor)));
+  $$('[data-note-font]', el).forEach((b) => b.addEventListener('click', () => setNoteFont(Number(b.dataset.noteFont))));
+  $('#noteCopyBtn').onclick = copyNoteText;
+  $('#notePopBtn').onclick = popNoteOut;
+  $('#noteCloseBtn').onclick = () => setNoteOpen(false);
+  $('#noteClearBtn').onclick = () => {
+    if (!noteState.title && !noteState.text) return;
+    confirmAction('លុបអត្ថបទទាំងអស់?', 'ចំណាំនេះនឹងត្រូវសម្អាតទាំងស្រុង។', () => {
+      noteState.title = '';
+      noteState.text = '';
+      $('#noteTitle').value = '';
+      $('#noteText').value = '';
+      saveNoteState();
+      paintNoteDot();
+      toast('បានសម្អាតចំណាំ', 'ok');
+    });
+  };
+
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'n' || e.key === 'N')) {
+      if ($('#app').classList.contains('hidden')) return;
+      e.preventDefault();
+      $('#noteBtn').click();
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    if (notePoppedWin) return;
+    clampNoteBox();
+    paintNoteBox();
+  });
+
+  new MutationObserver(() => {
+    const visible = !$('#app').classList.contains('hidden');
+    if (!visible) {
+      el.classList.add('hidden');
+      $('#noteBtn').classList.remove('is-open');
+    } else if (noteState.open) {
+      el.classList.remove('hidden');
+      $('#noteBtn').classList.add('is-open');
+    }
+  }).observe($('#app'), { attributes: true, attributeFilter: ['class'] });
+}
+
+initStickyNote();
+
 boot();
