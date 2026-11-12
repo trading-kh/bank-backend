@@ -52,6 +52,8 @@ function attach(server, SECRET) {
       if (p.typ !== 'admin' || !p.id) throw new Error('scope');
       adminId = p.id;
     } catch (_) {
+      // some proxies swallow close frames, so say why before closing
+      try { ws.send('{"type":"auth_error"}'); } catch (__) {}
       ws.close(4001, 'auth');
       return;
     }

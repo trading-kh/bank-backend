@@ -4920,11 +4920,21 @@ function connectNoteStream() {
     ws = new WebSocket(`${proto}//${location.host}/note-ws?token=${encodeURIComponent(token)}`);
   } catch { return; }
   noteWs = ws;
+  let handshake = 0;
+  const settle = () => { clearTimeout(handshake); handshake = 0; };
+  // proxies can swallow close frames, so give up on a socket that never gets ready
+  handshake = setTimeout(() => { settle(); try { ws.close(); } catch (_) {} }, 10000);
   ws.onopen = () => { noteWsTry = 0; };
   ws.onmessage = (ev) => {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
-    if (m.type === 'ready') { pullNote(); return; }
+    if (m.type === 'ready') { settle(); pullNote(); return; }
+    if (m.type === 'auth_error') {
+      settle();
+      noteWs = null;
+      try { ws.close(); } catch (_) {}
+      return;
+    }
     if (m.type !== 'note' || !m.note) return;
     const n = m.note;
     if (!(Number(n.updatedAt) > noteSyncAt)) return;
@@ -4934,6 +4944,7 @@ function connectNoteStream() {
     flashNoteSaved();
   };
   ws.onclose = () => {
+    settle();
     if (noteWs !== ws) return;
     noteWs = null;
     clearTimeout(noteWsTimer);

@@ -137,11 +137,21 @@ function connectNoteStream() {
     ws = new WebSocket(`${base}/note-ws?token=${encodeURIComponent(state.token)}`);
   } catch { return; }
   noteWs = ws;
+  let handshake = 0;
+  const settle = () => { clearTimeout(handshake); handshake = 0; };
+  // proxies can swallow close frames, so give up on a socket that never gets ready
+  handshake = setTimeout(() => { settle(); try { ws.close(); } catch (_) {} }, 10000);
   ws.on('open', () => { noteWsTry = 0; });
   ws.on('message', (raw) => {
     let m;
     try { m = JSON.parse(raw.toString()); } catch { return; }
-    if (m.type === 'ready') { pullNow(); return; }
+    if (m.type === 'ready') { settle(); pullNow(); return; }
+    if (m.type === 'auth_error') {
+      settle();
+      noteWs = null;
+      try { ws.close(); } catch (_) {}
+      return;
+    }
     if (m.type !== 'note' || !m.note) return;
     const n = normalizeNote(m.note);
     if (!(n.updatedAt > state.note.updatedAt)) return;
@@ -150,6 +160,7 @@ function connectNoteStream() {
     pushNote(n);
   });
   const retry = () => {
+    settle();
     if (noteWs !== ws) return;
     noteWs = null;
     clearTimeout(noteWsTimer);
