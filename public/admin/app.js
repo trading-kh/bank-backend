@@ -2482,8 +2482,8 @@ async function openCustomer(id, editMode = false) {
             <option value="other" ${u.gender === 'other' ? 'selected' : ''}>ផ្សេងៗ</option>
           </select></label>
       </div>
-      <label class="field"><span>អាសយដ្ឋាន (ខេត្ត / ស្រុក / ឃុំ)</span>
-        <input id="c_address" value="${esc(u.address || '')}" placeholder="ឧ. ភ្នំពេញ, ចំការមន, ទន្លេបាសាក់"></label>
+      <label class="field"><span>អាសយដ្ឋាន (ខេត្ត / ស្រុក / ឃុំ / ភូមិ)</span>
+        <input id="c_address" value="${esc(u.address || '')}" placeholder="ឧ. ភ្នំពេញ, ចំការមន, ទន្លេបាសាក់, ភូមិ ១"></label>
       <label class="field"><span>PIN ថ្មី (ទុកទទេដើម្បីមិនប្ដូរ)</span>
         <input id="c_pin" maxlength="64" placeholder="យ៉ាងតិច ៤ តួ"></label>
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">

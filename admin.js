@@ -363,7 +363,7 @@ module.exports = function createAdminRouter(ctx) {
       push('gender', gender || null);
     }
     if (req.body.address !== undefined) {
-      push('address', String(req.body.address || '').trim().slice(0, 200) || null);
+      push('address', String(req.body.address || '').trim().slice(0, 300) || null);
     }
     if (req.body.onboarded !== undefined) {
       const on = req.body.onboarded === true || req.body.onboarded === 1 || req.body.onboarded === '1';

@@ -1129,7 +1129,7 @@ app.post('/auth/onboarding', auth, handle(async (req, res) => {
     throw new ApiError('សូមជ្រើសរើសភេទ', 400, 'BAD_GENDER');
   if (!/^\+?\d[\d\s-]{7,16}$/.test(phone))
     throw new ApiError('លេខទូរស័ព្ទមិនត្រឹមត្រូវ', 400, 'BAD_PHONE');
-  if (address.length < 2 || address.length > 200)
+  if (address.length < 2 || address.length > 300)
     throw new ApiError('សូមជ្រើសរើសទីតាំង', 400, 'BAD_ADDRESS');
   if (!ONBOARD_PIN_RE.test(pin))
     throw new ApiError('PIN ត្រូវមានយ៉ាងតិច ៤ តួ និងគ្មានចន្លោះ', 400, 'BAD_PIN');
