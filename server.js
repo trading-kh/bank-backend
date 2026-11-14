@@ -173,6 +173,10 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS data_version INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'operations';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS age INTEGER;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS address TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarded INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE users DROP COLUMN IF EXISTS bank_name;
     ALTER TABLE users DROP COLUMN IF EXISTS bank_account;
     UPDATE users SET role = 'management' WHERE is_admin = 1 AND (role IS NULL OR role = 'operations');
@@ -810,7 +814,8 @@ async function checkPin(userId, pin) {
   }
 
   let valid = false;
-  if (typeof pin === 'string' && /^\d{4}$/.test(pin)) {
+  // PIN អាចជាលេខ អក្សរ ឬសញ្ញាពិសេស — គ្រាន់តែជា string ដែលអ្នកប្រើកំណត់
+  if (typeof pin === 'string' && pin.length >= 1 && pin.length <= 72) {
     try { valid = await bcrypt.compare(pin, u.pin_hash); } catch { valid = false; }
   }
 
@@ -1087,24 +1092,63 @@ app.post('/auth/google', handle(async (req, res) => {
     generatedPin = Math.floor(1000 + Math.random() * 9000).toString();
     const hash = await bcrypt.hash(generatedPin, SALT);
     const info = await db.prepare(
-      'INSERT INTO users (name, email, phone, pin_hash, auth_provider) VALUES (?, ?, ?, ?, ?)'
+      `INSERT INTO users (name, email, phone, pin_hash, auth_provider, onboarded)
+       VALUES (?, ?, ?, ?, ?, 0)`
     ).run(name || 'Google User', email, '', hash, 'google');
     await seedNewUser(info.lastInsertRowid);
-    user = { id: info.lastInsertRowid, name: name || 'Google User', email, phone: '', avatar: null };
+    user = { id: info.lastInsertRowid, name: name || 'Google User', email, phone: '',
+      avatar: null, onboarded: 0 };
   }
   // បើមានគណនីស្រាប់ មិនប្ដូរ auth_provider ទៀតទេ (ពីមុនធ្វើឲ្យ PIN login ខូច)
 
   const token = jwt.sign({ id: user.id }, SECRET, { expiresIn: '30d' });
   ok(res, {
     token,
-    user: { id: user.id, name: user.name, email: user.email, phone: user.phone, avatar: user.avatar || null },
+    user: { id: user.id, name: user.name, email: user.email, phone: user.phone,
+      avatar: user.avatar || null, onboarded: Number(user.onboarded) || 0 },
     generatedPin,
   });
 }));
 
+// បំពេញព័ត៌មានគណនីបន្ទាប់ពីចូលដោយ Google (ឈ្មោះ/អាយុ/ភេទ/ទូរស័ព្ទ/ទីតាំង/PIN)
+const ONBOARD_PIN_RE = /^\S{4,64}$/;
+app.post('/auth/onboarding', auth, handle(async (req, res) => {
+  const body = req.body || {};
+  const name = String(body.name || '').trim();
+  const age = Number(body.age);
+  const gender = String(body.gender || '').trim().toLowerCase();
+  const phone = String(body.phone || '').trim();
+  const address = String(body.address || '').trim();
+  const pin = typeof body.pin === 'string' ? body.pin : '';
+
+  if (name.length < 2 || name.length > 80)
+    throw new ApiError('សូមបញ្ចូលឈ្មោះឱ្យបានត្រឹមត្រូវ', 400, 'BAD_NAME');
+  if (!Number.isInteger(age) || age < 18 || age > 100)
+    throw new ApiError('អាយុត្រូវនៅចន្លោះ ១៨ ដល់ ១០០', 400, 'BAD_AGE');
+  if (!['male', 'female', 'other'].includes(gender))
+    throw new ApiError('សូមជ្រើសរើសភេទ', 400, 'BAD_GENDER');
+  if (!/^\+?\d[\d\s-]{7,16}$/.test(phone))
+    throw new ApiError('លេខទូរស័ព្ទមិនត្រឹមត្រូវ', 400, 'BAD_PHONE');
+  if (address.length < 2 || address.length > 200)
+    throw new ApiError('សូមជ្រើសរើសទីតាំង', 400, 'BAD_ADDRESS');
+  if (!ONBOARD_PIN_RE.test(pin))
+    throw new ApiError('PIN ត្រូវមានយ៉ាងតិច ៤ តួ និងគ្មានចន្លោះ', 400, 'BAD_PIN');
+
+  const hash = await bcrypt.hash(pin, SALT);
+  await db.prepare(`UPDATE users SET name = ?, phone = ?, age = ?, gender = ?,
+      address = ?, pin_hash = ?, pin_attempts = 0, locked_until = NULL, onboarded = 1
+    WHERE id = ?`).run(name, phone, age, gender, address, hash, req.userId);
+
+  const u = await db.prepare(`SELECT id, name, email, phone, avatar, age, gender,
+      address, onboarded FROM users WHERE id = ?`).get(req.userId);
+  ok(res, u);
+}));
+
 app.get('/me', auth, async (req, res) => {
   const u = await db.prepare(
-    'SELECT id, name, email, phone, avatar, auth_provider, data_version FROM users WHERE id = ?'
+    `SELECT id, name, email, phone, avatar, auth_provider, data_version,
+            age, gender, address, onboarded
+     FROM users WHERE id = ?`
   ).get(req.userId);
   if (!u) return fail(res, 'Not found', 404, 'NOT_FOUND');
   ok(res, u);
@@ -1236,7 +1280,8 @@ app.post('/auth/verify-pin', auth, handle(async (req, res) => {
 // ប្ដូរ PIN (ត្រូវដឹង PIN ចាស់)
 app.post('/auth/change-pin', auth, handle(async (req, res) => {
   const { old_pin, new_pin } = req.body;
-  if (!/^\d{4}$/.test(new_pin || '')) throw new ApiError('PIN ថ្មីត្រូវមាន ៤ ខ្ទង់', 400, 'BAD_PIN');
+  if (!ONBOARD_PIN_RE.test(new_pin || ''))
+    throw new ApiError('PIN ត្រូវមានយ៉ាងតិច ៤ តួ និងគ្មានចន្លោះ', 400, 'BAD_PIN');
   await checkPin(req.userId, old_pin);
   const hash = await bcrypt.hash(new_pin, SALT);
   await db.prepare('UPDATE users SET pin_hash = ? WHERE id = ?').run(hash, req.userId);
@@ -1246,7 +1291,8 @@ app.post('/auth/change-pin', auth, handle(async (req, res) => {
 // កំណត់ PIN សម្រាប់ Google User ដោយបញ្ជាក់ខ្លួនឡើងវិញតាម Google (ក្នុង ៥នាទី)
 app.post('/auth/google/set-pin', auth, handle(async (req, res) => {
   const { id_token, new_pin } = req.body;
-  if (!/^\d{4}$/.test(new_pin || '')) throw new ApiError('PIN ថ្មីត្រូវមាន ៤ ខ្ទង់', 400, 'BAD_PIN');
+  if (!ONBOARD_PIN_RE.test(new_pin || ''))
+    throw new ApiError('PIN ត្រូវមានយ៉ាងតិច ៤ តួ និងគ្មានចន្លោះ', 400, 'BAD_PIN');
   if (!id_token || !getApps().length) throw new ApiError('No token provided');
 
   let decoded;
