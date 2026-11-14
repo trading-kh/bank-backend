@@ -281,7 +281,7 @@ function drawLine(canvas, points, opts = {}) {
    PAGES
    ============================================================ */
 const TITLES = {
-  dashboard: 'ផ្ទាំងដើម', control: 'Control U', users: 'អ្នកប្រើ', cards: 'កាត',
+  dashboard: 'ផ្ទាំងដើម', control: 'Control U', users: 'អ្នកប្រើ', balance: 'សមតុល្យ',
   approvals: 'រង់ចាំអនុម័ត',
   transactions: 'ប្រតិបត្តិការ', loans: 'កម្ចី', kyc: 'KYC / CRM',
   identity: 'ផ្ទៀងផ្ទាត់អត្តសញ្ញាណ',
@@ -293,7 +293,7 @@ const PAGE_SUBS = {
   dashboard: 'ទិដ្ឋភាពរួម · KPI · សកម្មភាពថ្មីៗ',
   control: 'ផ្ញើកាតបញ្ជាផ្ទាល់ទៅអ្នកប្រើក្នុង app',
   users: 'ស្វែងរក កែសម្រួល ផ្អាក លុប និងគ្រប់គ្រងគណនី',
-  cards: 'គណនី/កាត សមតុល្យ និងកំណត់ប្រចាំថ្ងៃ',
+  balance: 'សមតុល្យអ្នកប្រើ · បន្ថែម · ដក · កំណត់',
   approvals: 'អនុម័ត ឬ បដិសេធការផ្ទេរប្រាក់ចេញ',
   transactions: 'ប្រវត្តិប្រតិបត្តិការ · ស្វែងរក · លុប',
   loans: 'ដាក់ពាក្យ វាយតម្លៃ អនុម័ត បញ្ចេញ និងតាមដាន',
@@ -1570,7 +1570,7 @@ async function showUser(id) {
   const d = await api(`/users/${id}`);
   const u = d.user;
   const tabs = [
-    ['cards', `កាត (${d.cards.length})`],
+    ['cards', `គណនី (${d.cards.length})`],
     ['transactions', `ប្រតិបត្តិការ (${d.transactions.length})`],
     ['loans', `កម្ចី (${d.loans.length})`],
     ['goals', `គោលបំណង (${d.goals.length})`],
@@ -1739,72 +1739,77 @@ function closeUserDrawer() {
 }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeUserDrawer(); });
 
-async function renderCards() {
-  const d = await api(`/cards?limit=${LIMIT}&offset=${offset}&q=${encodeURIComponent(search)}`);
+/* ============================================================
+   BALANCES — សមតុល្យអ្នកប្រើ (បន្ថែម / ដក / កំណត់)
+   ============================================================ */
+async function renderBalances() {
+  const d = await api(`/balances?limit=${LIMIT}&offset=${offset}&q=${encodeURIComponent(search)}`);
   $('#content').innerHTML = `
     <div class="card">
-      <div class="card-head"><h3>កាត ${d.total} សន្លាក់</h3></div>
+      <div class="card-head">
+        <h3>សមតុល្យអ្នកប្រើ ${d.total} នាក់</h3>
+        <span class="muted">សរុប ${money(d.total_balance)}</span>
+      </div>
       ${tableHtml([
-    { label: 'ID', render: (r) => `#${r.id}` },
-    { label: 'ម្ចាស់', render: (r) => esc(r.name) },
-    { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.number) },
-    { label: 'លេខកាត', render: (r) => `<span class="muted">${esc(r.number)}</span>` },
-    { label: 'សមតុល្យ', num: true, render: (r) => money(r.balance) },
-    { label: 'កំណត់/ថ្ងៃ', num: true, render: (r) => money(r.daily_limit) },
     {
-      label: 'ស្ថានភាព', render: (r) => [
-        r.frozen ? '<span class="pill bad">បានផ្អាក</span>' : '<span class="pill ok">ធម្មតា</span>',
-        r.online ? '' : '<span class="pill warn">កែប្ដូរក្រៅអន្តប្រវេស</span>',
-      ].join(' ')
+      label: 'អ្នកប្រើ', render: (r) => userChip(
+        r.name, r.avatar_thumb, r.id, undefined, r.phone || '')
+    },
+    { label: 'អ៊ីមែល', render: (r) => `<span class="muted">${esc(r.email)}</span>` },
+    {
+      label: 'សមតុល្យ', num: true,
+      render: (r) => `<b style="color:${Number(r.balance) > 0 ? '#7ee2a8' : '#ff9b9b'}">${money(r.balance)}</b>`
+    },
+    {
+      label: 'គណនី', num: true,
+      render: (r) => `<span class="muted">${Number(r.accounts)}</span>`
+    },
+    {
+      label: 'ប្រតិបត្តិការចុងក្រោយ', num: true,
+      render: (r) => `<span class="muted">${r.last_tx_at ? ago(r.last_tx_at) : '—'}</span>`
     },
     {
       label: 'សកម្ម', render: (r) => `<div class="row-actions">
-        <button class="btn ghost sm" data-card-edit="${r.id}">កែសម្រួល</button>
-        <button class="btn danger sm" data-card-del="${r.id}">លុប</button></div>`
+        <button class="btn primary sm" data-bal-op="add" data-bal-user="${r.id}">+ បន្ថែម</button>
+        <button class="btn ghost sm" data-bal-op="subtract" data-bal-user="${r.id}">− ដក</button>
+        <button class="btn ghost sm" data-bal-op="set" data-bal-user="${r.id}">កំណត់</button></div>`
     },
-  ], d.rows, { empty: 'រកមិនឃើញកាត', wrapClass: 'sticky-actions' })}
+  ], d.rows, { empty: 'រកមិនឃើញអ្នកប្រើ', wrapClass: 'sticky-actions' })}
       ${pagerHtml(d.total, offset, LIMIT)}
     </div>`;
   bindPager(d.total);
-  $$('[data-card-edit]').forEach((b) => b.onclick = () => editCard(b.dataset.cardEdit));
-  $$('[data-card-del]').forEach((b) => b.onclick = () => {
-    confirmDelete('លុបកាតនេះ? ប្រតិបត្តិការដែលជាកាតនេះនឹងត្រូវបានលុបផង។', async () => {
-      await api(`/cards/${b.dataset.cardDel}`, { method: 'DELETE' });
-      toast('បានលុបកាត', 'ok');
-      render();
-    });
+  $$('[data-bal-user]').forEach((b) => b.onclick = () => {
+    const row = d.rows.find((r) => String(r.id) === b.dataset.balUser);
+    if (row) openBalanceModal(row, b.dataset.balOp);
   });
 }
 
-async function editCard(id) {
-  const d = await api(`/cards?limit=300`);
-  const card = d.rows.find((c) => String(c.id) === String(id));
-  if (!card) return toast('រកមិនឃើញកាត', 'err');
+function openBalanceModal(user, op = 'add') {
+  const ops = {
+    add: ['បន្ថែមប្រាក់', '+'],
+    subtract: ['ដកប្រាក់', '−'],
+    set: ['កំណត់សមតុល្យថ្មី', '='],
+  };
   openModal({
-    title: `កែសម្រួលកាត · ${card.name}`,
+    title: `${ops[op][0]} · ${user.name}`,
     body: `
-      <label class="field"><span>ឈ្មោះកាត</span><input id="c_name" value="${esc(card.name)}"></label>
-      <label class="field"><span>សម្រាប្រាប់</span><input id="c_balance" type="number" step="0.01" value="${card.balance}"></label>
-      <label class="field"><span>កំណត់ប្រចាំថ្ងៃ</span><input id="c_limit" type="number" step="0.01" value="${card.daily_limit}"></label>
-      <label class="field" style="flex-direction:row;align-items:center;gap:10px">
-        <input type="checkbox" id="c_frozen" ${card.frozen ? 'checked' : ''} style="width:18px;height:18px"><span>ផ្អាកកាត (frozen)</span></label>
-      <label class="field" style="flex-direction:row;align-items:center;gap:10px">
-        <input type="checkbox" id="c_online" ${card.online ? 'checked' : ''} style="width:18px;height:18px"><span>អនុញ្ញាតប្រើអន្តប្រវេស</span></label>
-      <p class="muted" style="margin:0">ម្ចាស់: ${esc(card.user_name)} · ${esc(card.number)} · ${esc(card.expiry)}</p>`,
+      <p class="muted" style="margin:0 0 6px">សមតុល្យបច្ចុប្បន្ន: <b>${money(user.balance)}</b></p>
+      <label class="field"><span>ចំនួនប្រាក់ (USD)</span>
+        <input id="b_amount" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00" autofocus></label>
+      <label class="field"><span>ចំណាំ (ស្រេចចិត្ត)</span>
+        <input id="b_note" maxlength="100" placeholder="ឧ. បញ្ចូលប្រាក់តាមដៃ"></label>`,
     onSave: async () => {
-      await api(`/cards/${id}`, {
-        method: 'PATCH',
-        body: {
-          name: $('#c_name').value.trim(),
-          balance: Number($('#c_balance').value),
-          daily_limit: Number($('#c_limit').value),
-          frozen: $('#c_frozen').checked,
-          online: $('#c_online').checked,
-        },
+      const amount = Number($('#b_amount').value);
+      if (!Number.isFinite(amount) || amount < 0) throw new Error('ចំនួនប្រាក់មិនត្រឹមត្រូវ');
+      const res = await api(`/users/${user.id}/balance`, {
+        method: 'POST',
+        body: { op, amount, note: $('#b_note').value.trim() },
       });
-      toast('បានរក្សាទុកកាត', 'ok');
+      toast(`សមតុល្យថ្មី: ${money(res.balance)}`, 'ok');
+      loadBadges();
       render();
     },
+    saveLabel: 'អនុវត្ត',
   });
 }
 
@@ -3647,7 +3652,7 @@ async function renderIdentityReview(id) {
 }
 
 const RENDERERS = {
-  dashboard: renderDashboard, control: renderControl, users: renderUsers, cards: renderCards,
+  dashboard: renderDashboard, control: renderControl, users: renderUsers, balance: renderBalances,
   approvals: renderApprovals,
   transactions: renderTransactions, loans: renderLoans, kyc: renderKyc,
   identity: renderIdentityKyc,
@@ -4640,7 +4645,7 @@ async function render() {
   $('#pageTitle').textContent = TITLES[page] || page;
   $('#pageSub').textContent = PAGE_SUBS[page] || '';
   $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
-  $('#searchWrap').classList.toggle('hidden', !['users', 'cards', 'loans', 'identity'].includes(page));
+  $('#searchWrap').classList.toggle('hidden', !['users', 'balance', 'loans', 'identity'].includes(page));
   const action = $('#actionBtn');
   if (page === 'transactions') {
     action.hidden = false; action.textContent = '+ ប្រតិបត្តិការ';
@@ -4653,6 +4658,7 @@ async function render() {
   // មិនបង្ហាញ "កំពុងផ្ទុក…" ទេ — រក្សាមាតិកាចាស់រហូតដល់ទិន្នន័យថ្មីមកដល់
   try {
     await RENDERERS[page]();
+    await markPageSeen(page);
   } catch (e) {
     el.innerHTML = `<div class="empty">បរាជ័យ: ${esc(e.message)}</div>`;
   }
@@ -4669,6 +4675,7 @@ async function boot() {
     applyRolePermissions();
     render();
     loadBadges();
+    loadFeed();
     loadLiveUsers();
     loadHealth();
     setTimeout(initNoteSync, 400);
@@ -4706,6 +4713,7 @@ $('#loginForm').onsubmit = async (e) => {
     applyRolePermissions();
     render();
     loadBadges();
+    loadFeed();
     loadLiveUsers();
     loadHealth();
     setTimeout(initNoteSync, 400);
@@ -4849,7 +4857,6 @@ async function loadBadges() {
   try {
     const badges = await api('/badges');
     setBadge('badge-users', badges.users);
-    setBadge('badge-cards', badges.cards);
     setBadge('badge-approvals', badges.approvals, badges.approvals > 0 ? 'warning' : '');
     setBadge('badge-transactions', badges.transactions);
     setBadge('badge-loans', badges.loans);
@@ -4894,8 +4901,104 @@ function setFootBadge(id, count, extraClass) {
   }
 }
 
+// ---------- badge បាត់ពេលមើលរួច · បង្ហាញវិញតែទិន្នន័យថ្មី ----------
+const SECTION_FOR_PAGE = {
+  users: 'users', approvals: 'approvals', transactions: 'transactions',
+  loans: 'loans', kyc: 'kyc', identity: 'identity', collections: 'collections',
+  notifications: 'notifications', audit: 'audit', devices: 'devices', reports: 'reports',
+};
+async function markPageSeen(p) {
+  const section = SECTION_FOR_PAGE[p];
+  if (!section) return;
+  try {
+    await api('/seen', { method: 'POST', body: { section } });
+    setBadge('badge-' + section, 0);
+  } catch (_) { /* badge នឹងធ្លាក់ចុះនៅ polling បន្ទាប់ */ }
+}
+
+// ---------- header bell — សកម្មភាពថ្មីៗពីអ្នកប្រើ ----------
+let feedState = { items: [], unread: 0, seen_at: null };
+async function loadFeed() {
+  if (!token) return;
+  try {
+    feedState = await api('/feed');
+    updateBellBadge(feedState.unread);
+    if (!$('#notifPop').hidden) renderFeedList();
+  } catch (_) {}
+}
+function updateBellBadge(n) {
+  const el = $('#bellCount');
+  if (!el) return;
+  if (n > 0) {
+    el.textContent = n > 99 ? '99+' : n;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+    el.textContent = '';
+  }
+  $('#bellBtn').classList.toggle('has-new', n > 0);
+}
+function renderFeedList() {
+  const pop = $('#notifPop');
+  if (!pop) return;
+  const items = feedState.items || [];
+  const seenAt = feedState.seen_at ? new Date(feedState.seen_at) : null;
+  pop.innerHTML = `
+    <div class="notif-head">
+      <b>សកម្មភាពថ្មីៗ</b>
+      <button class="notif-mark" id="notifMarkAll" ${feedState.unread ? '' : 'disabled'}>សម្គាល់ថាបានអាន</button>
+    </div>
+    <div class="notif-list">
+      ${items.length ? items.map((i) => {
+    const isNew = !seenAt || new Date(i.created_at) > seenAt;
+    return `<button class="notif-item${isNew ? ' new' : ''}" data-feed-page="${esc(i.page)}">
+          <span class="notif-ic">${i.icon || '•'}</span>
+          <span class="notif-body"><b>${esc(i.title)}</b><small>${esc(i.sub || '')}</small></span>
+          <span class="notif-time">${ago(i.created_at)}</span>
+        </button>`;
+  }).join('') : '<div class="notif-empty">មិនទាន់មានសកម្មភាព</div>'}
+    </div>`;
+  const markAll = $('#notifMarkAll');
+  if (markAll) markAll.onclick = async () => {
+    await api('/seen', { method: 'POST', body: { section: 'feed' } }).catch(() => {});
+    feedState.unread = 0;
+    feedState.seen_at = new Date().toISOString();
+    updateBellBadge(0);
+    renderFeedList();
+  };
+  $$('[data-feed-page]').forEach((b) => b.onclick = async () => {
+    const target = b.dataset.feedPage;
+    await api('/seen', { method: 'POST', body: { section: 'feed' } }).catch(() => {});
+    feedState.unread = 0;
+    feedState.seen_at = new Date().toISOString();
+    updateBellBadge(0);
+    closeBell();
+    goPage(target);
+  });
+}
+function openBell() {
+  $('#notifPop').hidden = false;
+  $('#bellBtn').setAttribute('aria-expanded', 'true');
+  renderFeedList();
+  loadFeed();
+}
+function closeBell() {
+  const pop = $('#notifPop');
+  if (!pop || pop.hidden) return;
+  pop.hidden = true;
+  $('#bellBtn').setAttribute('aria-expanded', 'false');
+}
+$('#bellBtn').onclick = (e) => {
+  e.stopPropagation();
+  if ($('#notifPop').hidden) openBell(); else closeBell();
+};
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.bell-wrap')) closeBell();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeBell(); });
+
 // Auto-refresh badges every 30 seconds
-setInterval(loadBadges, 30000);
+setInterval(() => { loadBadges(); loadFeed(); }, 30000);
 
 // មិនមាន auto-refresh ទេ — អ្នកប្រើត្រូវចុច ⟳ ដើម្បីផ្អាសទិន្នន័យដោយខ្លួនឯង
 

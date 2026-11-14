@@ -663,6 +663,14 @@ async function initDb() {
       font INTEGER NOT NULL DEFAULT 14,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Admin បានមើលផ្នែកណាម្ដងហើយ — badge បង្ហាញតែទិន្នន័យថ្មីក្រោយពេលនោះ
+    CREATE TABLE IF NOT EXISTS admin_seen (
+      admin_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      section TEXT NOT NULL,
+      seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (admin_id, section)
+    );
   `);
 
   // កម្មវិធីកម្ចីវីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល

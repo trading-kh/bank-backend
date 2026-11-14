@@ -494,6 +494,93 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // ============================================================
+  // BALANCES — សមតុល្យអ្នកប្រើ (បញ្ចូល / ដក / កំណត់)
+  // ============================================================
+  router.get('/balances', adminAuth, handle(async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    const limit = Math.min(Math.max(int(req.query.limit, 50), 1), 300);
+    const offset = Math.max(int(req.query.offset, 0), 0);
+    const rows = await db.prepare(`
+      SELECT u.id, u.name, u.email, u.phone, u.avatar_thumb, u.is_locked, u.onboarded,
+             COALESCE(SUM(c.balance), 0) AS balance,
+             COUNT(c.id) AS accounts,
+             (SELECT MAX(t.created_at) FROM transactions t WHERE t.user_id = u.id) AS last_tx_at
+      FROM users u
+      LEFT JOIN cards c ON c.user_id = u.id
+      WHERE u.is_admin = 0
+        AND (?::text = '' OR lower(u.name) LIKE ? OR lower(u.email) LIKE ? OR u.phone LIKE ?)
+      GROUP BY u.id
+      ORDER BY balance DESC, u.id DESC
+      LIMIT ? OFFSET ?
+    `).all(q, like(q), like(q), like(q), limit, offset);
+    const agg = await db.prepare(`
+      SELECT COUNT(*) AS n, COALESCE(SUM(balance), 0) AS total FROM (
+        SELECT u.id, COALESCE(SUM(c.balance), 0) AS balance
+        FROM users u LEFT JOIN cards c ON c.user_id = u.id
+        WHERE u.is_admin = 0
+          AND (?::text = '' OR lower(u.name) LIKE ? OR lower(u.email) LIKE ? OR u.phone LIKE ?)
+        GROUP BY u.id
+      ) t
+    `).get(q, like(q), like(q), like(q));
+    ok(res, { rows, total: Number(agg.n) || 0, total_balance: Number(agg.total) || 0, limit, offset });
+  }));
+
+  router.post('/users/:id/balance', adminAuth, handle(async (req, res) => {
+    const userId = int(req.params.id);
+    const op = String(req.body.op || '').trim();
+    const amount = num(req.body.amount);
+    const note = String(req.body.note || '').trim().slice(0, 100);
+    if (!['add', 'subtract', 'set'].includes(op))
+      throw new ApiError('ប្រតិបត្តិការមិនត្រឹមត្រូវ', 400, 'BAD_OP');
+    if (amount === null || amount < 0 || amount > 10000000)
+      throw new ApiError('ចំនួនប្រាក់មិនត្រឹមត្រូវ', 400, 'BAD_AMOUNT');
+    const user = await db.prepare('SELECT id, name FROM users WHERE id = ?').get(userId);
+    if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
+
+    const out = await db.transaction(async () => {
+      let card = await db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id LIMIT 1')
+        .get(userId);
+      if (!card) {
+        if (op === 'subtract')
+          throw new ApiError('គណនីនេះមិនទាន់មានសមតុល្យ', 400, 'NO_ACCOUNT');
+        const info = await db.prepare(`INSERT INTO cards
+          (user_id, name, number, expiry, cvv, balance, color1, color2)
+          VALUES (?, 'គណនីចម្បង', ?, '12/29', '000', 0, ?, ?)`)
+          .run(userId, '4000000000' + String(userId).padStart(6, '0'), 0xFF0052D4, 0xFF4364F7);
+        card = await db.prepare('SELECT * FROM cards WHERE id = ?').get(info.lastInsertRowid);
+      }
+      const before = money(card.balance);
+      const delta = op === 'add' ? money(amount)
+        : op === 'subtract' ? money(-amount)
+          : money(amount - before);
+      if (delta === 0) return { changed: false, delta: 0, balance: before };
+      const upd = await db.prepare(`UPDATE cards SET balance = ROUND(balance + ?, 2)
+        WHERE id = ? AND balance + ? >= 0`).run(delta, card.id, delta);
+      if (upd.changes !== 1) throw new ApiError('សមតុល្យមិនគ្រប់គ្រាន់', 400, 'INSUFFICIENT_FUNDS');
+      const title = note || (delta > 0 ? 'ការបញ្ចូលប្រាក់ដោយអ្នកគ្រប់គ្រង' : 'ការកាត់ប្រាក់ដោយអ្នកគ្រប់គ្រង');
+      await db.prepare(`INSERT INTO transactions
+        (user_id, card_id, title, category, amount, is_expense, icon_code)
+        VALUES (?, ?, ?, 'សមតុល្យ', ?, ?, 0)`)
+        .run(userId, card.id, title, Math.abs(delta), delta < 0 ? 1 : 0);
+      await db.prepare(`INSERT INTO notifications (user_id, title, body, icon_code)
+        VALUES (?, ?, ?, 0)`)
+        .run(userId, delta > 0 ? 'ប្រាក់បានបញ្ចូល' : 'ប្រាក់ត្រូវបានកាត់',
+          `${title} · ${delta > 0 ? '+' : '-'}$${Math.abs(delta).toFixed(2)}`);
+      return { changed: true, delta, balance: money(before + delta), card_id: card.id };
+    });
+
+    await bumpVersion(userId);
+    if (out.changed && sendPushNotification) {
+      sendPushNotification(userId,
+        out.delta > 0 ? 'ប្រាក់បានបញ្ចូលចូលគណនីរបស់អ្នក' : 'ប្រាក់ត្រូវបានកាត់ចេញ',
+        `${out.delta > 0 ? '+' : '-'}$${Math.abs(out.delta).toFixed(2)} · កែសមតុល្យដោយអ្នកគ្រប់គ្រង`,
+        { type: 'admin', bank_code: 'AURA' });
+    }
+    await audit(req, 'adjust_balance', 'users', userId, `${op} ${amount} → ${out.balance}`);
+    ok(res, { user_id: userId, balance: out.balance, delta: out.delta || 0 });
+  }));
+
+  // ============================================================
   // CARDS
   // ============================================================
   router.get('/cards', adminAuth, handle(async (req, res) => {
@@ -1920,13 +2007,20 @@ module.exports = function createAdminRouter(ctx) {
   }));
 
   // Sidebar notification badges — counts of pending actions per section
+  // Badge បង្ហាញតែអ្វីដែលមកដល់ក្រោយពេល admin បានមើលផ្នែកនោះចុងក្រោយ
   router.get('/badges', adminAuth, handle(async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const dayStart = today.toISOString();
+
+    const seenRows = await db.prepare('SELECT section, seen_at FROM admin_seen WHERE admin_id = ?')
+      .all(req.admin.id);
+    const seen = {};
+    for (const r of seenRows) seen[r.section] = r.seen_at;
+    const since = (s) => seen[s] || dayStart;
 
     const [
       newUsers,
-      newCards,
       pendingTransactions,
       pendingApprovals,
       pendingLoans,
@@ -1942,24 +2036,42 @@ module.exports = function createAdminRouter(ctx) {
       dbUsageWarning,
       activityToday,
     ] = await Promise.all([
-      db.prepare(`SELECT COUNT(*) as c FROM users WHERE created_at >= $1`).get(today.toISOString()),
-      db.prepare(`SELECT COUNT(*) as c FROM cards WHERE created_at >= $1`).get(today.toISOString()),
-      db.prepare(`SELECT COUNT(*) as c FROM external_transfers WHERE status != 'settled'`).get(),
-      db.prepare(`SELECT COUNT(*) as c FROM transfer_approvals WHERE status IN ('pending', 'holding')`).get(),
-      db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status IN ('submitted', 'under_review', 'approved')`).get(),
-      db.prepare(`SELECT COUNT(*) as c FROM loan_kyc WHERE status = 'submitted'`).get(),
-      db.prepare(`SELECT COUNT(*) as c FROM identity_kyc WHERE status = 'pending'`).get(),
-      db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls JOIN loans l ON l.id = ls.loan_id WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE AND l.status = 'disbursed'`).get(),
-      db.prepare(`SELECT COUNT(*) as c FROM loans WHERE status = 'disbursed' AND created_at >= $1`).get(today.toISOString()),
-      db.prepare(`SELECT COUNT(*) as c FROM notifications WHERE "read" = 0`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM users
+        WHERE is_admin = 0 AND created_at > $1`).get(since('users')),
+      db.prepare(`SELECT COUNT(*) as c FROM external_transfers
+        WHERE status != 'settled' AND created_at > $1`).get(since('transactions')),
+      db.prepare(`SELECT COUNT(*) as c FROM transfer_approvals
+        WHERE status IN ('pending', 'holding') AND created_at > $1`).get(since('approvals')),
+      db.prepare(`SELECT COUNT(*) as c FROM loans
+        WHERE status IN ('submitted', 'under_review', 'approved') AND created_at > $1`).get(since('loans')),
+      db.prepare(`SELECT COUNT(*) as c FROM loan_kyc
+        WHERE status = 'submitted'
+          AND COALESCE(submitted_at, updated_at, created_at) > $1`).get(since('kyc')),
+      db.prepare(`SELECT COUNT(*) as c FROM identity_kyc
+        WHERE status = 'pending' AND submitted_at > $1`).get(since('identity')),
+      seen.collections
+        ? db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls
+            JOIN loans l ON l.id = ls.loan_id
+            WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE
+              AND ls.due_date >= $1::date AND l.status = 'disbursed'`)
+          .get(String(seen.collections).slice(0, 10))
+        : db.prepare(`SELECT COUNT(*) as c FROM loan_schedules ls
+            JOIN loans l ON l.id = ls.loan_id
+            WHERE ls.status = 'pending' AND ls.due_date < CURRENT_DATE AND l.status = 'disbursed'`).get(),
+      db.prepare(`SELECT COUNT(*) as c FROM loans
+        WHERE status = 'disbursed' AND created_at > $1`).get(since('reports')),
+      db.prepare(`SELECT COUNT(*) as c FROM notifications
+        WHERE "read" = 0 AND created_at > $1`).get(since('notifications')),
       db.prepare(`SELECT COUNT(*) as c FROM (
         SELECT id FROM admin_audit_log WHERE created_at < NOW() - INTERVAL '30 days'
         UNION ALL
         SELECT id FROM login_logs WHERE created_at < NOW() - INTERVAL '30 days'
       ) old_records`).get(),
-      db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= $1`).get(today.toISOString()),
+      db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations
+        WHERE recorded_at > $1`).get(since('devices')),
       db.prepare(`SELECT COUNT(DISTINCT user_id) as c FROM device_locations WHERE recorded_at >= NOW() - INTERVAL '10 minutes'`).get(),
-      db.prepare(`SELECT COUNT(*) as c FROM login_logs WHERE success = false AND created_at >= $1`).get(today.toISOString()),
+      db.prepare(`SELECT COUNT(*) as c FROM login_logs
+        WHERE success = false AND created_at > $1`).get(since('audit')),
       db.prepare(`SELECT pg_database_size(current_database()) as bytes`).get(),
       db.prepare(`SELECT COUNT(*) as c FROM (
         SELECT id FROM transactions WHERE created_at >= $1
@@ -1967,7 +2079,7 @@ module.exports = function createAdminRouter(ctx) {
         UNION ALL SELECT id FROM notifications WHERE created_at >= $1
         UNION ALL SELECT id FROM device_commands WHERE created_at >= $1
         UNION ALL SELECT id FROM login_logs WHERE created_at >= $1
-      ) events`).get(today.toISOString()),
+      ) events`).get(dayStart),
     ]);
 
     const DB_LIMIT_BYTES = 0.5 * 1024 * 1024 * 1024;
@@ -1975,7 +2087,6 @@ module.exports = function createAdminRouter(ctx) {
 
     ok(res, {
       users: newUsers?.c || 0,
-      cards: newCards?.c || 0,
       transactions: pendingTransactions?.c || 0,
       approvals: pendingApprovals?.c || 0,
       loans: pendingLoans?.c || 0,
@@ -1991,6 +2102,93 @@ module.exports = function createAdminRouter(ctx) {
       usage: usagePercent > 80 ? Math.round(usagePercent) : 0,
       activity: activityToday?.c || 0,
     });
+  }));
+
+  // សម្គាល់ថា admin បានមើលផ្នែកនេះហើយ → badge ត្រឡប់ទៅ 0
+  router.post('/seen', adminAuth, handle(async (req, res) => {
+    const section = String(req.body.section || '').trim().slice(0, 40);
+    if (!section) throw new ApiError('សូមបញ្ជាក់ផ្នែក', 400, 'BAD_SECTION');
+    await db.prepare(`
+      INSERT INTO admin_seen (admin_id, section, seen_at) VALUES (?, ?, NOW())
+      ON CONFLICT (admin_id, section) DO UPDATE SET seen_at = NOW()
+    `).run(req.admin.id, section);
+    ok(res, { section, seen_at: new Date().toISOString() });
+  }));
+
+  // Header bell — សកម្មភាពថ្មីៗពីអ្នកប្រើ រួមទាំងទំព័រត្រូវទៅ
+  router.get('/feed', adminAuth, handle(async (req, res) => {
+    const row = await db.prepare('SELECT seen_at FROM admin_seen WHERE admin_id = ? AND section = ?')
+      .get(req.admin.id, 'feed');
+    const seenAt = row ? row.seen_at : null;
+    const limit = Math.min(Math.max(int(req.query.limit, 40), 1), 100);
+
+    const [transfers, newUsers, newLoans, kyc, identity] = await Promise.all([
+      db.prepare(`SELECT ta.id, ta.amount, ta.kind, ta.note, ta.created_at,
+          u.id AS user_id, u.name, u.avatar_thumb
+        FROM transfer_approvals ta JOIN users u ON u.id = ta.sender_id
+        WHERE ta.status IN ('pending', 'holding')
+        ORDER BY ta.created_at DESC LIMIT 20`).all(),
+      db.prepare(`SELECT id AS user_id, name, email, avatar_thumb, created_at
+        FROM users WHERE is_admin = 0
+        ORDER BY created_at DESC LIMIT 15`).all(),
+      db.prepare(`SELECT l.id, l.principal, l.created_at,
+          u.id AS user_id, u.name, u.avatar_thumb
+        FROM loans l JOIN users u ON u.id = l.user_id
+        WHERE l.status = 'submitted'
+        ORDER BY l.created_at DESC LIMIT 15`).all(),
+      db.prepare(`SELECT k.id, COALESCE(k.submitted_at, k.updated_at, k.created_at) AS created_at,
+          u.id AS user_id, u.name, u.avatar_thumb
+        FROM loan_kyc k JOIN users u ON u.id = k.user_id
+        WHERE k.status = 'submitted'
+        ORDER BY COALESCE(k.submitted_at, k.updated_at, k.created_at) DESC LIMIT 15`).all(),
+      db.prepare(`SELECT k.id, k.ref, k.submitted_at AS created_at,
+          u.id AS user_id, u.name, u.avatar_thumb
+        FROM identity_kyc k JOIN users u ON u.id = k.user_id
+        WHERE k.status = 'pending'
+        ORDER BY k.submitted_at DESC LIMIT 15`).all(),
+    ]);
+
+    const items = [
+      ...transfers.map((r) => ({
+        id: `transfer:${r.id}`, kind: 'transfer', icon: '💸', page: 'approvals',
+        title: `${r.name} ស្នើផ្ទេរប្រាក់`,
+        sub: `${money(r.amount)}${r.note ? ' · ' + String(r.note).slice(0, 60) : ''}`,
+        created_at: r.created_at, user_id: r.user_id, name: r.name, avatar_thumb: r.avatar_thumb,
+      })),
+      ...newUsers.map((r) => ({
+        id: `user:${r.user_id}`, kind: 'user', icon: '👤', page: 'users',
+        title: `${r.name} បានបង្កើតគណនី`,
+        sub: r.email || '',
+        created_at: r.created_at, user_id: r.user_id, name: r.name, avatar_thumb: r.avatar_thumb,
+      })),
+      ...newLoans.map((r) => ({
+        id: `loan:${r.id}`, kind: 'loan', icon: '📋', page: 'loans',
+        title: `${r.name} ស្នើកម្ចី`,
+        sub: money(r.principal),
+        created_at: r.created_at, user_id: r.user_id, name: r.name, avatar_thumb: r.avatar_thumb,
+      })),
+      ...kyc.map((r) => ({
+        id: `kyc:${r.id}`, kind: 'kyc', icon: '🪪', page: 'kyc',
+        title: `${r.name} បានដាក់ KYC`,
+        sub: 'រង់ចាំពិនិត្យ',
+        created_at: r.created_at, user_id: r.user_id, name: r.name, avatar_thumb: r.avatar_thumb,
+      })),
+      ...identity.map((r) => ({
+        id: `identity:${r.id}`, kind: 'identity', icon: '🆔', page: 'identity',
+        title: `${r.name} បានដាក់ឯកសារអត្តសញ្ញាណ`,
+        sub: r.ref || '',
+        created_at: r.created_at, user_id: r.user_id, name: r.name, avatar_thumb: r.avatar_thumb,
+      })),
+    ]
+      .filter((i) => i.created_at)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, limit);
+
+    const unread = seenAt
+      ? items.filter((i) => new Date(i.created_at) > new Date(seenAt)).length
+      : items.length;
+
+    ok(res, { items, unread, seen_at: seenAt });
   }));
 
   // Usage monitoring dashboard
