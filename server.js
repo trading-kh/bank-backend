@@ -754,6 +754,7 @@ const handle = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((e) => {
     if (e instanceof ApiError) return fail(res, e.message, e.status, e.code);
     console.error('❌ Unhandled:', e);
+    res.locals.healthError = String(e.message || e).slice(0, 160);
     fail(res, 'Server error', 500, 'SERVER_ERROR');
   });
 

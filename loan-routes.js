@@ -7,7 +7,7 @@ const express = require('express');
 const crypto = require('crypto');
 const {
   money, INTEREST_METHODS, MAX_LOAN, OPEN_STATUSES, buildSchedule, computeScore,
-  scoreBand, cbcCheck, syncArrears, applyLoanPayment,
+  scoreBand, SCORE_BANDS, cbcCheck, syncArrears, applyLoanPayment,
 } = require('./loan-engine');
 
 const MAX_MONTHS = 60;
@@ -197,7 +197,9 @@ module.exports = function createLoanAppRouter(ctx) {
         ? JSON.parse(l.score_detail) : l.score_detail;
       if (Array.isArray(raw)) parts = raw;
     } catch (_) { /* score_detail ចាស់មិនត្រឹមត្រូវ — ទុកទទេ */ }
-    const band = l.score == null ? null : scoreBand(l.score);
+    const bandLetter = l.score == null ? null : scoreBand(l.score);
+    const band = bandLetter == null ? null
+      : (SCORE_BANDS.find((b) => b.band === bandLetter) || null);
     return {
       ...l,
       score_detail: parts,

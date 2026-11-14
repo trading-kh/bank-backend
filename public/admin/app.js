@@ -4483,6 +4483,11 @@ function hpPanelHtml(d) {
     <div class="hp-recovery"><span>♻</span>
       <div><b>${esc(r.detail || r.action)}</b><small>${ago(r.at)}</small></div>
     </div>`).join('');
+  const errors = (d.recent_errors || []).map((e) => `
+    <div class="hp-recovery"><span>⛔</span>
+      <div><b>${esc(e.method || '')} ${esc(e.path || '')} · ${esc(String(e.status || 500))}</b>
+        <small>${esc(e.message || 'គ្មានសារលម្អិត')} · ${ago(e.at)}</small></div>
+    </div>`).join('');
   const upMin = Math.floor((d.meta?.uptime_sec || 0) / 60);
   const trend = (d.history || []).map((p) => `<i class="is-${healthCls(p.status)}" title="${esc(p.score)} · ${esc(p.at)}"></i>`).join('');
   return `
@@ -4515,6 +4520,7 @@ function hpPanelHtml(d) {
         </div>
         ${d.steps.map(hpStep).join('')}
         ${alerts ? `<div class="hp-block"><h4>⚠ ការជូនដំណឹង (${(d.alerts || []).length})</h4>${alerts}</div>` : ''}
+        ${errors ? `<div class="hp-block"><h4>⛔ កំហុស 5xx ចុងក្រោយ (${(d.recent_errors || []).length})</h4>${errors}</div>` : ''}
         ${recovery ? `<div class="hp-block"><h4>♻ Auto-Recovery</h4>${recovery}</div>` : ''}
         <div class="hp-foot">
           <button class="btn ghost sm" id="hpPoll">⏱ ពិនិត្យស្វ័យប្រវត្តិ · 30s</button>
