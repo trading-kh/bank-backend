@@ -303,12 +303,13 @@ module.exports = function createAdminRouter(ctx) {
   router.get('/users/:id', adminAuth, handle(async (req, res) => {
     const id = int(req.params.id);
     const user = await db.prepare(`
-      SELECT id, name, email, phone, auth_provider, is_admin, is_locked, role, pin_attempts,
+      SELECT id, name, email, phone, age, gender, address, COALESCE(onboarded, 1) AS onboarded,
+             auth_provider, is_admin, is_locked, role, pin_attempts,
              locked_until, created_at, avatar_thumb, last_seen_at
       FROM users WHERE id = ?`).get(id);
     if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
 
-    const [cards, transactions, loans, goals, budgets, notifications, referrals] = await Promise.all([
+    const [cards, transactions, loans, goals, budgets, notifications, referrals, kyc] = await Promise.all([
       db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id').all(id),
       db.prepare(`SELECT * FROM transactions WHERE user_id = ?
         ORDER BY created_at DESC LIMIT 50`).all(id),
@@ -318,10 +319,11 @@ module.exports = function createAdminRouter(ctx) {
       db.prepare(`SELECT * FROM notifications WHERE user_id = ?
         ORDER BY created_at DESC LIMIT 30`).all(id),
       db.prepare('SELECT * FROM referrals WHERE user_id = ?').all(id),
+      db.prepare('SELECT * FROM loan_kyc WHERE user_id = ?').all(id),
     ]);
     ok(res, {
       user: { ...user, online: isOnline(user.last_seen_at) },
-      cards, transactions, loans, goals, budgets, notifications, referrals,
+      cards, transactions, loans, goals, budgets, notifications, referrals, kyc,
     });
   }));
 
@@ -344,6 +346,29 @@ module.exports = function createAdminRouter(ctx) {
       push('email', email);
     }
     if (req.body.phone !== undefined) push('phone', String(req.body.phone).trim().slice(0, 30));
+    if (req.body.age !== undefined) {
+      const raw = String(req.body.age ?? '').trim();
+      if (raw === '') push('age', null);
+      else {
+        const age = int(raw, -1);
+        if (age < 18 || age > 100) throw new ApiError('អាយុត្រូវនៅចន្លោះ ១៨–១០០', 400, 'BAD_AGE');
+        push('age', age);
+      }
+    }
+    if (req.body.gender !== undefined) {
+      const gender = String(req.body.gender || '').trim().toLowerCase();
+      if (!['', 'male', 'female', 'other'].includes(gender)) {
+        throw new ApiError('ភេទមិនត្រឹមត្រូវ', 400, 'BAD_GENDER');
+      }
+      push('gender', gender || null);
+    }
+    if (req.body.address !== undefined) {
+      push('address', String(req.body.address || '').trim().slice(0, 200) || null);
+    }
+    if (req.body.onboarded !== undefined) {
+      const on = req.body.onboarded === true || req.body.onboarded === 1 || req.body.onboarded === '1';
+      push('onboarded', on ? 1 : 0);
+    }
     if (req.body.is_admin !== undefined) {
       const isAdmin = req.body.is_admin === true || req.body.is_admin === 1 || req.body.is_admin === '1';
       if (id === req.admin.id && !isAdmin) {
@@ -380,13 +405,14 @@ module.exports = function createAdminRouter(ctx) {
     await bumpVersion(id);
     await audit(req, 'update_user', 'users', id,
       fields.map((f) => f.split(' = ')[0]).join(','));
-    ok(res, await db.prepare('SELECT id, name, email, phone, is_admin, created_at FROM users WHERE id = ?').get(id));
+    ok(res, await db.prepare(`SELECT id, name, email, phone, age, gender, address,
+      COALESCE(onboarded, 1) AS onboarded, is_admin, created_at FROM users WHERE id = ?`).get(id));
   }));
 
   router.post('/users/:id/pin', adminAuth, handle(async (req, res) => {
     const id = int(req.params.id);
     const pin = String(req.body.pin || '');
-    if (!/^\d{4}$/.test(pin)) throw new ApiError('PIN ត្រូវមាន 4 ខ្ទង់', 400, 'BAD_PIN');
+    if (!/^\S{4,64}$/.test(pin)) throw new ApiError('PIN ត្រូវមានយ៉ាងតិច ៤ តួ (គ្មានចន្លោះ)', 400, 'BAD_PIN');
     const user = await db.prepare('SELECT id FROM users WHERE id = ?').get(id);
     if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
     const hash = await bcrypt.hash(pin, SALT);

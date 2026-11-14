@@ -2372,13 +2372,173 @@ async function repayLoan(id) {
 /* ============================================================
    KYC
    ============================================================ */
+/* ---------- CRM: គ្រប់គ្រងព័ត៌មានអតិថិជន ---------- */
+let crmStage = 'all';
+let crmQuery = '';
+
+const genderLabel = (g) => ({ male: 'ប្រុស', female: 'ស្រី', other: 'ផ្សេងៗ' }[g] || '—');
+const kycPill = (s) => {
+  if (!s) return '<span class="muted">មិនទាន់មាន</span>';
+  const map = {
+    verified: ['ok', 'ផ្ទៀងផ្ទាត់រួច'], submitted: ['warn', 'រង់ចាំពិនិត្យ'],
+    rejected: ['bad', 'បដិសេធ'], draft: ['info', 'សារព្រាង'],
+  };
+  const [cls, label] = map[s] || ['info', s];
+  return `<span class="pill ${cls}">${esc(label)}</span>`;
+};
+
+async function loadCrmArea() {
+  const body = $('#crm-body');
+  if (!body) return;
+  body.innerHTML = '<div class="empty">កំពុងផ្ទុក…</div>';
+  let d;
+  try {
+    d = await api(`/customers?stage=${crmStage}&q=${encodeURIComponent(crmQuery)}&limit=200`);
+  } catch (e) {
+    body.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    return;
+  }
+  const rows = d.rows || [];
+  const s = d.stats || {};
+  const kpis = $('#crm-kpis');
+  if (kpis) {
+    kpis.innerHTML = `
+      <div class="card kpi"><div class="kpi-label">អតិថិជនសរុប</div>
+        <div class="kpi-value">${s.total || 0}</div><div class="kpi-sub">គណនីអ្នកប្រើទាំងអស់</div></div>
+      <div class="card kpi ok"><div class="kpi-label">បំពេញព័ត៌មានរួច</div>
+        <div class="kpi-value">${s.complete || 0}</div><div class="kpi-sub">ភ្ជាប់ព័ត៌មានពេញលេញ</div></div>
+      <div class="card kpi warn"><div class="kpi-label">រង់ចាំបំពេញ</div>
+        <div class="kpi-value">${s.pending || 0}</div><div class="kpi-sub">ចូលដោយ Google មិនទាន់បំពេញ</div></div>
+      <div class="card kpi"><div class="kpi-label">KYC កម្ចី</div>
+        <div class="kpi-value">${s.kyc_verified || 0}</div>
+        <div class="kpi-sub">ផ្ទៀងផ្ទាត់រួច · រង់ចាំ ${s.kyc_submitted || 0}</div></div>`;
+  }
+
+  body.innerHTML = tableHtml([
+    {
+      label: 'អតិថិជន', render: (r) => `<div class="cell-user">${avatarHtml(r.name, r.avatar_thumb, r.online)}
+        <span><b>${esc(r.name || '—')}</b><small>${esc(r.email || '')}</small></span></div>`,
+    },
+    { label: 'ទូរស័ព្ទ', render: (r) => `<span class="mono">${esc(r.phone || '—')}</span>` },
+    {
+      label: 'អាយុ / ភេទ',
+      render: (r) => `<span class="muted">${r.age ? `${r.age} ឆ្នាំ` : '—'} · ${genderLabel(r.gender)}</span>`,
+    },
+    {
+      label: 'អាសយដ្ឋាន',
+      render: (r) => (r.address
+        ? `<span class="muted" style="font-size:12px">${esc(r.address)}</span>`
+        : '<span class="muted">មិនទាន់មាន</span>'),
+    },
+    { label: 'KYC កម្ចី', render: (r) => kycPill(r.kyc_status) },
+    {
+      label: 'បំពេញព័ត៌មាន',
+      render: (r) => (Number(r.onboarded) === 1
+        ? '<span class="pill ok">រួចរាល់</span>'
+        : '<span class="pill warn">រង់ចាំ</span>'),
+    },
+    {
+      label: 'សកម្ម',
+      render: (r) => `<div class="row-actions">
+        <button class="btn ghost sm icon-act" data-crm-open="${r.id}" title="មើល / កែព័ត៌មាន">👁</button>
+        <button class="btn ghost sm icon-act" data-crm-edit="${r.id}" title="កែសម្រួលព័ត៌មាន">✎</button></div>`,
+    },
+  ], rows, { empty: crmQuery ? 'រកមិនឃើញអតិថិជន' : 'មិនទាន់មានអតិថិជន', wrapClass: 'sticky-actions' });
+
+  $$('[data-crm-open], [data-crm-edit]').forEach((b) => b.onclick = () => {
+    openCustomer(b.dataset.crmOpen || b.dataset.crmEdit, b.dataset.crmEdit != null);
+  });
+}
+
+async function openCustomer(id, editMode = false) {
+  let d;
+  try { d = await api(`/users/${id}`); } catch (e) { return toast(e.message, 'err'); }
+  const u = d.user || {};
+  const kyc = (d.kyc || []).find((k) => Number(k.user_id) === Number(id)) || null;
+  openModal({
+    title: `អតិថិជន · ${u.name || '—'}`,
+    wide: true,
+    saveLabel: 'រក្សាទុកព័ត៌មាន',
+    body: `
+      <div class="detail-grid" style="margin-bottom:14px">
+        <div class="detail-item"><div class="k">អ៊ីមែល</div><div class="v">${esc(u.email || '—')}</div></div>
+        <div class="detail-item"><div class="k">ចូលតាម</div><div class="v">${esc(u.auth_provider || '—')}</div></div>
+        <div class="detail-item"><div class="k">បង្កើតគណនី</div><div class="v">${dt(u.created_at)}</div></div>
+        <div class="detail-item"><div class="k">ចូលចុងក្រោយ</div><div class="v">${u.last_seen_at ? dt(u.last_seen_at) : '—'}</div></div>
+        <div class="detail-item"><div class="k">ស្ថានភាព</div><div class="v">${Number(u.onboarded) === 1
+      ? '<span class="pill ok">បំពេញព័ត៌មានរួច</span>'
+      : '<span class="pill warn">រង់ចាំបំពេញ</span>'} ${u.is_locked ? '<span class="pill bad">ផ្អាក</span>' : ''}</div></div>
+        <div class="detail-item"><div class="k">KYC កម្ចី</div><div class="v">${kycPill(kyc && kyc.status)}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="field"><span>ឈ្មោះ</span><input id="c_name" value="${esc(u.name || '')}"></label>
+        <label class="field"><span>លេខទូរស័ព្ទ</span><input id="c_phone" value="${esc(u.phone || '')}"></label>
+        <label class="field"><span>អាយុ</span><input id="c_age" type="number" min="18" max="100" value="${u.age || ''}"></label>
+        <label class="field"><span>ភេទ</span>
+          <select id="c_gender">
+            <option value="">— មិនបានកំណត់ —</option>
+            <option value="male" ${u.gender === 'male' ? 'selected' : ''}>ប្រុស</option>
+            <option value="female" ${u.gender === 'female' ? 'selected' : ''}>ស្រី</option>
+            <option value="other" ${u.gender === 'other' ? 'selected' : ''}>ផ្សេងៗ</option>
+          </select></label>
+      </div>
+      <label class="field"><span>អាសយដ្ឋាន (ខេត្ត / ស្រុក / ឃុំ)</span>
+        <input id="c_address" value="${esc(u.address || '')}" placeholder="ឧ. ភ្នំពេញ, ចំការមន, ទន្លេបាសាក់"></label>
+      <label class="field"><span>PIN ថ្មី (ទុកទទេដើម្បីមិនប្ដូរ)</span>
+        <input id="c_pin" maxlength="64" placeholder="យ៉ាងតិច ៤ តួ"></label>
+      <label class="field" style="flex-direction:row;align-items:center;gap:10px">
+        <input type="checkbox" id="c_onboarded" ${Number(u.onboarded) === 1 ? 'checked' : ''} style="width:18px;height:18px">
+        <span>សម្គាល់ថាបានបំពេញព័ត៌មានរួច</span></label>
+      ${editMode ? '' : '<div class="muted" style="font-size:12px">កែសម្រួលបានដោយផ្ទាល់ — រក្សាទុកដើម្បីភ្ជាប់ទៅ Backend។</div>'}`,
+    onSave: async () => {
+      const name = $('#c_name').value.trim();
+      if (name.length < 2) throw new Error('ឈ្មោះត្រូវមានយ៉ាងតិច ២ តួ');
+      const ageRaw = $('#c_age').value.trim();
+      const pin = $('#c_pin').value.trim();
+      if (pin && !/^\S{4,64}$/.test(pin)) throw new Error('PIN ត្រូវមានយ៉ាងតិច ៤ តួ (គ្មានចន្លោះ)');
+      await api(`/users/${id}`, {
+        method: 'PATCH',
+        body: {
+          name,
+          phone: $('#c_phone').value.trim(),
+          age: ageRaw === '' ? null : Number(ageRaw),
+          gender: $('#c_gender').value,
+          address: $('#c_address').value.trim(),
+          onboarded: $('#c_onboarded').checked,
+        },
+      });
+      if (pin) await api(`/users/${id}/pin`, { method: 'POST', body: { pin } });
+      toast('បានភ្ជាប់ព័ត៌មានទៅ Backend', 'ok');
+      loadCrmArea();
+    },
+  });
+}
+
 async function renderKyc() {
   const d = await api('/kyc');
   const rows = d.rows || [];
   $('#content').innerHTML = `
+    <div class="grid k4" id="crm-kpis"></div>
     <div class="card">
-      <div class="card-head"><h3>KYC / CRM (${rows.length})</h3>
-        <span class="muted">ព័ត៌មានអត្តសញ្ញាណសម្រាប់កម្ចីវីក្រុយ</span></div>
+      <div class="card-head"><h3>👥 គ្រប់គ្រងអតិថិជន (CRM)</h3>
+        <span class="muted">ព័ត៌មានគណនីដែលអ្នកប្រើបំពេញតាម App</span></div>
+      <div class="toolbar" style="margin-bottom:14px">
+        <div class="tabs" style="margin:0">
+          ${[['all', 'ទាំងអស់'], ['complete', 'បំពេញរួច'], ['pending', 'រង់ចាំ'],
+      ['kyc_verified', 'KYC ផ្ទៀងផ្ទាត់'], ['kyc_submitted', 'KYC រង់ចាំ']]
+      .map(([k, l]) => `<button class="tab ${crmStage === k ? 'active' : ''}" data-crmstage="${k}">${esc(l)}</button>`).join('')}
+        </div>
+        <div class="spacer"></div>
+        <input id="crm_q" type="search" value="${esc(crmQuery)}"
+          placeholder="ស្វែងរក ឈ្មោះ / អ៊ីមែល / ទូរស័ព្ទ / អាសយដ្ឋាន"
+          style="max-width:330px;padding:9px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg)">
+      </div>
+      <div id="crm-body"><div class="empty">កំពុងផ្ទុក…</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>ឯកសារ KYC កម្ចី (${rows.length})</h3>
+        <span class="muted">ព័ត៌មានអត្តសញ្ញាណសម្រាប់វីក្រុយកម្ចី</span></div>
       ${tableHtml([
     { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.national_id || '') },
     { label: 'អត្តសញ្ញាណ', render: (r) => `<span class="muted">${esc(r.national_id || '—')}</span>` },
@@ -2394,6 +2554,18 @@ async function renderKyc() {
     },
   ], rows, { empty: 'មិនទាន់មានទិន្ននថ្យី KYC', wrapClass: 'sticky-actions' })}
     </div>`;
+  $$('[data-crmstage]').forEach((b) => b.onclick = () => {
+    crmStage = b.dataset.crmstage;
+    $$('[data-crmstage]').forEach((x) => x.classList.toggle('active', x === b));
+    loadCrmArea();
+  });
+  let crmTimer = null;
+  $('#crm_q').oninput = (e) => {
+    const v = e.target.value;
+    clearTimeout(crmTimer);
+    crmTimer = setTimeout(() => { crmQuery = v.trim(); loadCrmArea(); }, 320);
+  };
+
   $$('[data-kyc-view]').forEach((b) => b.onclick = () => {
     const r = rows.find((x) => String(x.user_id) === b.dataset.kycView);
     openModal({
@@ -2422,6 +2594,8 @@ async function renderKyc() {
       .then(() => { toast('បានបដិសេធ KYC', 'ok'); render(); })
       .catch((e) => toast(e.message, 'err'));
   });
+
+  loadCrmArea();
 }
 
 /* ============================================================

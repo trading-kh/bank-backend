@@ -578,5 +578,49 @@ module.exports = function createLoanAdminRouter(ctx) {
     ok(res, await db.prepare('SELECT * FROM loan_kyc WHERE user_id = ?').get(userId));
   }));
 
+  // ---------- CRM អតិថិជន (ព័ត៌មានគណនី + KYC) ----------
+  router.get('/customers', adminAuth, handle(async (req, res) => {
+    const q = String(req.query.q || '').trim();
+    const l = like(q);
+    const stage = String(req.query.stage || 'all');
+    const limit = Math.min(Math.max(int(req.query.limit, 50), 1), 500);
+
+    const where = ["u.is_admin = 0"];
+    const params = [];
+    if (q) {
+      where.push('(lower(u.name) LIKE ? OR lower(u.email) LIKE ? OR u.phone LIKE ? OR lower(COALESCE(u.address, \'\')) LIKE ?)');
+      params.push(l, l, l, l);
+    }
+    if (stage === 'pending') where.push('COALESCE(u.onboarded, 1) = 0');
+    else if (stage === 'complete') where.push('COALESCE(u.onboarded, 1) = 1');
+    else if (stage === 'kyc_verified') where.push("k.status = 'verified'");
+    else if (stage === 'kyc_submitted') where.push("k.status = 'submitted'");
+
+    const rows = await db.prepare(`
+      SELECT u.id, u.name, u.email, u.phone, u.age, u.gender, u.address,
+             COALESCE(u.onboarded, 1) AS onboarded, u.auth_provider, u.avatar_thumb,
+             u.is_locked, u.created_at, u.last_seen_at,
+             k.status AS kyc_status, k.updated_at AS kyc_updated_at,
+             (SELECT COALESCE(SUM(c.balance), 0) FROM cards c WHERE c.user_id = u.id) AS balance,
+             (SELECT COUNT(*) FROM transactions t WHERE t.user_id = u.id) AS tx_count
+      FROM users u
+      LEFT JOIN loan_kyc k ON k.user_id = u.id
+      WHERE ${where.join(' AND ')}
+      ORDER BY COALESCE(u.onboarded, 1) ASC, u.created_at DESC
+      LIMIT ?`).all(...params, limit);
+
+    const stats = await db.prepare(`
+      SELECT COUNT(*) AS total,
+             COUNT(*) FILTER (WHERE COALESCE(u.onboarded, 1) = 1) AS complete,
+             COUNT(*) FILTER (WHERE COALESCE(u.onboarded, 1) = 0) AS pending,
+             COUNT(*) FILTER (WHERE u.phone <> '' AND u.phone IS NOT NULL) AS with_phone,
+             COUNT(*) FILTER (WHERE k.status = 'verified') AS kyc_verified,
+             COUNT(*) FILTER (WHERE k.status = 'submitted') AS kyc_submitted
+      FROM users u LEFT JOIN loan_kyc k ON k.user_id = u.id
+      WHERE u.is_admin = 0`).get();
+
+    ok(res, { rows, stats, limit });
+  }));
+
   return router;
 };
