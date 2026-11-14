@@ -7,7 +7,7 @@ const express = require('express');
 const crypto = require('crypto');
 const {
   money, INTEREST_METHODS, MAX_LOAN, OPEN_STATUSES, buildSchedule, computeScore,
-  cbcCheck, syncArrears, applyLoanPayment,
+  scoreBand, cbcCheck, syncArrears, applyLoanPayment,
 } = require('./loan-engine');
 
 const MAX_MONTHS = 60;
@@ -146,20 +146,31 @@ module.exports = function createLoanAppRouter(ctx) {
     const channel = 'online';   // តែតែចូលបន្ថែមដោយ Credit Officer (admin) ទេដែលកំណត់ channel='co'
     const quote = buildSchedule({ principal, months, annualRate, method });
 
+    // ការវាយតម្លៃបឋម — គណនាភ្លាមពេលដាក់ស្នើ ដើម្បីឲ្យអ្នកប្រើឃើញពិន្ទុរបស់ខ្លួន
+    const userStats = await db.prepare(`
+      SELECT (SELECT COUNT(*) FROM loans WHERE user_id = ? AND status <> 'rejected') AS loan_count,
+             (SELECT COUNT(*) FROM loans WHERE user_id = ? AND status = 'closed') AS closed_count
+      FROM users WHERE id = ?`).get(req.userId, req.userId, req.userId);
+    const preliminary = computeScore({
+      principal, months, annualRate, method, kyc, user: userStats,
+    });
+
     const loanId = await db.transaction(async () => {
       const info = await db.prepare(`INSERT INTO loans
         (user_id, principal, months, annual_rate, province, district, commune, village, birth_place,
          status, channel, co_name, co_phone, interest_method, fee_percent, fee_amount,
          monthly_payment, total_interest, total_payable, outstanding,
-         purpose, monthly_income, monthly_expense, bank_name, bank_account, account_verified)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         purpose, monthly_income, monthly_expense, bank_name, bank_account, account_verified,
+         score, score_band, score_detail)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id`)
         .run(req.userId, principal, months, annualRate, ...addr, str(kyc.birth_place, 200),
           'submitted', channel, null, null,
           method, feePercent, 0,
           quote.monthly_payment, quote.total_interest, quote.total_payable, principal,
           str(b.purpose, 200), money(kyc.monthly_income), money(kyc.monthly_expense),
-          kyc.bank_name, kyc.bank_account, 0);
+          kyc.bank_name, kyc.bank_account, 0,
+          preliminary.score, preliminary.band, JSON.stringify(preliminary.parts));
       return info.lastInsertRowid;
     });
 
@@ -177,11 +188,31 @@ module.exports = function createLoanAppRouter(ctx) {
   router.post('/loan', auth, applyHandler);
 
   // ---------- បញ្ជីកម្ចី ----------
+  // បន្ថែមព័ត៌មានវាយតម្លៃឥណទានសម្រាប់អ្នកប្រើ (ពិន្ទុ + ចំណុចលម្អិត + ក្រុម)
+  const shapeLoan = (l) => {
+    if (!l) return null;
+    let parts = [];
+    try {
+      const raw = typeof l.score_detail === 'string'
+        ? JSON.parse(l.score_detail) : l.score_detail;
+      if (Array.isArray(raw)) parts = raw;
+    } catch (_) { /* score_detail ចាស់មិនត្រឹមត្រូវ — ទុកទទេ */ }
+    const band = l.score == null ? null : scoreBand(l.score);
+    return {
+      ...l,
+      score_detail: parts,
+      score_band_label: band ? band.label : null,
+      score_max: 100,
+      recommendation: l.score == null ? null
+        : (l.score >= 65 ? 'approve' : l.score >= 50 ? 'review' : 'reject'),
+    };
+  };
+
   router.get('/loans', auth, handle(async (req, res) => {
     const rows = await db.prepare(
       `SELECT * FROM loans WHERE user_id = ? ORDER BY id DESC LIMIT 50`
     ).all(req.userId);
-    ok(res, { rows });
+    ok(res, { rows: rows.map(shapeLoan) });
   }));
 
   router.get('/loan', auth, handle(async (req, res) => {
@@ -189,7 +220,7 @@ module.exports = function createLoanAppRouter(ctx) {
       `SELECT * FROM loans WHERE user_id = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
        ORDER BY id DESC LIMIT 1`
     ).get(req.userId, ...OPEN_STATUSES);
-    ok(res, loan || null);
+    ok(res, shapeLoan(loan));
   }));
 
   router.get('/loan/schedule', auth, handle(async (req, res) => {
