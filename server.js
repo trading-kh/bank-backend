@@ -1163,6 +1163,46 @@ app.get('/me', auth, async (req, res) => {
   ok(res, u);
 });
 
+// កែព័ត៌មានគណនីដោយខ្លួនឯង (ឈ្មោះ/អាយុ/ភេទ/ទូរស័ព្ទ/ទីតាំង · PIN ជាជម្រើស)
+app.patch('/me/profile', auth, handle(async (req, res) => {
+  const body = req.body || {};
+  const name = String(body.name || '').trim();
+  const age = Number(body.age);
+  const gender = String(body.gender || '').trim().toLowerCase();
+  const phone = String(body.phone || '').trim();
+  const address = String(body.address || '').trim();
+  const pin = typeof body.pin === 'string' ? body.pin : '';
+
+  if (name.length < 2 || name.length > 80)
+    throw new ApiError('សូមបញ្ចូលឈ្មោះឱ្យបានត្រឹមត្រូវ', 400, 'BAD_NAME');
+  if (!Number.isInteger(age) || age < 18 || age > 100)
+    throw new ApiError('អាយុត្រូវនៅចន្លោះ ១៨ ដល់ ១០០', 400, 'BAD_AGE');
+  if (!['male', 'female', 'other'].includes(gender))
+    throw new ApiError('សូមជ្រើសរើសភេទ', 400, 'BAD_GENDER');
+  if (!/^\+?\d[\d\s-]{7,16}$/.test(phone))
+    throw new ApiError('លេខទូរស័ព្ទមិនត្រឹមត្រូវ', 400, 'BAD_PHONE');
+  if (address.length < 2 || address.length > 300)
+    throw new ApiError('សូមជ្រើសរើសទីតាំង', 400, 'BAD_ADDRESS');
+  if (pin && !ONBOARD_PIN_RE.test(pin))
+    throw new ApiError('PIN ត្រូវមានយ៉ាងតិច ៤ តួ និងគ្មានចន្លោះ', 400, 'BAD_PIN');
+
+  if (pin) {
+    const hash = await bcrypt.hash(pin, SALT);
+    await db.prepare(`UPDATE users SET name = ?, phone = ?, age = ?, gender = ?,
+        address = ?, pin_hash = ?, pin_attempts = 0, locked_until = NULL,
+        onboarded = 1, data_version = data_version + 1
+      WHERE id = ?`).run(name, phone, age, gender, address, hash, req.userId);
+  } else {
+    await db.prepare(`UPDATE users SET name = ?, phone = ?, age = ?, gender = ?,
+        address = ?, onboarded = 1, data_version = data_version + 1
+      WHERE id = ?`).run(name, phone, age, gender, address, req.userId);
+  }
+
+  const u = await db.prepare(`SELECT id, name, email, phone, avatar, age, gender,
+      address, onboarded FROM users WHERE id = ?`).get(req.userId);
+  ok(res, u);
+}));
+
 // ---------- AVATAR ----------
 const AVATAR_RE = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/;
 const AVATAR_MAX_BYTES = 200 * 1024;
