@@ -2012,8 +2012,10 @@ app.post('/qr/external/start', auth, handle(async (req, res) => {
   ).run(req.userId, 'Aura Bank · OTP', body, rail.code)).lastInsertRowid;
 
   const user = await db.prepare('SELECT phone FROM users WHERE id = ?').get(req.userId);
+  // notification_id ត្រូវផ្ញើទៅជាមួយ — App ប្រើ id តែមួយនេះសម្រាប់ local notification
+  // (បើខ្វះ នោះ FCM និង polling បង្ហាញ OTP ២ ដងដាច់ពីគ្នា)
   sendPushNotification(req.userId, 'Aura Bank · OTP', body,
-    { type: 'otp', id: notifId, bank_code: rail.code });
+    { type: 'otp', id: notifId, notification_id: notifId, bank_code: rail.code });
 
   ok(res, {
     request_id: info.lastInsertRowid,
