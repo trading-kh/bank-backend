@@ -208,11 +208,39 @@ module.exports = function createLoanAppRouter(ctx) {
     };
   };
 
+  // កម្ចីចាស់ដែលមិនទាន់មានពិន្ទុ → គណនាបឋមពេលអាន (idempotent)
+  const ensureScore = async (loan) => {
+    if (!loan || loan.score != null) return loan;
+    const kyc = await db.prepare('SELECT * FROM loan_kyc WHERE user_id = ?')
+      .get(loan.user_id);
+    const userStats = await db.prepare(`
+      SELECT (SELECT COUNT(*) FROM loans WHERE user_id = ? AND id <> ?
+                AND status <> 'rejected') AS loan_count,
+             (SELECT COUNT(*) FROM loans WHERE user_id = ? AND id <> ?
+                AND status = 'closed') AS closed_count
+      FROM users WHERE id = ?`)
+      .get(loan.user_id, loan.id, loan.user_id, loan.id, loan.user_id);
+    const result = computeScore({
+      principal: loan.principal, months: loan.months, annualRate: loan.annual_rate,
+      method: loan.interest_method, kyc, user: userStats,
+    });
+    await db.prepare(`UPDATE loans SET score = ?, score_band = ?, score_detail = ?
+      WHERE id = ?`)
+      .run(result.score, result.band, JSON.stringify(result.parts), loan.id);
+    return {
+      ...loan,
+      score: result.score,
+      score_band: result.band,
+      score_detail: JSON.stringify(result.parts),
+    };
+  };
+
   router.get('/loans', auth, handle(async (req, res) => {
     const rows = await db.prepare(
       `SELECT * FROM loans WHERE user_id = ? ORDER BY id DESC LIMIT 50`
     ).all(req.userId);
-    ok(res, { rows: rows.map(shapeLoan) });
+    const shaped = await Promise.all(rows.map(async (l) => shapeLoan(await ensureScore(l))));
+    ok(res, { rows: shaped });
   }));
 
   router.get('/loan', auth, handle(async (req, res) => {
@@ -220,7 +248,7 @@ module.exports = function createLoanAppRouter(ctx) {
       `SELECT * FROM loans WHERE user_id = ? AND status IN (${OPEN_STATUSES.map(() => '?').join(',')})
        ORDER BY id DESC LIMIT 1`
     ).get(req.userId, ...OPEN_STATUSES);
-    ok(res, shapeLoan(loan));
+    ok(res, shapeLoan(await ensureScore(loan)));
   }));
 
   router.get('/loan/schedule', auth, handle(async (req, res) => {
