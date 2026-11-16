@@ -92,6 +92,9 @@ const IS_PROD = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
 // URL សាធារណៈ — FCM ទាញយក logo ធនាគារពីទីនេះ (ត្រូវជា HTTPS សាធារណៈ)
 const PUBLIC_BASE_URL = String(process.env.PUBLIC_BASE_URL ||
   'https://bank-backend-f6ay.onrender.com').replace(/\/+$/, '');
+// គេហទំព័រ app — ប្រើសម្រាប់ QR "អញ្ជើញទាញយក" ពេលអ្នកប្រើមិនទាន់មានគណនី KHQR
+const WEB_APP_URL = String(process.env.WEB_APP_URL ||
+  'https://loan-banking-kh-2026-497f5.web.app').replace(/\/+$/, '');
 const PUSH_BANK_LOGOS = new Set([
   'ABA', 'ACLEDA', 'CANADIA', 'WING', 'JUNTUOR', 'CHIPMONG', 'SATHAPANA',
   'VATTANAC', 'CPB', 'PPCBANK', 'HATTHA', 'TRUEMONEY', 'LYF', 'MAYBANK', 'BAKONG',
@@ -179,6 +182,17 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarded INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE users DROP COLUMN IF EXISTS bank_name;
     ALTER TABLE users DROP COLUMN IF EXISTS bank_account;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS khqr_account TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS khqr_name TEXT;
+
+    CREATE TABLE IF NOT EXISTS qr_codes (
+      code TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      amount NUMERIC,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_qr_codes_user ON qr_codes(user_id);
     UPDATE users SET role = 'management' WHERE is_admin = 1 AND (role IS NULL OR role = 'operations');
 
     CREATE TABLE IF NOT EXISTS cards (
@@ -1535,19 +1549,166 @@ app.get('/recipients', auth, handle(async (req, res) => {
 }));
 
 // 2) QR: អ្នកទទួលបង្កើត token អាយុ ៥នាទី
+const QR_TTL_SECONDS = 300;
+
+// ---------- KHQR (EMVCo) — QR ពិតដែលធនាគារដទៃស្កេនបង់ប្រាក់បាន ----------
+function emvField(tag, value) {
+  const v = String(value);
+  return tag + String(v.length).padStart(2, '0') + v;
+}
+
+function emvCrc16(str) {
+  let crc = 0xffff;
+  for (let i = 0; i < str.length; i++) {
+    crc ^= str.charCodeAt(i) << 8;
+    for (let b = 0; b < 8; b++) {
+      crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+    }
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+// ASCII តែប៉ុណ្ណោះសម្រាប់ tag 59 (ឈ្មោះ) — Khmer multibyte ធ្វើអោយ TLV ខូចលើ app ខ្លះ
+function asciiName(raw, fallback = 'AURA USER') {
+  const s = String(raw || '').trim();
+  const ascii = s.replace(/[^\x20-\x7E]/g, '').replace(/\s+/g, ' ').trim();
+  return (ascii || fallback).slice(0, 25);
+}
+
+/**
+ * បង្កើត KHQR string ស្តង់ដារ (accountId = Bakong ID ឧ. `012345678@abaa`)
+ * ref = លេខកូដ Aura ខ្លី (ដាក់ក្នុង tag 62/05 — ធនាគារដទៃមិនអាន តែ app យើងអានបាន)
+ */
+function buildKhqr({ accountId, accountInfo, bankName, name, amount, currency = 'USD', ref, expireAt }) {
+  const amountNum = amount == null ? null : Number(amount);
+  let payload = emvField('00', '01') + emvField('01', amountNum ? '12' : '11');
+  let merchant = emvField('00', String(accountId).slice(0, 32));
+  if (accountInfo) merchant += emvField('01', String(accountInfo).slice(0, 32));
+  if (bankName) merchant += emvField('02', asciiName(bankName, bankName).slice(0, 32));
+  payload += emvField('29', merchant);
+  payload += emvField('52', '5999');
+  payload += emvField('53', currency === 'KHR' ? '116' : '840');
+  if (amountNum) {
+    payload += emvField('54', currency === 'KHR'
+      ? String(Math.round(amountNum))
+      : amountNum.toFixed(2));
+  }
+  payload += emvField('58', 'KH');
+  payload += emvField('59', asciiName(name));
+  payload += emvField('60', 'Phnom Penh');
+  if (ref) payload += emvField('62', emvField('05', ref.slice(0, 25)));
+  if (expireAt) {
+    payload += emvField('99', emvField('00', String(Date.now()))
+      + emvField('01', String(expireAt)));
+  }
+  const withCrc = payload + '6304';
+  return withCrc + emvCrc16(withCrc);
+}
+
+const QR_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newQrCode() {
+  let out = '';
+  for (let i = 0; i < 8; i++) {
+    out += QR_CODE_ALPHABET[crypto.randomInt(QR_CODE_ALPHABET.length)];
+  }
+  return out;
+}
+
 app.post('/qr/create', auth, handle(async (req, res) => {
   let amt = null;
   if (req.body.amount !== undefined && req.body.amount !== null) {
     amt = toMoney(req.body.amount);
     if (!(amt > 0) || amt > MAX_TX) throw new ApiError('Invalid amount', 400, 'BAD_AMOUNT');
   }
+  const user = await db.prepare(
+    'SELECT id, name, khqr_account, khqr_name FROM users WHERE id = ?'
+  ).get(req.userId);
+  if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
+
+  const code = newQrCode();
+  const expiresAt = new Date(Date.now() + QR_TTL_SECONDS * 1000);
+  await db.prepare(
+    'INSERT INTO qr_codes (code, user_id, amount, expires_at) VALUES (?, ?, ?, ?)'
+  ).run(code, req.userId, amt, expiresAt);
+
   const qr_token = jwt.sign({ typ: 'qr', uid: req.userId, amt }, QR_SECRET, { expiresIn: '5m' });
-  ok(res, { qr_token, expires_in: 300 });
+  const invite_url = `${WEB_APP_URL}/join.html?c=${code}`;
+
+  // មានគណនី KHQR ភ្ជាប់ → QR ពិត (ធនាគារដទៃស្កេនបង់បាន) · មិនមាន → QR អញ្ជើញទាញយក
+  const account = String(user.khqr_account || '').trim();
+  if (account && account.includes('@')) {
+    const suffix = (account.split('@')[1] || '').toLowerCase();
+    const khqr = buildKhqr({
+      accountId: account,
+      bankName: QR_BANK_SUFFIX[suffix] || suffix.toUpperCase(),
+      name: user.khqr_name || user.name,
+      amount: amt,
+      currency: 'USD',
+      ref: `AURA${code}`,
+      expireAt: expiresAt.getTime(),
+    });
+    return ok(res, {
+      mode: 'khqr',
+      code,
+      qr_token,
+      khqr,
+      amount: amt,
+      name: user.name,
+      expires_in: QR_TTL_SECONDS,
+    });
+  }
+
+  ok(res, {
+    mode: 'invite',
+    code,
+    qr_token,
+    invite_url,
+    amount: amt,
+    name: user.name,
+    expires_in: QR_TTL_SECONDS,
+  });
+}));
+
+// 2b) ព័ត៌មានសាធារណៈសម្រាប់ landing page (គ្មាន auth) — ឈ្មោះ + ចំនួនប៉ុណ្ណោះ
+app.get('/qr/public/:code', handle(async (req, res) => {
+  const row = await db.prepare(
+    `SELECT q.code, q.amount, q.expires_at, u.name FROM qr_codes q
+     JOIN users u ON u.id = q.user_id
+     WHERE q.code = ? AND q.expires_at > now()`
+  ).get(String(req.params.code || '').trim().toUpperCase());
+  if (!row) throw new ApiError('QR នេះផុតកំណត់ ឬមិនមាន', 404, 'QR_EXPIRED');
+  ok(res, {
+    code: row.code,
+    name: row.name,
+    amount: row.amount == null ? null : Number(row.amount),
+    expires_at: row.expires_at,
+  });
 }));
 
 // 3) អ្នកផ្ញើស្កេន QR → Server បកស្រាយអ្នកទទួលពិតប្រាកដ
 app.post('/qr/resolve', auth, handle(async (req, res) => {
   rateLimit(`qr:${req.userId}`, 30, 60 * 1000);
+  const rawCode = String(req.body.code || '').trim().toUpperCase();
+  if (rawCode) {
+    const row = await db.prepare(
+      `SELECT q.user_id AS uid, q.amount FROM qr_codes q
+       WHERE q.code = ? AND q.expires_at > now()`
+    ).get(rawCode);
+    if (!row) throw new ApiError('QR ផុតកំណត់ ឬមិនត្រឹមត្រូវ', 400, 'BAD_QR');
+    if (row.uid === req.userId) throw new ApiError('មិនអាចផ្ទេរទៅខ្លួនឯង', 400, 'SELF_TRANSFER');
+    const user = await db.prepare(
+      "SELECT id, name, email, phone, avatar_thumb FROM users WHERE id = ? AND COALESCE(auth_provider, '') <> 'admin'"
+    ).get(row.uid);
+    if (!user) throw new ApiError('QR មិនត្រឹមត្រូវ', 400, 'BAD_QR');
+    return ok(res, {
+      recipient_id: String(user.id),
+      name: user.name,
+      masked_account: maskContact(user),
+      avatar_thumb: user.avatar_thumb || null,
+      amount: row.amount == null ? null : Number(row.amount),
+    });
+  }
+
   let p;
   try {
     p = jwt.verify(String(req.body.qr_token || ''), QR_SECRET);

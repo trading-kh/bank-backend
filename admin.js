@@ -304,7 +304,7 @@ module.exports = function createAdminRouter(ctx) {
     const id = int(req.params.id);
     const user = await db.prepare(`
       SELECT id, name, email, phone, age, gender, address, COALESCE(onboarded, 1) AS onboarded,
-             auth_provider, is_admin, is_locked, role, pin_attempts,
+             auth_provider, is_admin, is_locked, role, pin_attempts, khqr_account, khqr_name,
              locked_until, created_at, avatar_thumb, last_seen_at
       FROM users WHERE id = ?`).get(id);
     if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
@@ -394,6 +394,17 @@ module.exports = function createAdminRouter(ctx) {
       }
       push('role', role);
     }
+    if (req.body.khqr_account !== undefined) {
+      const acc = String(req.body.khqr_account || '').trim().toLowerCase().slice(0, 64);
+      if (acc && !/^[a-z0-9._-]{2,32}@[a-z0-9]{2,16}$/.test(acc)) {
+        throw new ApiError('គណនី KHQR ត្រូវជាទម្រង់ name@bank (ឧ. 012345678@abaa)',
+          400, 'BAD_KHQR_ACCOUNT');
+      }
+      push('khqr_account', acc || null);
+    }
+    if (req.body.khqr_name !== undefined) {
+      push('khqr_name', String(req.body.khqr_name || '').trim().slice(0, 25) || null);
+    }
     if (req.body.unlock === true) {
       push('pin_attempts', 0);
       push('locked_until', null);
@@ -406,7 +417,8 @@ module.exports = function createAdminRouter(ctx) {
     await audit(req, 'update_user', 'users', id,
       fields.map((f) => f.split(' = ')[0]).join(','));
     ok(res, await db.prepare(`SELECT id, name, email, phone, age, gender, address,
-      COALESCE(onboarded, 1) AS onboarded, is_admin, created_at FROM users WHERE id = ?`).get(id));
+      COALESCE(onboarded, 1) AS onboarded, is_admin, khqr_account, khqr_name, created_at
+      FROM users WHERE id = ?`).get(id));
   }));
 
   router.post('/users/:id/pin', adminAuth, handle(async (req, res) => {
