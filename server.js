@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const { Readable } = require('stream');
 const db = require('./db');
 const createLoanAppRouter = require('./loan-routes');
 const { initLoanSchema, syncArrears, runAutoDebit } = require('./loan-engine');
@@ -77,6 +78,28 @@ app.use((req, res, next) => {
 // ---------- HEALTH ----------
 app.get('/health', (_req, res) => {
   res.json({ ok: true, commit: String(process.env.RENDER_GIT_COMMIT || '').slice(0, 7) });
+});
+
+// ---------- APK DOWNLOAD ----------
+// Firebase Spark hosting ហាមឯកសារ .apk — ដូច្នេះយើងបម្រើវាតាម domain របស់យើង
+// ជាមួយ MIME ត្រឹមត្រូវ ដើម្បីឲ្យទូរស័ព្ទស្គាល់ថាជា package ដំឡើងបាន
+const APK_URL = process.env.APK_URL ||
+  'https://raw.githubusercontent.com/trading-kh/loan-banking-app/dist/aura.apk';
+app.get('/download/aura.apk', async (_req, res) => {
+  try {
+    const upstream = await fetch(APK_URL, { redirect: 'follow' });
+    if (!upstream.ok || !upstream.body) throw new Error(`upstream ${upstream.status}`);
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    res.setHeader('Content-Disposition', 'attachment; filename="aura.apk"');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    const len = upstream.headers.get('content-length');
+    if (len) res.setHeader('Content-Length', len);
+    Readable.fromWeb(upstream.body)
+      .on('error', () => res.destroy())
+      .pipe(res);
+  } catch (e) {
+    res.status(502).json({ ok: false, code: 'APK_DOWNLOAD_FAILED', error: e.message });
+  }
 });
 
 // ---------- BANK LOGOS (សាធារណៈ — FCM large icon) ----------
