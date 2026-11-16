@@ -1514,6 +1514,12 @@ async function editUser(id) {
         • <strong>Administration:</strong> គ្រប់គ្រងទាំងអស់ <em>លើកលែង</em> 📱 Device Management<br>
         • <strong>Operations:</strong> ដូច Administration
       </div>
+      <label class="field"><span>🏦 គណនី KHQR (ទទួលប្រាក់ពីធនាគារផ្សេង — ឧ. 012345678@abaa)</span><input id="f_khqr" value="${esc(u.khqr_account || '')}" placeholder="012345678@abaa"></label>
+      <label class="field"><span>ឈ្មោះលើ KHQR (ឡាតាំង ≤ 25 តួ)</span><input id="f_khqr_name" maxlength="25" value="${esc(u.khqr_name || '')}" placeholder="SOK DARA"></label>
+      <div style="padding:10px 12px;margin-bottom:12px;background:rgba(52,199,142,.08);border:1px solid rgba(52,199,142,.22);border-radius:12px;font-size:11.5px;color:#9fd6c2;line-height:1.8">
+        មានគណនី KHQR → QR របស់អ្នកប្រើក្លាយជា <strong>KHQR ពិត</strong> ធនាគារណាមួយស្កេនបង់បាន។
+        ទុកទទេ → QR ជាទំព័រអញ្ជើញទាញយកកម្មវិធី (តាម OS)។
+      </div>
       <label class="field" style="flex-direction:row;align-items:center;gap:10px">
         <input type="checkbox" id="f_locked" ${u.is_locked ? 'checked' : ''} style="width:18px;height:18px">
         <span>🔒 ផ្អាកគណនី (មិនអាចចូលប្រើប្រើវិញ)</span></label>
@@ -1530,6 +1536,8 @@ async function editUser(id) {
         is_admin: $('#f_admin').checked,
         is_locked: $('#f_locked').checked,
         role: $('#f_role').value,
+        khqr_account: $('#f_khqr').value.trim(),
+        khqr_name: $('#f_khqr_name').value.trim(),
       };
       await api(`/users/${id}`, { method: 'PATCH', body });
       const pin = $('#f_pin').value.trim();
