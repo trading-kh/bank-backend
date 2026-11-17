@@ -299,9 +299,9 @@ module.exports = function createLoanAppRouter(ctx) {
     const card = Number.isInteger(cardId)
       ? await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(cardId, req.userId)
       : await db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(req.userId);
-    if (!card) throw new ApiError('រកមិនឃើញកាតសម្រាប់បង់ប្រាក់', 400, 'NO_CARD');
+    if (!card) throw new ApiError('រកមិនឃើញគណនីសម្រាប់បង់ប្រាក់', 400, 'NO_CARD');
     if (Number(card.balance) < amount)
-      throw new ApiError('សម្រាកលុយក្នុងកាតមិនគ្រប់គ្រាន់', 400, 'INSUFFICIENT_FUNDS');
+      throw new ApiError('សមតុល្យក្នុងគណនីមិនគ្រប់គ្រាន់', 400, 'INSUFFICIENT_FUNDS');
 
     const ref = crypto.randomUUID();
     let result;

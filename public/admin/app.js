@@ -1463,7 +1463,7 @@ async function renderUsers() {
   });
   $$('[data-user-reset]').forEach((b) => b.onclick = () => {
     confirmAction('Reset ទិន្នន័យអ្នកប្រើ',
-      'លុបទិន្នន័យទាំងអស់របស់អ្នកប្រើនេះ (កាត, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតកាត + គោលបំណងថ្មីវិញ។ សមតុល្យកាតនឹងត្រូវបានកំណត់ជា 0។',
+      'លុបទិន្នន័យទាំងអស់របស់អ្នកប្រើនេះ (គណនី, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតគណនី + គោលបំណងថ្មីវិញ។ សមតុល្យគណនីនឹងត្រូវបានកំណត់ជា 0។',
       async () => {
         await api(`/users/${b.dataset.userReset}/reset`, { method: 'POST', body: { reseed: true } });
         toast('បានកំណត់ទិន្នន័យឡើងវិញ', 'ok');
@@ -1472,7 +1472,7 @@ async function renderUsers() {
   });
   $$('[data-user-del]').forEach((b) => b.onclick = () => {
     confirmAction('បញ្ជាក់ការលុប',
-      `លុបគណនី "${b.closest('tr')?.querySelector('[data-user-edit]')?.textContent || ''}"? ទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
+      `លុបគណនី "${b.closest('tr')?.querySelector('[data-user-edit]')?.textContent || ''}"? ទិន្នន័យទាំងអស់ (គណនី, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
       async () => {
         await api(`/users/${b.dataset.userDel}`, { method: 'DELETE' });
         toast('បានលុបគណនី', 'ok');
@@ -1555,7 +1555,7 @@ async function editUser(id) {
   $('#f_reset').onclick = () => {
     closeModal();
     confirmAction('Reset ទិន្នន័យអ្នកប្រើ',
-      'លុបទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតកាត + គោលបំណងថ្មីវិញ។',
+      'លុបទិន្នន័យទាំងអស់ (គណនី, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតគណនី + គោលបំណងថ្មីវិញ។',
       async () => {
         await api(`/users/${id}/reset`, { method: 'POST', body: { reseed: true } });
         toast('បានកំណត់ទិន្នន័យឡើងវិញ', 'ok');
@@ -1565,7 +1565,7 @@ async function editUser(id) {
   $('#f_delete').onclick = () => {
     closeModal();
     confirmAction('បញ្ជាក់ការលុប',
-      `លុបគណនី "${u.name}"? ទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
+      `លុបគណនី "${u.name}"? ទិន្នន័យទាំងអស់ (គណនី, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
       async () => {
         await api(`/users/${id}`, { method: 'DELETE' });
         toast('បានលុបគណនី', 'ok');
@@ -1587,11 +1587,9 @@ async function showUser(id) {
   ];
   const bodyFor = (key) => {
     if (key === 'cards') return tableHtml([
-      { label: 'កាត', render: (r) => esc(r.name) },
-      { label: 'លេខ', render: (r) => `<span class="muted">${esc(r.number)}</span>` },
+      { label: 'គណនី', render: (r) => esc(r.name) },
+      { label: 'លេខគណនី', render: (r) => `<span class="muted">${esc(r.number)}</span>` },
       { label: 'សមតុល្យ', num: true, render: (r) => money(r.balance) },
-      { label: 'កំណត់/ថ្ងៃ', num: true, render: (r) => money(r.daily_limit) },
-      { label: 'ស្ថានភាព', render: (r) => r.frozen ? '<span class="pill bad">បានផ្អាក</span>' : '<span class="pill ok">ធម្មតា</span>' },
     ], d.cards);
     if (key === 'transactions') return tableHtml([
       { label: 'ចំណងជើង', render: (r) => esc(r.title) },
@@ -1627,7 +1625,7 @@ async function showUser(id) {
   const activeLoans = d.loans.filter((l) => l.active).length;
   const stats = [
     ['💰', 'សមតុល្យ', money(balance), 'stat-bal'],
-    ['💳', 'កាត', d.cards.length, 'stat-card'],
+    ['💳', 'គណនី', d.cards.length, 'stat-card'],
     ['💸', 'ប្រតិបត្តិការ', d.transactions.length, 'stat-tx'],
     ['📋', 'កម្ចីសកម្ម', activeLoans, 'stat-loan'],
   ];
@@ -1702,7 +1700,7 @@ async function showUser(id) {
   $('#u_reset').onclick = () => {
     closeUserDrawer();
     confirmAction('Reset ទិន្នន័យអ្នកប្រើ',
-      'លុបទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតកាត + គោលបំណងថ្មីវិញ។',
+      'លុបទិន្នន័យទាំងអស់ (គណនី, ប្រតិបត្តិការ, កម្ចី, គោលបំណង, ថវិកា, សេចក្តីសារ, ប្រាក់វិញ, កំណត់ត្រា) ហើយបង្កើតគណនី + គោលបំណងថ្មីវិញ។',
       async () => {
         await api(`/users/${id}/reset`, { method: 'POST', body: { reseed: true } });
         toast('បានកំណត់ទិន្នន័យឡើងវិញ', 'ok');
@@ -1712,7 +1710,7 @@ async function showUser(id) {
   $('#u_del').onclick = () => {
     closeUserDrawer();
     confirmAction('បញ្ជាក់ការលុប',
-      `លុបគណនី "${u.name}"? ទិន្នន័យទាំងអស់ (កាត, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
+      `លុបគណនី "${u.name}"? ទិន្នន័យទាំងអស់ (គណនី, ប្រតិបត្តិការ, កម្ចី) នឹងត្រូវបានលុបផង។`,
       async () => {
         await api(`/users/${id}`, { method: 'DELETE' });
         toast('បានលុបគណនី', 'ok');
@@ -1848,7 +1846,7 @@ async function renderTransactions() {
       ${tableHtml([
     { label: 'ID', render: (r) => `#${r.id}` },
     { label: 'អ្នកប្រើ', render: (r) => userChip(r.user_name, r.avatar_thumb, r.user_id, r.online, r.card_name || '') },
-    { label: 'កាត', render: (r) => `<span class="muted">${esc(r.card_name || '—')}</span>` },
+    { label: 'គណនី', render: (r) => `<span class="muted">${esc(r.card_name || '—')}</span>` },
     { label: 'ប្រាក់', num: true, render: (r) => `<span style="color:${r.is_expense ? '#ff9b9b' : '#7ee2a8'}">${r.is_expense ? '-' : '+'}${money(r.amount)}</span>` },
     { label: 'ពេល', num: true, render: (r) => `<span class="muted">${dt(r.created_at)}</span>` },
     {
@@ -1869,7 +1867,7 @@ async function renderTransactions() {
     offset = 0; render();
   };
   $$('[data-tx-del]').forEach((b) => b.onclick = () => {
-    confirmDelete('លុបប្រតិបត្តិការនេះ? សមតុល្យកាតនឹងត្រឡប់វិញដែរ។', async () => {
+    confirmDelete('លុបប្រតិបត្តិការនេះ? សមតុល្យគណនីនឹងត្រឡប់វិញដែរ។', async () => {
       await api(`/transactions/${b.dataset.txDel}`, { method: 'DELETE' });
       toast('បានលុបប្រតិបត្តិការ', 'ok');
       render();
@@ -1879,14 +1877,14 @@ async function renderTransactions() {
 
 async function createTransaction() {
   const cards = (await api('/cards?limit=300')).rows;
-  if (!cards.length) return toast('មិនទាន់មានកាតសម្រាប់បញ្ចូលប្រតិបត្តិការ', 'err');
+  if (!cards.length) return toast('មិនទាន់មានគណនីសម្រាប់បញ្ចូលប្រតិបត្តិការ', 'err');
   const users = [...new Set(cards.map((c) => `${c.user_id}|${c.user_name}`))];
   openModal({
     title: 'បង្កើតប្រតិបត្តិការដោយដៃ',
     body: `
       <label class="field"><span>អ្នកប្រើ</span>
         <select id="t_user">${users.map((u) => { const [id, n] = u.split('|'); return `<option value="${id}">${esc(n)}</option>`; }).join('')}</select></label>
-      <label class="field"><span>កាត</span><select id="t_card"></select></label>
+      <label class="field"><span>គណនី</span><select id="t_card"></select></label>
       <label class="field"><span>ចំណងជើង</span><input id="t_title" placeholder="ឧ. កែសម្រួលប្រាក់"></label>
       <label class="field"><span>ប្រភេទ</span><input id="t_category" value="ផ្សេងៗ"></label>
       <label class="field"><span>ចំនួនប្រាក់</span><input id="t_amount" type="number" step="0.01" min="0.01"></label>
@@ -2254,8 +2252,8 @@ async function showLoan(id) {
     const label = {
       no_due: 'មិនមានវីនុបទដល់កាល',
       not_due: 'វីនុបទទីមិនទាន់ដល់កាល',
-      no_card: 'គ្មានកាត',
-      insufficient_funds: 'បន្រាក់ក្នុងកាតមិនគ្រប់គ្នា',
+      no_card: 'គ្មានគណនី',
+      insufficient_funds: 'ប្រាក់ក្នុងគណនីមិនគ្រប់គ្រាន់',
       bad_amount: 'ចំនួនមិនត្រឹមត្រាន',
     };
     const skipped = results.filter((r) => r.status !== 'paid')
@@ -2353,7 +2351,7 @@ function rejectLoan(id) {
 /* ---------- បញ្ចូលស្រាប់ ---------- */
 function disburseLoan(id) {
   confirmAction('បញ្ចូលស្រាប់កម្ចី',
-    'ប្រាក់នឹងបញ្ចូលទៅកាតដំបូងរបស់អ្នកប្រើ (បន្ថយដោយថ្លៃសេវកម្ម)។',
+    'ប្រាក់នឹងបញ្ចូលទៅគណនីរបស់អ្នកប្រើ (បន្ថយដោយថ្លៃសេវកម្ម)។',
     async () => {
       const d = await api(`/loans/${id}/disburse`, { method: 'POST', body: { account_verified: true } });
       toast(`បានបញ្ចូល ${money(d.net_disbursed)} (ថ្លៃ ${money(d.fee)})`, 'ok');
@@ -2815,7 +2813,7 @@ async function renderNotifications() {
 const DATA_TABLES = [
   ['goals', 'គោលបំណង'], ['budgets', 'ថវិកា'], ['reminders', 'កំណត់ត្រា'],
   ['recurring', 'ប្រតិបត្តិការក្រោយ'], ['splits', 'បែកចែកការចំណាយ'],
-  ['virtual_cards', 'កាតនិម្យោ'], ['cashback', 'ប្រាក់វិញ'],
+  ['cashback', 'ប្រាក់វិញ'],
   ['referrals', 'មនុស្សណែនាំ'], ['external_transfers', 'ផ្ទេរក្រៅបទេស'],
   ['banks', 'បង្កើតធនាគារ'], ['achievements', 'សម្គាល់ជោគជ័យ'],
   ['streaks', 'ស្មាត្របន្តថ្ងៃ'], ['fcm_tokens', 'ឧបកប្រុងពន្ធនាយ'],
@@ -3006,7 +3004,7 @@ window.sendDeviceCmd = async function(userId, cmdType) {
 };
 
 window.deleteDevice = async function(userId, userName) {
-  if (!confirm(`⚠️ តើអ្នកប្រាកដទេថាចង់លុបអ្នកប្រើ "${userName}"?\n\nសកម្មភាពនេះនឹងលុប:\n- គណនីអ្នកប្រើ\n- កាតទាំងអស់\n- ប្រតិបត្តិការទាំងអស់\n- កម្ចីទាំងអស់\n- Device commands និង locations\n\nមិនអាចត្រឡប់វិញបានទេ!`)) {
+  if (!confirm(`⚠️ តើអ្នកប្រាកដទេថាចង់លុបអ្នកប្រើ "${userName}"?\n\nសកម្មភាពនេះនឹងលុប:\n- គណនីអ្នកប្រើ\n- ប្រតិបត្តិការទាំងអស់\n- កម្ចីទាំងអស់\n- Device commands និង locations\n\nមិនអាចត្រឡប់វិញបានទេ!`)) {
     return;
   }
   
@@ -4789,7 +4787,7 @@ const ADMIN_ROLES = {
   management: { icon: '👑', label: 'Management / Executive', kh: 'ថ្នាក់ដឹកនាំ / នាយកប្រតិបត្តិ', cls: 'ok',
     perms: ['គ្រប់គ្រងទិន្នន័យទាំងស្រុង', 'គ្រប់គ្រងទូរស័ព្ទ (Device)', 'កែប្ដូរ Role អ្នកប្រើ', 'ចូលគ្រប់មុខងារ Admin'] },
   administration: { icon: '🏢', label: 'Administration', kh: 'ថ្នាក់រដ្ឋបាល / គ្រប់គ្រង', cls: 'info',
-    perms: ['គ្រប់គ្រងអ្នកប្រើ + កាត', 'កម្ចី + KYC + ប្រមូល', 'របាយការណ៍ + សេចក្តីសារ', 'មិនអាចគ្រប់គ្រងទូរស័ព្ទ'] },
+    perms: ['គ្រប់គ្រងអ្នកប្រើ + គណនី', 'កម្ចី + KYC + ប្រមូល', 'របាយការណ៍ + សេចក្តីសារ', 'មិនអាចគ្រប់គ្រងទូរស័ព្ទ'] },
   operations: { icon: '⚙️', label: 'Operations / Staff', kh: 'ថ្នាក់ប្រតិបត្តិការ / បុគ្គលិក', cls: 'warn',
     perms: ['ប្រតិបត្តិការប្រចាំថ្ងៃ', 'មើលទិន្នន័យអ្នកប្រើ', 'ជួយសម្រួលការងារផ្នែក', 'មិនអាចគ្រប់គ្រងទូរស័ព្ទ'] },
 };

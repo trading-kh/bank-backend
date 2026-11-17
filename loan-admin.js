@@ -229,7 +229,7 @@ module.exports = function createLoanAdminRouter(ctx) {
     const card = cardId
       ? await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(cardId, loan.user_id)
       : await db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').get(loan.user_id);
-    if (!card) throw new ApiError('អ្នកប្រើគ្មានកាតសម្រាប់ទទួលប្រាក់', 400, 'NO_CARD');
+    if (!card) throw new ApiError('អ្នកប្រើគ្មានគណនីសម្រាប់ទទួលប្រាក់', 400, 'NO_CARD');
 
     const fee = money(loan.fee_amount);
     const net = money(Number(loan.principal) - fee);
@@ -253,7 +253,7 @@ module.exports = function createLoanAdminRouter(ctx) {
     await audit(req, 'disburse_loan', 'loans', id,
       `net=$${net} fee=$${fee} card=${card.id}`);
     sendPushNotification(loan.user_id, 'ស្រាប់កម្ចីបានបញ្ចូល',
-      `ប្រាក់ $${net.toFixed(2)} បានបញ្ចូលទៅកាតរបស់អ្នក`, { type: 'loan_disbursed', id });
+      `ប្រាក់ $${net.toFixed(2)} បានបញ្ចូលចូលគណនីរបស់អ្នក`, { type: 'loan_disbursed', id });
     ok(res, { id, status: 'disbursed', net_disbursed: net, fee });
   }));
 

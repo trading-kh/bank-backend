@@ -310,7 +310,7 @@ module.exports = function createAdminRouter(ctx) {
     if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
 
     const [cards, transactions, loans, goals, budgets, notifications, referrals, kyc] = await Promise.all([
-      db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id').all(id),
+      db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id LIMIT 1').all(id),
       db.prepare(`SELECT * FROM transactions WHERE user_id = ?
         ORDER BY created_at DESC LIMIT 50`).all(id),
       db.prepare('SELECT * FROM loans WHERE user_id = ? ORDER BY id DESC').all(id),
@@ -450,7 +450,7 @@ module.exports = function createAdminRouter(ctx) {
 
     const WIPE = [
       'external_transfers', 'transactions', 'cards', 'loans', 'goals', 'budgets',
-      'reminders', 'recurring', 'splits', 'virtual_cards', 'cashback',
+      'reminders', 'recurring', 'splits', 'cashback',
       'notifications', 'streaks', 'achievements', 'referrals', 'fcm_tokens',
       'idempotency_keys',
     ];
@@ -557,8 +557,8 @@ module.exports = function createAdminRouter(ctx) {
           throw new ApiError('គណនីនេះមិនទាន់មានសមតុល្យ', 400, 'NO_ACCOUNT');
         const info = await db.prepare(`INSERT INTO cards
           (user_id, name, number, expiry, cvv, balance, color1, color2)
-          VALUES (?, 'គណនីចម្បង', ?, '12/29', '000', 0, ?, ?)`)
-          .run(userId, '4000000000' + String(userId).padStart(6, '0'), 0xFF0052D4, 0xFF4364F7);
+          VALUES (?, 'Aura Account', ?, '—', '—', 0, ?, ?)`)
+          .run(userId, String(1000000000 + userId), 0xFF0B1F3A, 0xFF1E4D8C);
         card = await db.prepare('SELECT * FROM cards WHERE id = ?').get(info.lastInsertRowid);
       }
       const before = money(card.balance);
@@ -610,75 +610,6 @@ module.exports = function createAdminRouter(ctx) {
       WHERE (?::text = '' OR lower(u.name) LIKE ? OR lower(u.email) LIKE ? OR lower(c.name) LIKE ?)
     `).get(q, like(q), like(q), like(q))).n;
     ok(res, { rows, total, limit, offset });
-  }));
-
-  router.patch('/cards/:id', adminAuth, handle(async (req, res) => {
-    const id = int(req.params.id);
-    const card = await db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
-    if (!card) throw new ApiError('រកមិនឃើញកាត', 404, 'NOT_FOUND');
-
-    const fields = [];
-    const values = [];
-    const push = (col, val) => { fields.push(`${col} = ?`); values.push(val); };
-
-    if (req.body.name !== undefined) push('name', String(req.body.name).slice(0, 60));
-    if (req.body.balance !== undefined) {
-      const b = num(req.body.balance);
-      if (b === null || b < 0) throw new ApiError('សម្រាប់ត្រូវ ≥ 0', 400, 'BAD_BALANCE');
-      push('balance', money(b));
-    }
-    if (req.body.frozen !== undefined) push('frozen', req.body.frozen ? 1 : 0);
-    if (req.body.online !== undefined) push('online', req.body.online ? 1 : 0);
-    if (req.body.daily_limit !== undefined) {
-      const l = num(req.body.daily_limit);
-      if (l === null || l < 0) throw new ApiError('ដីហទិតត្រូវ ≥ 0', 400, 'BAD_LIMIT');
-      push('daily_limit', money(l));
-    }
-    if (!fields.length) throw new ApiError('គ្មានអ្វីត្រូវកែប្ដូរ', 400, 'NOTHING_TO_UPDATE');
-
-    values.push(id);
-    await db.prepare(`UPDATE cards SET ${fields.join(', ')} WHERE id = ?`).run(...values);
-    await bumpVersion(card.user_id);
-    const after = await db.prepare('SELECT balance FROM cards WHERE id = ?').get(id);
-    const delta = money(Number(after.balance)) - money(Number(card.balance));
-    if (delta !== 0 && sendPushNotification) {
-      sendPushNotification(card.user_id,
-        delta > 0 ? 'ប្រាក់បានបញ្ចូលចូលគណនីរបស់អ្នក' : 'ប្រាក់ត្រូវបានកាត់ចេញ',
-        `កាត ${card.name} · ${delta > 0 ? '+' : '-'}$${Math.abs(delta).toFixed(2)} · សមារាល្ថបន្តិដោយអ្នកគ្រប់គ្រង`,
-        { type: 'admin', bank_code: 'AURA' });
-    }
-    await audit(req, 'update_card', 'cards', id, fields.map((f) => f.split(' = ')[0]).join(','));
-    ok(res, await db.prepare('SELECT * FROM cards WHERE id = ?').get(id));
-  }));
-
-  router.post('/users/:id/cards', adminAuth, handle(async (req, res) => {
-    const userId = int(req.params.id);
-    const user = await db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
-    if (!user) throw new ApiError('រកមិនឃើញអ្នកប្រើ', 404, 'NOT_FOUND');
-    const name = String(req.body.name || 'កាត').slice(0, 60);
-    const number = String(req.body.number || '').replace(/\s/g, '');
-    const expiry = String(req.body.expiry || '12/28');
-    const cvv = String(req.body.cvv || '123');
-    const balance = money(Math.max(num(req.body.balance) || 0, 0));
-    const color1 = int(req.body.color1, 0xFF0052D4);
-    const color2 = int(req.body.color2, 0xFF4364F7);
-    const info = await db.prepare(`INSERT INTO cards
-      (user_id, name, number, expiry, cvv, balance, color1, color2)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(userId, name, number, expiry, cvv, balance, color1, color2);
-    await bumpVersion(userId);
-    await audit(req, 'create_card', 'cards', info.lastInsertRowid, `user ${userId}`);
-    ok(res, await db.prepare('SELECT * FROM cards WHERE id = ?').get(info.lastInsertRowid));
-  }));
-
-  router.delete('/cards/:id', adminAuth, handle(async (req, res) => {
-    const id = int(req.params.id);
-    const card = await db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
-    if (!card) throw new ApiError('រកមិនឃើញកាត', 404, 'NOT_FOUND');
-    await db.prepare('DELETE FROM cards WHERE id = ?').run(id);
-    await bumpVersion(card.user_id);
-    await audit(req, 'delete_card', 'cards', id, card.name);
-    ok(res, { id, message: 'បានលុបកាត' });
   }));
 
   // ============================================================
@@ -740,7 +671,7 @@ module.exports = function createAdminRouter(ctx) {
     if (!(amount > 0)) throw new ApiError('ចំនួនលុយត្រូវ > 0', 400, 'BAD_AMOUNT');
 
     const card = await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(cardId, userId);
-    if (!card) throw new ApiError('រកមិនឃើញកាត', 404, 'NOT_FOUND');
+    if (!card) throw new ApiError('រកមិនឃើញគណនី', 404, 'NOT_FOUND');
 
     const id = await db.transaction(async () => {
       const delta = isExpense ? -amount : amount;
@@ -1130,7 +1061,6 @@ module.exports = function createAdminRouter(ctx) {
     reminders: 'កំណត់ត្រា',
     recurring: 'ប្រតិបត្តិការក្រោយ',
     splits: 'បែកចែកការចំណាយ',
-    virtual_cards: 'កាតនិម្យោ',
   };
   const EDITABLE_COLUMNS = {
     goals: ['name', 'target', 'saved', 'icon_code', 'color'],
@@ -1138,7 +1068,6 @@ module.exports = function createAdminRouter(ctx) {
     reminders: ['title', 'amount', 'due_date', 'paid', 'icon_code'],
     recurring: ['title', 'amount', 'category', 'card_id', 'next_date', 'frequency', 'active', 'icon_code'],
     splits: ['title', 'total_amount', 'your_share', 'participants'],
-    virtual_cards: ['name', 'number', 'cvv', 'expiry', 'limit_amount', 'spent', 'active', 'frozen'],
   };
 
   router.get('/tables/:name', adminAuth, handle(async (req, res) => {

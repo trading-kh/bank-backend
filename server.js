@@ -493,20 +493,6 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
-    CREATE TABLE IF NOT EXISTS virtual_cards (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      number TEXT NOT NULL,
-      cvv TEXT NOT NULL,
-      expiry TEXT NOT NULL,
-      limit_amount DOUBLE PRECISION NOT NULL DEFAULT 500,
-      spent DOUBLE PRECISION NOT NULL DEFAULT 0,
-      active INTEGER NOT NULL DEFAULT 1,
-      frozen INTEGER NOT NULL DEFAULT 0,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-
     CREATE TABLE IF NOT EXISTS referrals (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
@@ -712,6 +698,36 @@ async function initDb() {
 
   // កម្មវិធីកម្ចីវីក្រុយ: KYC, តារាងសងប្រាក់, កំណត់ចំនាំ, ប្រមូល
   await initLoanSchema(db);
+
+  // គណនីតែមួយ — បញ្ចូលកាតចាស់ទាំងអស់ចូលគណនីដំបូង រួចលុបកាតបន្ថែម
+  try {
+    const dupes = await db.prepare(
+      'SELECT user_id FROM cards GROUP BY user_id HAVING COUNT(*) > 1'
+    ).all();
+    for (const row of dupes) {
+      const keep = (await db.prepare(
+        'SELECT id FROM cards WHERE user_id = ? ORDER BY id LIMIT 1'
+      ).get(row.user_id)).id;
+      for (const t of ['transactions', 'transfer_approvals', 'qr_otp_requests',
+        'recurring', 'loan_payments', 'external_transfers']) {
+        await db.prepare(
+          `UPDATE ${t} SET card_id = ? WHERE card_id IN (SELECT id FROM cards WHERE user_id = ?)`
+        ).run(keep, row.user_id);
+      }
+      await db.prepare('DELETE FROM cards WHERE user_id = ? AND id <> ?')
+        .run(row.user_id, keep);
+    }
+    await db.prepare(
+      "UPDATE cards SET name = 'Aura Account', expiry = '—', cvv = '—'"
+    ).run();
+    await db.prepare(`UPDATE cards c SET number = COALESCE(NULLIF(
+        REGEXP_REPLACE(u.phone, '\\D', '', 'g'), ''),
+        LPAD((1000000000 + c.user_id)::text, 10, '0'))
+      FROM users u WHERE u.id = c.user_id`).run();
+    console.log(`✅ Single-account migration (${dupes.length} users merged)`);
+  } catch (e) {
+    console.log('ℹ️ Single-account migration skipped:', e.message);
+  }
 
   // SQLite មាន ROUND(x, 2) សម្រាប់ REAL — Postgres មានតែ round(numeric, int)
   await db.exec(`
@@ -978,16 +994,17 @@ async function ensureAdminAccount() {
   console.log(`✅ Admin account created: ${email}`);
 }
 
-async function seedNewUser(userId) {
-  const cards = [
-    ['ABA Visa Platinum', '4532118800008824', '12/28', '458', 0, 0xFF0052D4, 0xFF4364F7],
-    ['Mastercard Gold', '5412750000003310', '09/27', '912', 0, 0xFF0F9D8A, 0xFF38D39F],
-    ['UnionPay Global', '6212260000005591', '05/29', '734', 0, 0xFF8E2DE2, 0xFF4A00E0],
-  ];
-  const insCard = db.prepare(`INSERT INTO cards
+// លេខគណនីតែមួយ — ប្រើលេខទូរស័ព្ទបើមាន បើអត់ប្រើ 1000000xxx
+function accountNumberFor(userId, phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  return digits || String(1000000000 + Number(userId));
+}
+
+async function seedNewUser(userId, phone = '') {
+  await db.prepare(`INSERT INTO cards
     (user_id, name, number, expiry, cvv, balance, color1, color2)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-  for (const c of cards) await insCard.run(userId, ...c);
+    VALUES (?, 'Aura Account', ?, '—', '—', 0, ?, ?)`)
+    .run(userId, accountNumberFor(userId, phone), 0xFF0B1F3A, 0xFF1E4D8C);
 
   const insGoal = db.prepare(`INSERT INTO goals
     (user_id, name, target, saved, icon_code, color) VALUES (?, ?, ?, ?, ?, ?)`);
@@ -1051,7 +1068,7 @@ app.post('/auth/register', handle(async (req, res) => {
     'INSERT INTO users (name, email, phone, pin_hash, auth_provider) VALUES (?, ?, ?, ?, ?)'
   ).run(name, email, phone, hash, 'email');
   const userId = info.lastInsertRowid;
-  await seedNewUser(userId);
+  await seedNewUser(userId, phone);
 
   const token = jwt.sign({ id: userId }, SECRET, { expiresIn: '30d' });
   ok(res, { token, user: { id: userId, name, email, phone, avatar: null } });
@@ -1184,6 +1201,8 @@ app.post('/auth/onboarding', auth, handle(async (req, res) => {
   await db.prepare(`UPDATE users SET name = ?, phone = ?, age = ?, gender = ?,
       address = ?, pin_hash = ?, pin_attempts = 0, locked_until = NULL, onboarded = 1
     WHERE id = ?`).run(name, phone, age, gender, address, hash, req.userId);
+  await db.prepare(`UPDATE cards SET number = ? WHERE user_id = ?`)
+    .run(accountNumberFor(req.userId, phone), req.userId);
 
   const u = await db.prepare(`SELECT id, name, email, phone, avatar, age, gender,
       address, onboarded FROM users WHERE id = ?`).get(req.userId);
@@ -1234,6 +1253,8 @@ app.patch('/me/profile', auth, handle(async (req, res) => {
         address = ?, onboarded = 1, data_version = data_version + 1
       WHERE id = ?`).run(name, phone, age, gender, address, req.userId);
   }
+  await db.prepare(`UPDATE cards SET number = ? WHERE user_id = ?`)
+    .run(accountNumberFor(req.userId, phone), req.userId);
 
   const u = await db.prepare(`SELECT id, name, email, phone, avatar, age, gender,
       address, onboarded FROM users WHERE id = ?`).get(req.userId);
@@ -1400,31 +1421,11 @@ app.post('/auth/google/set-pin', auth, handle(async (req, res) => {
 }));
 
 // ============================================================
-// CARDS
+// ACCOUNT (គណនីតែមួយក្នុងម្នាក់ — តារាង cards ជាបេះដូងសមតុល្យ)
 // ============================================================
 app.get('/cards', auth, async (req, res) => {
-  ok(res, await db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id').all(req.userId));
-});
-
-app.patch('/cards/:id', auth, async (req, res) => {
-  const { frozen, online, daily_limit } = req.body;
-  const card = await db.prepare('SELECT id FROM cards WHERE id = ? AND user_id = ?')
-    .get(req.params.id, req.userId);
-  if (!card) return fail(res, 'Card not found', 404, 'NOT_FOUND');
-
-  const updates = [];
-  const values = [];
-  if (frozen !== undefined) { updates.push('frozen = ?'); values.push(frozen ? 1 : 0); }
-  if (online !== undefined) { updates.push('online = ?'); values.push(online ? 1 : 0); }
-  if (daily_limit !== undefined) {
-    const l = toMoney(daily_limit);
-    if (!(l >= 0)) return fail(res, 'Invalid limit');
-    updates.push('daily_limit = ?'); values.push(l);
-  }
-  if (updates.length === 0) return fail(res, 'Nothing to update');
-  values.push(req.params.id, req.userId);
-  await db.prepare(`UPDATE cards SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
-  ok(res, { updated: true });
+  ok(res, await db.prepare('SELECT * FROM cards WHERE user_id = ? ORDER BY id LIMIT 1')
+    .all(req.userId));
 });
 
 // ============================================================
@@ -2623,44 +2624,6 @@ app.post('/splits', auth, async (req, res) => {
     (user_id, title, total_amount, your_share, participants) VALUES (?, ?, ?, ?, ?)`)
     .run(req.userId, title, total_amount, share, JSON.stringify(participants));
   ok(res, { your_share: share });
-});
-
-// ============================================================
-// VIRTUAL CARDS
-// ============================================================
-app.get('/virtual-cards', auth, async (req, res) => {
-  ok(res, await db.prepare('SELECT * FROM virtual_cards WHERE user_id = ?').all(req.userId));
-});
-
-app.post('/virtual-cards', auth, async (req, res) => {
-  const { name } = req.body;
-  const limit = req.body.limit_amount === undefined ? 500 : toMoney(req.body.limit_amount);
-  if (!name || !(limit > 0)) return fail(res, 'Invalid');
-  const number = '4' + Array.from({ length: 15 }, () => crypto.randomInt(0, 10)).join('');
-  const cvv = String(crypto.randomInt(100, 1000));
-  const m = String(new Date().getMonth() + 1).padStart(2, '0');
-  const y = String(new Date().getFullYear() + 3).slice(-2);
-  await db.prepare(`INSERT INTO virtual_cards
-    (user_id, name, number, cvv, expiry, limit_amount) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(req.userId, name, number, cvv, `${m}/${y}`, limit);
-  ok(res, { created: true });
-});
-
-app.patch('/virtual-cards/:id', auth, async (req, res) => {
-  const { active, frozen } = req.body;
-  const updates = [];
-  const params = [];
-  if (active !== undefined) { updates.push('active = ?'); params.push(active ? 1 : 0); }
-  if (frozen !== undefined) { updates.push('frozen = ?'); params.push(frozen ? 1 : 0); }
-  if (updates.length === 0) return fail(res, 'Nothing to update');
-  params.push(req.params.id, req.userId);
-  await db.prepare(`UPDATE virtual_cards SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).run(...params);
-  ok(res, { updated: true });
-});
-
-app.delete('/virtual-cards/:id', auth, async (req, res) => {
-  await db.prepare('DELETE FROM virtual_cards WHERE id = ? AND user_id = ?').run(req.params.id, req.userId);
-  ok(res, { deleted: true });
 });
 
 // ============================================================
