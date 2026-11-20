@@ -334,6 +334,19 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- ការរាយការណ៍បញ្ហា / ការបន្លំ / សំណើឧបករណ៍ ពីកម្មវិធី
+    CREATE TABLE IF NOT EXISTS support_reports (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      category TEXT NOT NULL,
+      message TEXT NOT NULL,
+      device_info TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_support_reports_status
+      ON support_reports (status, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS loans (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -2579,6 +2592,30 @@ app.delete('/notifications/:id', auth, handle(async (req, res) => {
     .run(id, req.userId);
   if (!r.changes) throw new ApiError('រកមិនឃើញសារ', 404, 'NOT_FOUND');
   ok(res, { deleted: true });
+}));
+
+// ============================================================
+// SUPPORT REPORTS — រាយការណ៍បញ្ហា / ការបន្លំ / សំណើឧបករណ៍ ពីកម្មវិធី
+// ============================================================
+const SUPPORT_CATEGORIES = new Set([
+  'transfer', 'otp', 'scam', 'app', 'device', 'other',
+]);
+
+app.post('/support/reports', auth, handle(async (req, res) => {
+  rateLimit(`support:${req.userId}`, 5, 10 * 60 * 1000);
+  const category = String(req.body?.category || 'other').trim();
+  const message = String(req.body?.message || '').trim();
+  if (!SUPPORT_CATEGORIES.has(category))
+    throw new ApiError('ប្រភេទបញ្ហាមិនត្រឹមត្រូវ', 400, 'INVALID_CATEGORY');
+  if (message.length < 10)
+    throw new ApiError('សូមពណ៌នាបញ្ហាយ៉ាងតិច ១០ តួអក្សរ', 400, 'MESSAGE_TOO_SHORT');
+  if (message.length > 2000)
+    throw new ApiError('សារវែងពេក (អតិបរមា ២០០០ តួអក្សរ)', 400, 'MESSAGE_TOO_LONG');
+  const device = String(req.headers['user-agent'] || '').slice(0, 300);
+  const info = await db.prepare(`INSERT INTO support_reports
+    (user_id, category, message, device_info) VALUES (?, ?, ?, ?)`)
+    .run(req.userId, category, message, device || null);
+  ok(res, { id: Number(info.lastInsertRowid), status: 'open' });
 }));
 
 // ============================================================
