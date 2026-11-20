@@ -319,6 +319,21 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- OTP សម្រាប់ផ្ទេរប្រាក់ក្នុងកម្មវិធី (Aura → Aura) — ផ្ទេរភ្លាម មិនរង់ចាំ Admin
+    CREATE TABLE IF NOT EXISTS p2p_otp_requests (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      card_id INTEGER NOT NULL,
+      amount DOUBLE PRECISION NOT NULL,
+      note TEXT,
+      otp_hash TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      used INTEGER NOT NULL DEFAULT 0,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     CREATE TABLE IF NOT EXISTS loans (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -709,7 +724,7 @@ async function initDb() {
         'SELECT id FROM cards WHERE user_id = ? ORDER BY id LIMIT 1'
       ).get(row.user_id)).id;
       for (const t of ['transactions', 'transfer_approvals', 'qr_otp_requests',
-        'recurring', 'loan_payments', 'external_transfers']) {
+        'p2p_otp_requests', 'recurring', 'loan_payments', 'external_transfers']) {
         await db.prepare(
           `UPDATE ${t} SET card_id = ? WHERE card_id IN (SELECT id FROM cards WHERE user_id = ?)`
         ).run(keep, row.user_id);
@@ -1883,6 +1898,184 @@ app.get('/transfers/:ref/status', auth, handle(async (req, res) => {
       Math.round((new Date(a.expires_at).getTime() - Date.now()) / 1000)),
     result: a.response ? JSON.parse(a.response) : null,
   });
+}));
+
+// 4c) ផ្ទេរក្នុងកម្មវិធី (Aura → Aura) — បញ្ជាក់តែ OTP ហើយផ្ទេរភ្លាម
+//     មិនមាន hold ឬរង់ចាំការអនុម័តពី Admin ទេ
+const executeInstantP2p = (p) => db.transaction(async () => {
+  const prior = await db.prepare('SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?')
+    .get(p.idem, p.senderId);
+  if (prior) {
+    if (prior.req_hash !== p.reqHash)
+      throw new ApiError('Idempotency-Key ត្រូវបានប្រើជាមួយសំណើផ្សេង', 422, 'IDEMPOTENCY_MISMATCH');
+    return { replay: true, response: JSON.parse(prior.response) };
+  }
+
+  const card = await db.prepare('SELECT * FROM cards WHERE id = ? AND user_id = ?').get(p.cardId, p.senderId);
+  if (!card) throw new ApiError('Card not found', 404, 'CARD_NOT_FOUND');
+  if (card.frozen) throw new ApiError('កាតត្រូវបានបង្កក', 400, 'CARD_FROZEN');
+
+  const sender = await db.prepare('SELECT id, name FROM users WHERE id = ?').get(p.senderId);
+  const recipient = await db.prepare('SELECT id, name, email, phone FROM users WHERE id = ?').get(p.recipientId);
+  if (!recipient) throw new ApiError('រកមិនឃើញអ្នកទទួល', 404, 'NOT_FOUND');
+
+  const recipientCard = await db.prepare(
+    'SELECT id FROM cards WHERE user_id = ? AND frozen = 0 ORDER BY id LIMIT 1'
+  ).get(recipient.id);
+  if (!recipientCard) throw new ApiError('អ្នកទទួលមិនអាចទទួលប្រាក់បានពេលនេះ', 400, 'RECIPIENT_UNAVAILABLE');
+
+  if (card.balance < p.amount) throw new ApiError('សមតុល្យមិនគ្រប់គ្រាន់', 400, 'INSUFFICIENT_FUNDS');
+  if (p.amount > card.daily_limit || await spentToday(card.id) + p.amount > card.daily_limit)
+    throw new ApiError('លើសកម្រិតប្រាក់ប្រចាំថ្ងៃ', 400, 'DAILY_LIMIT');
+
+  const dec = await db.prepare(`UPDATE cards SET balance = ROUND(balance - ?, 2)
+    WHERE id = ? AND balance >= ?`).run(p.amount, card.id, p.amount);
+  if (dec.changes !== 1) throw new ApiError('សមតុល្យមិនគ្រប់គ្រាន់', 400, 'INSUFFICIENT_FUNDS');
+  await db.prepare('UPDATE cards SET balance = ROUND(balance + ?, 2) WHERE id = ?')
+    .run(p.amount, recipientCard.id);
+
+  const ref = crypto.randomUUID();
+  const noteSuffix = p.note ? ` · ${p.note}` : '';
+  const outId = (await db.prepare(`INSERT INTO transactions
+    (user_id, card_id, title, category, amount, is_expense, icon_code, counterparty_id, transfer_ref, status)
+    VALUES (?, ?, ?, 'ផ្ទេរប្រាក់', ?, 1, 18, ?, ?, 'completed')`).run(
+    sender.id, card.id, `ផ្ទេរទៅ ${recipient.name}${noteSuffix}`.slice(0, 100),
+    p.amount, recipient.id, ref)).lastInsertRowid;
+  const inId = (await db.prepare(`INSERT INTO transactions
+    (user_id, card_id, title, category, amount, is_expense, icon_code, counterparty_id, transfer_ref, status)
+    VALUES (?, ?, ?, 'ផ្ទេរប្រាក់', ?, 0, 18, ?, ?, 'completed')`).run(
+    recipient.id, recipientCard.id, `ទទួលពី ${sender.name}${noteSuffix}`.slice(0, 100),
+    p.amount, sender.id, ref)).lastInsertRowid;
+
+  const response = {
+    pending: false,
+    transfer_ref: ref,
+    status: 'completed',
+    in_tx_id: inId,
+    new_balance: (await db.prepare('SELECT balance FROM cards WHERE id = ?').get(card.id)).balance,
+    transaction: await db.prepare('SELECT * FROM transactions WHERE id = ?').get(outId),
+    recipient: { name: recipient.name, masked_account: maskContact(recipient) },
+  };
+  await db.prepare('INSERT INTO idempotency_keys (key, user_id, req_hash, response) VALUES (?, ?, ?, ?)')
+    .run(p.idem, p.senderId, p.reqHash, JSON.stringify(response));
+
+  return { replay: false, response, senderName: sender.name, recipientName: recipient.name };
+});
+
+app.post('/transfers/otp/start', auth, handle(async (req, res) => {
+  rateLimit(`p2p:start:${req.userId}`, 8, 60 * 1000);
+
+  const recipientId = parseInt(req.body.recipient_id, 10);
+  const cardId = parseInt(req.body.card_id, 10);
+  const amount = toMoney(req.body.amount);
+  const note = String(req.body.note || '').trim().slice(0, 60);
+
+  if (!Number.isInteger(recipientId) || !Number.isInteger(cardId))
+    throw new ApiError('Invalid input', 400, 'BAD_REQUEST');
+  if (!(amount >= 0.01) || amount > MAX_TX)
+    throw new ApiError('ចំនួនទឹកប្រាក់មិនត្រឹមត្រូវ', 400, 'BAD_AMOUNT');
+  if (recipientId === req.userId)
+    throw new ApiError('មិនអាចផ្ទេរទៅខ្លួនឯង', 400, 'SELF_TRANSFER');
+
+  const card = await db.prepare('SELECT id, frozen FROM cards WHERE id = ? AND user_id = ?')
+    .get(cardId, req.userId);
+  if (!card) throw new ApiError('Card not found', 404, 'CARD_NOT_FOUND');
+  if (card.frozen) throw new ApiError('កាតត្រូវបានបង្កក', 400, 'CARD_FROZEN');
+
+  const recipient = await db.prepare(
+    "SELECT id, name FROM users WHERE id = ? AND COALESCE(auth_provider, '') <> 'admin'")
+    .get(recipientId);
+  if (!recipient) throw new ApiError('រកមិនឃើញអ្នកទទួល', 404, 'NOT_FOUND');
+
+  await db.prepare('UPDATE p2p_otp_requests SET used = 1 WHERE user_id = ? AND used = 0')
+    .run(req.userId);
+
+  const otp = String(crypto.randomInt(100000, 1000000));
+  const otpHash = await bcrypt.hash(otp, SALT);
+  const info = await db.prepare(`INSERT INTO p2p_otp_requests
+    (user_id, recipient_id, card_id, amount, note, otp_hash, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, now() + interval '${OTP_TTL_SECONDS} seconds')`)
+    .run(req.userId, recipientId, cardId, amount, note || null, otpHash);
+
+  const expireAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
+  const expireTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Phnom_Penh', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(expireAt);
+  const body = `លេខកូដ OTP របស់អ្នក ${otp}\nផ្ទេរ $${amount.toFixed(2)} ទៅ ${recipient.name} · Aura Bank · ផុតកំណត់ម៉ោង ${expireTime}`;
+  const notifId = await notifyUser(req.userId, 'Aura Bank · OTP', body,
+    { type: 'otp', bank_code: 'AURA' }, 18, 'AURA');
+
+  const user = await db.prepare('SELECT phone FROM users WHERE id = ?').get(req.userId);
+  ok(res, {
+    request_id: info.lastInsertRowid,
+    expires_in: OTP_TTL_SECONDS,
+    hint: maskContact(user || {}),
+    notification_id: notifId,
+  });
+}));
+
+app.post('/transfers/otp/confirm', auth, handle(async (req, res) => {
+  rateLimit(`p2p:confirm:${req.userId}`, 10, 60 * 1000);
+
+  const idem = req.get('Idempotency-Key');
+  if (!idem || idem.length < 8 || idem.length > 100)
+    throw new ApiError('Missing Idempotency-Key', 400, 'BAD_REQUEST');
+
+  const requestId = parseInt(req.body.request_id, 10);
+  const otp = String(req.body.otp || '').trim();
+  if (!Number.isInteger(requestId))
+    throw new ApiError('Invalid input', 400, 'BAD_REQUEST');
+  if (!/^\d{6}$/.test(otp))
+    throw new ApiError('សូមបំពេញលេខកូដ OTP ៦ ខ្ទង់', 400, 'BAD_OTP');
+
+  const r = await db.prepare('SELECT * FROM p2p_otp_requests WHERE id = ? AND user_id = ?')
+    .get(requestId, req.userId);
+  if (!r)
+    throw new ApiError('សំណើ OTP មិនត្រឹមត្រូវ សូមស្នើម្តងទៀត', 400, 'OTP_NOT_FOUND');
+
+  if (r.used) {
+    const prior = await db.prepare(
+      'SELECT req_hash, response FROM idempotency_keys WHERE key = ? AND user_id = ?'
+    ).get(idem, req.userId);
+    if (prior) return ok(res, JSON.parse(prior.response));
+    throw new ApiError('OTP នេះត្រូវបានប្រើរួចហើយ', 400, 'OTP_USED');
+  }
+  if (new Date(r.expires_at) < new Date())
+    throw new ApiError('OTP ផុតកំណត់ សូមស្នើម្តងទៀត', 400, 'OTP_EXPIRED');
+  if (r.attempts >= OTP_MAX_ATTEMPTS)
+    throw new ApiError('OTP ខុសច្រើនដងពេក សូមស្នើម្តងទៀត', 429, 'OTP_LOCKED');
+
+  let valid = false;
+  try { valid = await bcrypt.compare(otp, r.otp_hash); } catch { valid = false; }
+  if (!valid) {
+    await db.prepare('UPDATE p2p_otp_requests SET attempts = attempts + 1 WHERE id = ?').run(r.id);
+    const left = OTP_MAX_ATTEMPTS - (r.attempts + 1);
+    throw new ApiError(
+      left > 0 ? `OTP មិនត្រឹមត្រូវ (នៅសល់ ${left} ដង)` : 'OTP ខុសច្រើនដងពេក សូមស្នើម្តងទៀត',
+      401, 'WRONG_OTP');
+  }
+
+  await db.prepare('UPDATE p2p_otp_requests SET used = 1 WHERE id = ?').run(r.id);
+
+  const reqHash = crypto.createHash('sha256')
+    .update(`${r.recipient_id}|${r.card_id}|${r.amount}|${r.note || ''}|otp:${r.id}`)
+    .digest('hex');
+
+  const result = await executeInstantP2p({
+    idem, reqHash, senderId: req.userId, recipientId: r.recipient_id,
+    cardId: r.card_id, amount: r.amount, note: r.note || '',
+  });
+  ok(res, result.response);
+
+  if (!result.replay) {
+    await unlockAchievement(req.userId, 'first_tx');
+    const amt = `$${Number(r.amount).toFixed(2)}`;
+    await notifyUser(req.userId, 'ផ្ទេរប្រាក់ជោគជ័យ',
+      `ផ្ទេរ ${amt} ទៅ ${result.recipientName}`, { type: 'transfer_sent' }, 18, 'AURA');
+    await notifyUser(r.recipient_id, 'បានទទួលប្រាក់',
+      `លោកអ្នកបានទទួលប្រាក់ចំនួន ${amt} ពីឈ្មោះ ${result.senderName}`,
+      { type: 'transfer_received' }, 18, 'AURA');
+  }
 }));
 
 // 5) បញ្ជីធនាគារ/MFI ដែលគាំទ្រ (App ប្រើដើម្បីបង្ហាញ fee និងកំណត់ចំនួន)
