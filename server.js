@@ -1890,23 +1890,8 @@ app.get('/banks', auth, async (req, res) => {
   ok(res, await db.prepare('SELECT * FROM banks WHERE active = 1 ORDER BY name').all());
 });
 
-// 5b) ពិនិត្យគណនីអ្នកទទួលមុនផ្ទេរ — បង្ហាញឈ្មោះអ្នកកាន់គណនី
-const HOLDER_FAMILY = ['សុខ', 'ស៊ីវ', 'ចាន់', 'លី', 'ម៉េង', 'ហ៊ុន', 'គង់',
-  'ជា', 'អ៊ី', 'ពៅ', 'ទូច', 'សំ', 'រ៉ា', 'វណ្ណ', 'ណារ', 'ប៊ុន',
-  'ធី', 'សេង', 'ហួត', 'ជឹម', 'កែវ', 'អ៊ុក', 'យិន', 'សែន'];
-const HOLDER_GIVEN = ['សុភា', 'ដារា', 'វិចិត្រ', 'សុខា', 'រតនា', 'ពិសិដ្ឋ',
-  'ស្រីណុច', 'មុនី', 'ចន្ថា', 'វីរៈ', 'សុជាតា', 'រិទ្ធី', 'ភារម្យ',
-  'កុសល', 'សំណាង', 'ដានី', 'សុវណ្ណ', 'ច័ន្ទ', 'មាលា', 'ធារី'];
-
-// ឈ្មោះអ្នកកាន់គណនីធនាគារក្នុងប្រព័ន្ធសាកល្បង — កំណត់ដោយ hash
-// ដូច្នេះគណនីមួយតែងតែបង្ហាញឈ្មោះដូចគ្នារាល់ពេល
-function simulatedHolder(bankCode, digits) {
-  const h = crypto.createHash('sha1').update(`${bankCode}|${digits}`).digest();
-  const family = HOLDER_FAMILY[h[0] % HOLDER_FAMILY.length];
-  const given = HOLDER_GIVEN[h[1] % HOLDER_GIVEN.length];
-  return `${family} ${given}`;
-}
-
+// 5b) ពិនិត្យគណនីអ្នកទទួលមុនផ្ទេរ — បង្ហាញឈ្មោះអ្នកកាន់គណនី (Aura Bank)
+//     ធនាគារដទៃមិនមានប្រព័ន្ធស្វែងរកឈ្មោះទេ → ACCOUNT_NOT_FOUND (App សុំវាយឈ្មោះដោយខ្លួនឯង)
 app.get('/transfers/external/lookup', auth, handle(async (req, res) => {
   rateLimit(`extlookup:${req.userId}`, 40, 60 * 1000);
   const bankCode = String(req.query.bank_code || '').trim().toUpperCase();
@@ -1919,41 +1904,35 @@ app.get('/transfers/external/lookup', auth, handle(async (req, res) => {
 
   const mask = (n) => (n.length <= 4 ? n : '•'.repeat(n.length - 4) + n.slice(-4));
 
-  // គណនីរបស់អ្នកប្រើ Aura → ឈ្មោះពិត និងអាចផ្ទេរចូលគណនីគ្នាផ្ទាល់
-  const aura = await db.prepare(`
-    SELECT u.id, u.name, u.avatar_thumb FROM cards c
-    JOIN users u ON u.id = c.user_id
-    WHERE REPLACE(REPLACE(c.number, ' ', ''), '-', '') = ?
-      AND COALESCE(u.auth_provider, '') <> 'admin'
-    LIMIT 1`).get(digits);
-  if (aura) {
-    if (aura.id === req.userId)
-      throw new ApiError('មិនអាចផ្ទេរទៅគណនីខ្លួនឯង', 400, 'SELF_TRANSFER');
-    return ok(res, {
-      aura: true,
-      recipient_id: String(aura.id),
-      name: aura.name,
-      account: digits,
-      masked_account: mask(digits),
-      bank_code: 'AURA',
-      bank_name: 'Aura Bank',
-      avatar_thumb: aura.avatar_thumb || null,
-    });
+  if (bankCode === 'AURA') {
+    const aura = await db.prepare(`
+      SELECT u.id, u.name, u.avatar_thumb FROM cards c
+      JOIN users u ON u.id = c.user_id
+      WHERE REPLACE(REPLACE(c.number, ' ', ''), '-', '') = ?
+        AND COALESCE(u.auth_provider, '') <> 'admin'
+      LIMIT 1`).get(digits);
+    if (aura) {
+      if (aura.id === req.userId)
+        throw new ApiError('មិនអាចផ្ទេរទៅគណនីខ្លួនឯង', 400, 'SELF_TRANSFER');
+      return ok(res, {
+        aura: true,
+        recipient_id: String(aura.id),
+        name: aura.name,
+        account: digits,
+        masked_account: mask(digits),
+        bank_code: 'AURA',
+        bank_name: 'Aura Bank',
+        avatar_thumb: aura.avatar_thumb || null,
+      });
+    }
+    throw new ApiError('រកមិនឃើញគណនីនេះនៅ Aura Bank', 404, 'ACCOUNT_NOT_FOUND');
   }
 
   const rail = await db.prepare('SELECT * FROM banks WHERE code = ? AND active = 1').get(bankCode);
   if (!rail) throw new ApiError('ធនាគារនេះមិនត្រូវបានគាំទ្រ', 400, 'BANK_NOT_SUPPORTED');
 
-  ok(res, {
-    aura: false,
-    recipient_id: null,
-    name: simulatedHolder(bankCode, digits),
-    account: digits,
-    masked_account: mask(digits),
-    bank_code: bankCode,
-    bank_name: rail.name,
-    avatar_thumb: null,
-  });
+  // គ្មានទិន្នន័យអ្នកកាន់គណនីពីធនាគារខាងក្រៅ — មិនបង្កើតឈ្មោះក្លែងក្លាយទេ
+  throw new ApiError(`រកមិនឃើញព័ត៌មានគណនីនេះនៅ ${rail.name}`, 404, 'ACCOUNT_NOT_FOUND');
 }));
 
 // 6) ផ្ទេរចេញក្រៅ (ធនាគារ/MFIs/វ៉លឡេត/ក្រៅប្រទេស)
