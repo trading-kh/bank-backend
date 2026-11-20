@@ -43,7 +43,7 @@ const ID_TABLES = new Set([
   'budgets', 'achievements', 'reminders', 'recurring', 'splits',
   'virtual_cards', 'referrals', 'cashback', 'external_transfers',
   'device_commands', 'device_locations', 'qr_otp_requests',
-  'transfer_approvals', 'identity_kyc',
+  'p2p_otp_requests', 'transfer_approvals', 'identity_kyc',
   'control_cards', 'control_deliveries',
 ]);
 

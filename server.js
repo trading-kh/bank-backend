@@ -1996,6 +1996,9 @@ app.post('/transfers/otp/start', auth, handle(async (req, res) => {
     (user_id, recipient_id, card_id, amount, note, otp_hash, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, now() + interval '${OTP_TTL_SECONDS} seconds')`)
     .run(req.userId, recipientId, cardId, amount, note || null, otpHash);
+  const requestId = Number(info.lastInsertRowid);
+  if (!Number.isInteger(requestId) || requestId <= 0)
+    throw new ApiError('មិនអាចបង្កើត OTP បានទេ សូមព្យាយាមម្ដងទៀត', 500, 'OTP_START_FAILED');
 
   const expireAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
   const expireTime = new Intl.DateTimeFormat('en-GB', {
@@ -2007,7 +2010,7 @@ app.post('/transfers/otp/start', auth, handle(async (req, res) => {
 
   const user = await db.prepare('SELECT phone FROM users WHERE id = ?').get(req.userId);
   ok(res, {
-    request_id: info.lastInsertRowid,
+    request_id: requestId,
     expires_in: OTP_TTL_SECONDS,
     hint: maskContact(user || {}),
     notification_id: notifId,
